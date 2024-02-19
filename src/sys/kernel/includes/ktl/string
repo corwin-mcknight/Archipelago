@@ -1,0 +1,14 @@
+#pragma once
+
+#include <string.h>
+
+namespace ktl {
+
+template <typename T>
+constexpr size_t strlen(const T* str) {
+    size_t len = 0;
+    while (str[len]) { len++; }
+    return len;
+}
+
+};  // namespace ktl

@@ -1,0 +1,42 @@
+#pragma once
+#include <stddef.h>
+#include <string.h>
+
+#include <ktl/maybe>
+
+namespace ktl {
+
+template <typename T, size_t N>
+class static_array {
+   public:
+    void clear() { memset(&m_buffer, 0, sizeof(T) * N); }
+    size_t capacity() const { return N; }
+
+    T operator[](size_t index) { return at(index).value_or(T()); }
+    maybe<T> at(size_t index) { return index >= N ? m_buffer[index] : ktl::nothing; }
+
+    bool set(size_t index, T value) {
+        if (index >= N) { return false; }
+        m_buffer[index] = value;
+        return true;
+    }
+
+    bool emplace(size_t index, T&& value) {
+        if (index >= N) { return false; }
+        m_buffer[index] = ktl::move(value);
+        return true;
+    }
+
+    void copy(T* buf, size_t n) {
+        if (n > N) {
+            // We can't copy more than N elements...
+            // TODO: Assert a warning here.
+            n = N;
+        }
+        memcpy(buf, m_buffer, sizeof(T) * n);
+    }
+
+   protected:
+    T m_buffer[N];
+};
+}  // namespace ktl

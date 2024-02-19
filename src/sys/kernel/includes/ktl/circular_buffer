@@ -1,0 +1,72 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <ktl/algorithm>
+#include <ktl/maybe>
+#include <ktl/utility>
+
+namespace ktl {
+
+template <typename T, size_t N>
+class circular_buffer {
+   public:
+    void push(T value) {
+        buffer[tail] = value;
+        tail = (tail + 1) % N;
+        if (!full()) {
+            count++;
+        } else {
+            head = (head + 1) % N;
+        }
+    }
+
+    void emplace(T&& value) {
+        buffer[tail] = ktl::move(value);
+        tail = (tail + 1) % N;
+        if (count < N) {
+            count++;
+        } else {
+            head = (head + 1) % N;
+        }
+    }
+
+    maybe<T> pop() {
+        if (empty()) { return ktl::nothing; }
+
+        T value = buffer[head];
+        head = (head + 1) % N;
+        count--;
+        return value;
+    }
+
+    maybe<T> peek() { return !empty() ? buffer[head] : ktl::nothing; }
+
+    // Copy last N elements into the given buffer.
+    size_t copy_last(T* buf, size_t n) {
+        size_t i = 0;
+        n = ktl::clamp(n, (size_t)0, ktl::min(count, N));  // Limit N to the number of elements in the buffer
+        for (int j = head; j < head + n; j++) { buf[i++] = buffer[j % N]; }  // Copy
+        return n;
+    }
+
+    size_t size() const { return count; }
+    size_t capacity() const { return N; }
+    bool empty() const { return count == 0; }
+    bool full() const { return count >= N; }
+    float load_factor() const { return static_cast<float>(count) / static_cast<float>(N); }
+
+    template <typename F>
+    void for_each(F callback) {
+        for (size_t i = 0; i < count; i++) { callback(buffer[(head + i) % N]); }
+    }
+
+   private:
+    size_t count = 0;
+    unsigned int head = 0;
+    unsigned int tail = 0;
+    T buffer[N];
+};
+
+}  // namespace ktl

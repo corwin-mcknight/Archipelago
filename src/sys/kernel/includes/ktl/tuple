@@ -1,0 +1,52 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <ktl/utility>
+
+template <size_t idx, typename T>
+struct tuple_item {
+    T value;
+
+    tuple_item(const T& v) : value(v) {}
+    tuple_item(T&& v) : value(ktl::move(v)) {}
+
+    T& get() { return value; }
+    const T& get() const { return value; }
+};
+
+template <size_t idx, typename... Ts>
+struct tuple_impl;
+
+// Specialization for at least one type
+template <size_t idx, typename T, typename... Ts>
+struct tuple_impl<idx, T, Ts...> : public tuple_item<idx, T>, public tuple_impl<idx + 1, Ts...> {
+    tuple_impl(const T& v, const Ts&... vs) : tuple_item<idx, T>(v), tuple_impl<idx + 1, Ts...>(vs...) {}
+    tuple_impl(T&& v, Ts&&... vs) : tuple_item<idx, T>(std::move(v)), tuple_impl<idx + 1, Ts...>(std::move(vs)...) {}
+
+    using tuple_item<idx, T>::get;
+    using tuple_impl<idx + 1, Ts...>::get;
+};
+
+// Specialization for last type
+template <size_t idx>
+struct tuple_impl<idx> {
+    void get() {}
+};
+
+template <typename... Ts>
+struct tuple : public tuple_impl<0, Ts...> {
+    tuple(const Ts&... vs) : tuple_impl<0, Ts...>(vs...) {}
+    tuple(Ts&&... vs) : tuple_impl<0, Ts...>(std::move(vs)...) {}
+
+    template <size_t idx>
+    auto& get() {
+        return TupleImpl<0, Ts...>::get<idx>();
+    }
+
+    template <size_t idx>
+    const auto& get() const {
+        return TupleImpl<0, Ts...>::get<idx>();
+    }
+};

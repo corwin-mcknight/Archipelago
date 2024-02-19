@@ -1,0 +1,119 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <ktl/maybe>
+
+#include "kernel/panic.h"
+
+/// result_t is a type meant to be a return type. If less then zero, it dictates an error.
+/// If greater or equal to zero, it dictates a user specified quantity.
+typedef intptr_t result_t;
+
+#define result_error(x) (x < 0)
+
+#define RESULT_OK 0
+#define RESULT_UNKNOWN_ERROR -1
+#define RESULT_NULL_ARGUMENT -2
+#define RESULT_INVALID_OPERATION -3
+#define RESULT_OOM -4
+#define RESULT_WRONG_TYPE -5
+#define RESULT_HANDLE_INVALID -6
+
+enum class ResultType { Ok, Err };
+
+template <typename T, typename E>
+struct Result {
+    union {
+        T ok;
+        E err;
+    } value;
+    ResultType type;
+
+   public:
+    // Boolean
+    bool is_ok() const { return type == ResultType::Ok; }
+    bool is_err() const { return type == ResultType::Err; }
+    explicit operator bool() const { return is_ok(); }
+
+    // Extraction
+    T expect(const char* error_message) const {
+        if (is_err()) { panic(error_message); }
+        return value.ok;
+    }
+
+    T unwrap() {
+        if (is_err()) { panic("Result unwrap failed"); }
+        return value.ok;
+    }
+
+    T unwrap() const {
+        if (is_err()) { panic("Result unwrap failed"); }
+        return value.ok;
+    }
+
+    E unwrap_err() const {
+        if (!is_err()) { panic("Result unwrap_err failed"); }
+        return value.err;
+    }
+
+    T unwrap_or(T default_value) const {
+        if (is_err()) { return default_value; }
+        return value.ok;
+    }
+
+    // Transformation
+    ktl::maybe<T> ok() const { return is_ok() ? ktl::maybe<T>(value.ok) : ktl::nothing; }
+    ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
+
+    // Default initalizer
+    Result() : type(ResultType::Err) {}
+    explicit Result(T val) : type(ResultType::Ok) { value.ok = val; }
+    explicit Result(E val) : type(ResultType::Err) { value.err = val; }
+
+    static Result<T, E> ok(T value) {
+        Result<T, E> res;
+        res.value.ok = value;
+        res.type = ResultType::Ok;
+        return res;
+    }
+
+    static Result<T, E> err(E value) {
+        Result<T, E> res;
+        res.value.err = value;
+        res.type = ResultType::Err;
+        return res;
+    }
+
+    // Operators
+    bool operator==(const Result<T, E>& other) const {
+        if (type != other.type) { return false; }
+        if (type == ResultType::Ok) { return value.ok == other.value.ok; }
+        return value.err == other.value.err;
+    }
+
+    bool operator!=(const Result<T, E>& other) const { return !(*this == other); }
+
+    template <typename F>
+    auto map(F&& func) const -> Result<decltype(func(value.ok)), E> {
+        if (is_err()) { return Result<decltype(func(value.ok)), E>::err(value.err); }
+        return Result<decltype(func(value.ok)), E>::ok(func(value.ok));
+    }
+
+    // This function assumes that the function returns a Result
+    template <typename F>
+    auto and_then(F&& func) const -> decltype(func(value.ok)) {
+        if (is_err()) {
+            return Result<decltype(func(value.ok).value.ok), decltype(func(value.ok).value.err)>::err(
+                value.err);
+        }
+        return func(value.ok);
+    }
+
+    template <typename F>
+    auto or_else(F&& func) const -> decltype(func(value.err)) {
+        if (is_ok()) { return ok(value.ok); }
+        return func(value.err);
+    }
+};

@@ -1,0 +1,15 @@
+{
+    "tasks": [
+        {
+            "label": "Launch QEMU",
+            "type": "shell",
+            "windows": {
+                "command": "start -FilePath 'qemu-system-i386' -ArgumentList '-S -gdb tcp::1234 -boot d -cdrom bin/myos.iso -m 512'"
+            },
+            "linux": {
+                "command": "make install && qemu-system-x86_64 -S -gdb tcp::1234 -boot d -cdrom build/image.iso -m 256"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
