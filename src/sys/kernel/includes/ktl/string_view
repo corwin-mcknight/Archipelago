@@ -1,0 +1,82 @@
+#pragma once
+
+#include <ktl/algorithm>
+#include <ktl/string>
+
+namespace ktl {
+
+class string_view {
+   public:
+    constexpr string_view() : m_ptr(nullptr), m_size(0) {}
+    constexpr string_view(const string_view& other) = default;
+    constexpr string_view(const char* str, size_t count) : m_ptr(str), m_size(count) {}
+    constexpr string_view(const char* str) : m_ptr(str), m_size(ktl::strlen(str)) {}
+    // string_view(const ktl::string str) : m_ptr(str.data()), m_size(str.size()) {}
+
+    // Copy assignment
+    constexpr string_view& operator=(const string_view& other) = default;
+
+    constexpr const char* data() const { return m_ptr; }
+    constexpr size_t size() const { return m_size; }
+
+    // operator ktl::string() const { return std::string(m_ptr, m_size); }
+
+    constexpr size_t find(char c) const {
+        for (size_t i = 0; i < m_size; i++) {
+            if (m_ptr[i] == c) { return i; }
+        }
+        return npos;
+    }
+
+    constexpr size_t find(char c, size_t start) const {
+        for (size_t i = start; i < m_size; i++) {
+            if (m_ptr[i] == c) { return i; }
+        }
+        return npos;
+    }
+
+    constexpr size_t rfind(char c) const {
+        for (size_t i = m_size - 1; i > 0; i--) {
+            if (m_ptr[i] == c) { return i; }
+        }
+        return npos;
+    }
+
+    char at(size_t idx) const { return m_ptr[idx]; }
+
+    constexpr char operator[](size_t idx) const { return m_ptr[idx]; }
+
+    string_view substr(size_t start, size_t count = npos) const {
+        size_t rcount = ktl::min(count, m_size - start);
+        return string_view(m_ptr + start, rcount);
+    }
+
+    constexpr int compare(const char* s) const {
+        const char* str1 = s;
+        const char* str2 = m_ptr;
+
+        for (size_t i = 0; i < m_size; i++) {
+            if (*str1 != *str2) { return *str1 - *str2; }
+            str1++;
+            str2++;
+        }
+
+        return 0;
+    }
+
+    // Copy the string into the destination buffer, up to c characters.
+    size_t copy(char* destination, size_t c, size_t pos = 0) const {
+        size_t rcount = ktl::min(c, m_size - pos);
+        memcpy(destination, m_ptr + pos, rcount);
+        return rcount;
+    }
+
+    // Constants
+    static const size_t npos = (size_t)-1;
+
+   private:
+    const char* m_ptr;
+    size_t m_size;
+};
+
+}  // namespace ktl

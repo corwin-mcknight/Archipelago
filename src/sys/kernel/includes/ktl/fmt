@@ -1,0 +1,91 @@
+#pragma once
+
+#include <stdlib.h>
+#include <string.h>
+
+#include <ktl/string>
+#include <ktl/string_view>
+#include <ktl/type_traits>
+
+// Format
+#include <ktl/fmt_builtin>
+#include <ktl/fmt_type>
+
+namespace ktl {
+namespace format {
+
+template <typename... Args>
+constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string_view fmt, Args... args) {
+    size_t buffer_index = 0;
+
+    for (size_t format_index = 0; format_index < fmt.size(); ++format_index) {
+        if (buffer_index >= (buffer_max - 1)) { break; }
+        if (fmt[format_index] != '{') {
+            buffer[buffer_index++] = fmt[format_index];
+
+            continue;
+        }
+
+        format_args fmtargs;
+        fmtargs.specifier = 'd';
+        fmtargs.width = 0;
+        fmtargs.zero_padded = false;
+        fmtargs.right_aligned = true;
+
+        // We have an argument specifier, parse it.
+        size_t argument_index = 0;
+        while (fmt[++format_index] != '}' && fmt[format_index] != ':') {
+            argument_index = argument_index * 10 + ((size_t)fmt[format_index] - '0');
+        }
+
+        if (fmt[format_index] == ':') {
+            // Parse the format specifier
+            // Order is [left-aligned][zero-padded][width][specifier]
+            // - left aligns the text
+            // 0 zero pads the text, if it's the first thing in the number...
+            // Rest of numbers is the width of the text
+            // All fields are optional but specifier...
+
+            // Left aligned
+            if (fmt[++format_index] == '-') {
+                fmtargs.right_aligned = false;
+                ++format_index;
+            }
+
+            // Zero padded
+            if (fmt[format_index] == '0') {
+                fmtargs.zero_padded = true;
+                ++format_index;
+            }
+
+            // Get width as a substing (until first non-digit character)...
+            while (fmt[format_index] >= '0' && fmt[format_index] <= '9') {
+                fmtargs.width = fmtargs.width * 10 + ((size_t)fmt[format_index] - '0');
+                ++format_index;
+            }
+
+            // If there's a specifier, get it.
+            if (fmt[format_index] != '}') { fmtargs.specifier = fmt[format_index]; }
+
+            // Advance until next }
+            while (fmt[++format_index] != '}') {}
+        }
+
+        if (argument_index < sizeof...(args)) {
+            size_t i = 0;
+            bool found = false;
+            ((i++ == argument_index ? found = true, kfmt_printer<ktl::decay_t<decltype(args)>>::print(
+                                                        fmtargs, buffer, buffer_max, buffer_index, args)
+                                    : void()),
+             ...);
+            if (!found) { --format_index; }
+        } else {
+            // print the string "<invalid argument>"
+            const char* invalid_argument = "<invalid argument>";
+            while (*invalid_argument) { buffer[buffer_index++] = *invalid_argument++; }
+        }
+    }
+    buffer[buffer_index] = '\0';  // null-terminate the string
+}
+}  // namespace format
+}  // namespace ktl

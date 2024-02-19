@@ -1,0 +1,89 @@
+#pragma once
+
+#include <stdlib.h>
+
+#include <ktl/fmt_type>
+
+namespace ktl {
+namespace format {
+
+#define KFMT_INT_PRINTER(KFMT_TYPE, MAX_BUFFER)                                             \
+    template <>                                                                             \
+    struct kfmt_printer<KFMT_TYPE> {                                                        \
+        static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, \
+                          KFMT_TYPE value) {                                                \
+            char number_temp[MAX_BUFFER];                                                   \
+            memset(number_temp, 0, MAX_BUFFER);                                             \
+            unsigned int base;                                                              \
+            switch (args.specifier) {                                                       \
+                case 'h':                                                                   \
+                case 'x':                                                                   \
+                case 'p': base = 16; break;                                                 \
+                case 'd': base = 10; break;                                                 \
+                case 'o': base = 8; break;                                                  \
+                case 'b': base = 2; break;                                                  \
+                default: base = 10; break;                                                  \
+            }                                                                               \
+            itoa((unsigned long long)value, number_temp, base);                             \
+            format_args::print_string(args, buffer, buffer_max, index, number_temp);        \
+        }                                                                                   \
+    };
+
+#define KFMT_SIGNED_INT_PRINTER(KFMT_TYPE, MAX_BUFFER)                                      \
+    template <>                                                                             \
+    struct kfmt_printer<KFMT_TYPE> {                                                        \
+        static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, \
+                          KFMT_TYPE value) {                                                \
+            char number_temp[MAX_BUFFER];                                                   \
+            memset(number_temp, 0, MAX_BUFFER);                                             \
+            if (value < 0) {                                                                \
+                buffer[index++] = '-';                                                      \
+                value = -value;                                                             \
+            }                                                                               \
+            unsigned int base;                                                              \
+            switch (args.specifier) {                                                       \
+                case 'h':                                                                   \
+                case 'x':                                                                   \
+                case 'p': base = 16; break;                                                 \
+                case 'd': base = 10; break;                                                 \
+                case 'o': base = 8; break;                                                  \
+                case 'b': base = 2; break;                                                  \
+                default: base = 10; break;                                                  \
+            }                                                                               \
+            itoa((unsigned long long)value, number_temp, base);                             \
+            format_args::print_string(args, buffer, buffer_max, index, number_temp);        \
+        }                                                                                   \
+    };
+
+KFMT_SIGNED_INT_PRINTER(short, 18);
+KFMT_INT_PRINTER(unsigned short, 18);
+KFMT_SIGNED_INT_PRINTER(int, 34);
+KFMT_INT_PRINTER(unsigned int, 34);
+KFMT_SIGNED_INT_PRINTER(long, 66);
+KFMT_INT_PRINTER(unsigned long, 66);
+KFMT_SIGNED_INT_PRINTER(long long, 66);
+KFMT_INT_PRINTER(unsigned long long, 66);
+
+template <>
+struct kfmt_printer<const char*> {
+    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, const char* value) {
+        args.zero_padded = false;  // This doesn't make sense for pure strings..
+        format_args::print_string(args, buffer, buffer_max, index, value);
+    }
+};
+
+template <>
+struct kfmt_printer<char> {
+    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, char value) {
+        if (args.specifier == 'c') {
+            buffer[index++] = value;
+            return;
+        } else {
+            // Invoke int printer
+            kfmt_printer<int>::print(args, buffer, buffer_max, index, (int)value);
+        }
+    }
+};
+
+}  // namespace format
+}  // namespace ktl

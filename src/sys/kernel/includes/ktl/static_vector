@@ -1,0 +1,38 @@
+#pragma once
+#include <ktl/static_array>
+#include <ktl/utility>
+
+namespace ktl {
+
+template <typename T, size_t N>
+class static_vector : public static_array<T, N> {
+   public:
+    void push_back(T value) {
+        if (m_count == N) { return; }
+        this->m_buffer[m_count++] = value;
+    }
+
+    void emplace_back(T&& value) {
+        if (m_count == N) { return; }
+        this->m_buffer[m_count++] = ktl::move(value);
+    }
+
+    maybe<T> pop_back() { return m_count > 0 ? this->m_buffer[--m_count] : ktl::nothing; }
+    maybe<T> peek_back() { return m_count > 0 ? this->m_buffer[m_count - 1] : ktl::nothing; }
+
+    void clear() { m_count = 0; }
+    size_t size() const { return m_count; }
+
+    // iterator
+    T* begin() { return this->m_buffer; }
+    T* end() { return this->m_buffer + m_count; }
+
+    // const iterator
+    const T* begin() const { return this->m_buffer; }
+    const T* end() const { return this->m_buffer + m_count; }
+
+   private:
+    size_t m_count;
+};
+
+}  // namespace ktl

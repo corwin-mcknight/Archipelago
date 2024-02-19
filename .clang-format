@@ -1,0 +1,12 @@
+---
+BasedOnStyle: Google
+IndentWidth: 4
+UseTab: Never
+AllowShortBlocksOnASingleLine: 'true'
+AllowShortCaseLabelsOnASingleLine: 'true'
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLambdasOnASingleLine: All
+AllowShortLoopsOnASingleLine: 'true'
+ColumnLimit: '110'
+AlignConsecutiveAssignments: 'false'
