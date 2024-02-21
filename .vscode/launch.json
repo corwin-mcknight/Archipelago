@@ -1,37 +1,6 @@
 {
     "configurations": [
         {
-            "name": "Debug LLDB",
-            "type": "lldb",
-            "request": "custom",
-            "targetCreateCommands": [
-                "target create ${workspaceFolder}/build/sysroot/boot/kernel.elf"
-            ],
-            "processCreateCommands": [
-                "gdb-remote localhost:1234"
-            ]
-        },
-        {
-            "name": "(gdb) Attach with cppdebug",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/sysroot/boot/kernel.elf", // for loading symbols from running program
-            "cwd": "${workspaceFolder}",
-            // if you want to connect at entry point (requires remote program to start paused)
-            "stopAtEntry": false,
-            "stopAtConnect": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/gdb-multiarch",
-            "miDebuggerServerAddress": "localhost:1234",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true,
-                }
-            ]
-        },
-        {
             "type": "gdb",
             "request": "attach",
             "name": "Attach to gdbserver",
@@ -43,9 +12,8 @@
             "valuesFormatting": "parseText",
             "printCalls": true,
             "autorun": [
-                "file ${workspaceFolder}/build/sysroot/boot/kernel.elf",
-                "break _start",
-                "continue"
+                "symbol-file ${workspaceFolder}/build/sysroot/boot/kernel.elf",
+                "break _start"
             ]
         }
     ],

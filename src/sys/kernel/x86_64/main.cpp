@@ -1,6 +1,3 @@
-#include <assert.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <vendor/limine.h>
 
 #include <ktl/circular_buffer>
@@ -10,12 +7,9 @@
 #include <ktl/result>
 #include <ktl/static_array>
 
-#include "kernel/assert.h"
 #include "kernel/drivers/uart.h"
 #include "kernel/log.h"
 #include "kernel/panic.h"
-#include "kernel/time.h"
-#include "kernel/x86/ioport.h"
 
 extern "C" void init_global_constructors_array(void);
 
@@ -33,9 +27,7 @@ Result<bool, const char*> init_hardware() {
 
     // TODO:
     // * GDT, IDT & TSS, Paging, PIT...
-
     res = res.err("Failed to initialize GDT!");
-
     return res;
 }
 
@@ -45,7 +37,7 @@ extern "C" void _start(void) {
     init_log();
 
     // Display version message
-    g_log.info("Archipelago ver. {0}...", "0.0.1");
+    g_log.info("Starting archipelago ver. {0}", "0.0.1");
     g_log.flush();
 
     auto did_init_hardware = init_hardware();
@@ -53,6 +45,5 @@ extern "C" void _start(void) {
         g_log.fatal("Failed to initialize hardware: {0}", did_init_hardware.unwrap_err());
         panic("Was unable to finish initialization due to hardware initialization failure.");
     }
-
     panic("Hit end of kernel main!");
 }

@@ -63,17 +63,19 @@ $(OBJ_DIR)/$(TARGET_EXEC): $(OBJS)
 
 # assembly
 $(OBJ_DIR)/%.s.o: %.s
+	@echo -n "A"
 	@$(MKDIR_P) $(dir $@)
 	@$(AS) $(ASFLAGS) -c $< -o $@
 
 # c source
 $(OBJ_DIR)/%.c.o: %.c
+	@echo -n "C"
 	@$(MKDIR_P) $(dir $@)
 	@$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 # c++ source
 $(OBJ_DIR)/%.cpp.o: %.cpp
-	@echo -n "."
+	@echo -n "+"
 	@$(MKDIR_P) $(dir $@)
 	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 

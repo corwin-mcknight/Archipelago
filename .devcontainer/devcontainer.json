@@ -1,18 +1,18 @@
 {
-    "build": { "dockerfile": "Dockerfile" },
-    
-    "customizations": {
-      "vscode": {
-        "extensions": [
-			"ms-azuretools.vscode-docker",
-			"llvm-vs-code-extensions.vscode-clangd",
-			"xaver.clang-format",
-			"twxs.cmake",
-			"ms-vscode.cpptools",
-			"ms-vscode.makefile-tools",
-			"GitHub.copilot"
-		]
-      }
+    "build": {
+        "dockerfile": "Dockerfile"
     },
-    "forwardPorts": [5900]
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-azuretools.vscode-docker",
+                "llvm-vs-code-extensions.vscode-clangd",
+                "xaver.clang-format",
+                "twxs.cmake",
+                "ms-vscode.cpptools",
+                "ms-vscode.makefile-tools",
+                "GitHub.copilot"
+            ]
+        }
+    }
 }

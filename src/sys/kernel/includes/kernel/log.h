@@ -99,31 +99,18 @@ class system_log {
         if (this->m_autoflush) { this->flush(); }
     }
 
-    // Specialize for log_level::debug
-    template <typename... Args>
-    inline void debug(const ktl::string_view fmt, Args... args) {
-        log<log_level::debug>(fmt, args...);
+// Specialize for log_level::debug
+#define LOG_LEVEL_HELPER(thelevel)                                   \
+    template <typename... Args>                                      \
+    inline void thelevel(const ktl::string_view fmt, Args... args) { \
+        log<log_level::thelevel>(fmt, args...);                      \
     }
 
-    template <typename... Args>
-    inline void info(const ktl::string_view fmt, Args... args) {
-        log<log_level::info>(fmt, args...);
-    }
-
-    template <typename... Args>
-    inline void warn(const ktl::string_view fmt, Args... args) {
-        log<log_level::warn>(fmt, args...);
-    }
-
-    template <typename... Args>
-    inline void error(const ktl::string_view fmt, Args... args) {
-        log<log_level::error>(fmt, args...);
-    }
-
-    template <typename... Args>
-    inline void fatal(const ktl::string_view fmt, Args... args) {
-        log<log_level::fatal>(fmt, args...);
-    }
+    LOG_LEVEL_HELPER(debug)
+    LOG_LEVEL_HELPER(info)
+    LOG_LEVEL_HELPER(warn)
+    LOG_LEVEL_HELPER(error)
+    LOG_LEVEL_HELPER(fatal)
 
     template <typename F>
     uint64_t for_each(uint64_t minimum_sequence_id, F func) {
