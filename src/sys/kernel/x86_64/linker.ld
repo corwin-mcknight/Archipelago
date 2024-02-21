@@ -22,7 +22,7 @@ SECTIONS
     /* that is the beginning of the region. */
     . = 0xffffffff80000000;
  
-    .text : {
+    .text ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(.text .text.*)
     } :text
 
@@ -34,29 +34,17 @@ SECTIONS
         __init_array_end = .;
     } :text
  
-    /* Move to the next memory page for .rodata */
-    . += CONSTANT(MAXPAGESIZE);
- 
-    .rodata : {
+    .rodata ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(.rodata .rodata.*)
     } :rodata
- 
-    /* Move to the next memory page for .data */
-    . += CONSTANT(MAXPAGESIZE);
- 
-    .data : {
-        *(.data .data.*)
+
+    .data ALIGN(CONSTANT(MAXPAGESIZE)) : {
+        *(.data .data.* .ldata)
     } :data
 
-
-
-    /* NOTE: .bss needs to be the last thing mapped to :data, otherwise lots of */
-    /* unnecessary zeros will be written to the binary. */
-    /* If you need, for example, .init_array and .fini_array, those should be placed */
-    /* above this. */
-    .bss : {
+    .bss ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(COMMON)
-        *(.bss .bss.*)
+        *(.bss .bss.* .lbss .lbss.*)
     } :data
  
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */

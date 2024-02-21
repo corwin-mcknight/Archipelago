@@ -16,7 +16,6 @@ cd tools/limine
 cp limine.sys limine-cd.bin limine-cd-efi.bin ../../sysroot/
 cd ../..
 
-ls ../media
 cp -r ../media/* ./sysroot/
 
 xorriso -as mkisofs -b limine-cd.bin \
@@ -24,5 +23,8 @@ xorriso -as mkisofs -b limine-cd.bin \
         --efi-boot limine-cd-efi.bin \
         -efi-boot-part --efi-boot-image --protective-msdos-label \
         sysroot -o image.iso
+
+./tools/limine/limine-deploy image.iso
+
 
 cd $TOOLS_DIR

@@ -23,6 +23,11 @@ debug: install
 	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 64
 
 clean:
+	-@rm -r ${BUILD_DIR}/obj
+	-@rm -r ${BUILD_DIR}/sysroot
+	-@rm ${BUILD_DIR}/image.iso
+
+full-clean: 
 	-@rm -r ${BUILD_DIR}
 	-@mkdir -p ${BUILD_DIR}
 	-@rm -r ${PWD}/.cache

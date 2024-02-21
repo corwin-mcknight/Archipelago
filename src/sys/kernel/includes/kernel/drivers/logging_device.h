@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ktl/string_view"
 namespace kernel {
 namespace driver {
 
@@ -9,6 +10,9 @@ class logging_device {
 
     virtual void init() = 0;
     virtual void write_byte(char c) = 0;
+    virtual void write_string(ktl::string_view s) {
+        for (size_t i = 0; i < s.size(); i++) { write_byte(s[i]); }
+    }
 };
 
 }  // namespace driver
