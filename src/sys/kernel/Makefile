@@ -1,4 +1,5 @@
-CC  ?= clang
+AS  := nasm
+CC  := clang
 CXX := clang++
 LD  := ld.lld
 
@@ -11,13 +12,15 @@ SRC_DIRS  ?= ./
 ARCH := x86_64
 
 # Glob all CPP files in src
-ARCH_SRCS :=  $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp)
+ARCH_SRCS :=  $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp) $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp)
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp)
 SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
+
+override ASFLAGS += -g -f elf64
 
 override CXXFLAGS += \
 	-MMD -MP \
@@ -65,7 +68,7 @@ $(OBJ_DIR)/$(TARGET_EXEC): $(OBJS)
 $(OBJ_DIR)/%.s.o: %.s
 	@echo -n "A"
 	@$(MKDIR_P) $(dir $@)
-	@$(AS) $(ASFLAGS) -c $< -o $@
+	@$(AS) $(ASFLAGS) $< -o $@
 
 # c source
 $(OBJ_DIR)/%.c.o: %.c

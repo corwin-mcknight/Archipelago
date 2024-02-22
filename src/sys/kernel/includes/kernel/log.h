@@ -10,6 +10,7 @@
 #include <ktl/string_view>
 #include <ktl/utility>
 
+#include "kernel/config.h"
 #include "kernel/drivers/logging_device.h"
 #include "kernel/time.h"
 
@@ -30,22 +31,22 @@ struct log_message {
     constexpr static size_t max_message_size = max_size - 16;
     constexpr static size_t sequence_bits = 56;
 
-    timestamp_t timestamp;  // 8 bytes
-    uint64_t level_seq;     // 8 bytes, 60 bits for sequence, a nibble for level
+    ktime_t timestamp;   // 8 bytes
+    uint64_t level_seq;  // 8 bytes, 60 bits for sequence, a nibble for level
     ktl::fixed_string<max_message_size> text;
 
     log_message() = default;
-    explicit log_message(timestamp_t time, log_level level, uint64_t sequence, const char* message)
+    explicit log_message(ktime_t time, log_level level, uint64_t sequence, const char* message)
         : timestamp(time),
           level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
           text(message) {}
 
-    explicit log_message(timestamp_t time, log_level level, uint64_t sequence, const ktl::string_view message)
+    explicit log_message(ktime_t time, log_level level, uint64_t sequence, const ktl::string_view message)
         : timestamp(time),
           level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
           text(message) {}
 
-    explicit log_message(timestamp_t time, log_level level, uint64_t sequence,
+    explicit log_message(ktime_t time, log_level level, uint64_t sequence,
                          const ktl::fixed_string<max_message_size> message)
         : timestamp(time),
           level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
@@ -88,13 +89,12 @@ class system_log {
 
     template <log_level level, typename... Args>
     inline void log(const ktl::string_view fmt, Args... args) {
-        timestamp_t time = 0;
         uint64_t seq = last_seq++;
 
         ktl::fixed_string<log_message::max_message_size> string;
         ktl::format::format_to_buffer_raw(string.m_buffer, log_message::max_message_size, fmt, args...);
 
-        messages.emplace(log_message(time, level, seq, string));
+        messages.emplace(log_message(kernel::time::now(), level, seq, string));
 
         if (this->m_autoflush) { this->flush(); }
     }
@@ -125,7 +125,7 @@ class system_log {
     }
 
     void flush();
-    ktl::static_vector<kernel::driver::logging_device*, 4> devices;
+    ktl::static_vector<kernel::driver::logging_device*, CONFIG_LOG_MAX_DEVICES> devices;
 
    private:
     bool m_autoflush = true;
