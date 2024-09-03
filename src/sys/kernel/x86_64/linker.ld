@@ -16,10 +16,6 @@ PHDRS
  
 SECTIONS
 {
-    /* We wanna be placed in the topmost 2GiB of the address space, for optimisations */
-    /* and because that is what the Limine spec mandates. */
-    /* Any address in this region will do, but often 0xffffffff80000000 is chosen as */
-    /* that is the beginning of the region. */
     . = 0xffffffff80000000;
  
     .text ALIGN(CONSTANT(MAXPAGESIZE)) : {
@@ -45,6 +41,13 @@ SECTIONS
     .bss ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(COMMON)
         *(.bss .bss.* .lbss .lbss.*)
+        
+        . += 0x1000;
+        . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+        _.initial_heap_start = .;
+        . += 0x20000;
+        _.initial_heap_end = .;
     } :data
  
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */
