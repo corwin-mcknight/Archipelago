@@ -16,12 +16,14 @@
 
 namespace kernel {
 
+// Log level is a 4-bit value that represents the severity of a log message.
 enum class log_level : uint8_t {
-    debug,
-    info,
-    warn,
-    error,
-    fatal,
+    trace = 0b000,
+    debug = 0b001,
+    info = 0b010,
+    warn = 0b011,
+    error = 0b100,
+    fatal = 0b101,
 };
 
 /// A log message is a 256 byte structure that contains a
@@ -29,7 +31,7 @@ enum class log_level : uint8_t {
 struct log_message {
     constexpr static size_t max_size = 256;
     constexpr static size_t max_message_size = max_size - 16;
-    constexpr static size_t sequence_bits = 56;
+    constexpr static size_t sequence_bits = 60;
 
     ktime_t timestamp;   // 8 bytes
     uint64_t level_seq;  // 8 bytes, 60 bits for sequence, a nibble for level
@@ -76,8 +78,8 @@ struct log_message {
         return *this;
     }
 
-    // Sequence is first 56 bits, level is last 8 bits
-    uint64_t sequence() const { return level_seq & 0xFFFFFFFFFFFFFF; }
+    // Sequence is first 56 bits, level is last 4 bits (and really only consumes 3.)
+    uint64_t sequence() const { return level_seq & 0xFFFFFFFFFFFFFFF; }
     log_level level() const { return static_cast<log_level>(level_seq >> sequence_bits); }
 };
 
@@ -106,6 +108,7 @@ class system_log {
         log<log_level::thelevel>(fmt, args...);                      \
     }
 
+    LOG_LEVEL_HELPER(trace)
     LOG_LEVEL_HELPER(debug)
     LOG_LEVEL_HELPER(info)
     LOG_LEVEL_HELPER(warn)
