@@ -25,7 +25,7 @@ override ASFLAGS += -g -f elf64
 override CXXFLAGS += \
 	-MMD -MP \
 	-g \
-	-Og \
+	-O0 \
     -Wall \
     -Wextra \
 	-Wconversion \
@@ -49,6 +49,8 @@ override CXXFLAGS += \
     -mno-red-zone \
     -mcmodel=medany \
 	-D OPTION_KTL_HARDEN \
+	-D ARCH_X86 \
+	-D ARCH_X86_64 \
 	-I $(PWD)/includes/std \
 	-I $(PWD)/includes
 

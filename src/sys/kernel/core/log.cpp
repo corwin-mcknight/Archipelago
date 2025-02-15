@@ -3,6 +3,8 @@
 #include "kernel/time.h"
 #include "ktl/fixed_string"
 
+kernel::system_log g_log;
+
 // Color codes for the log levels...
 static const char* log_level_colors[] = {
     "\033[0m",     // Reset
@@ -14,7 +16,6 @@ static const char* log_level_colors[] = {
 };
 
 void kernel::system_log::flush() {
-    kernel::time::tick();  // TODO: Temporary for testing
     this->last_flushed_sequence =
         this->for_each(this->last_flushed_sequence, [&](const log_message* message) {
             char status = '-';

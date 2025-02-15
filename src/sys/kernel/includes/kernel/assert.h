@@ -1,5 +1,6 @@
 #ifndef KERNEL_ASSERT_H
 #define KERNEL_ASSERT_H
+
 #ifndef NDEBUG
 #include "kernel/log.h"
 #include "kernel/panic.h"

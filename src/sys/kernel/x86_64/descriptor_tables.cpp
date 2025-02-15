@@ -60,7 +60,7 @@ kernel::x86::gdt gdts[CONFIG_MAX_CORES];
 
 // They share the same IDT, which is initialized by the BP.
 __attribute__((aligned(0x10))) struct kernel::x86::idt_entry idt[256];
-struct kernel::x86::idt_ptr idtptr;
+__attribute__((aligned(0x10))) struct kernel::x86::idt_ptr idtptr;
 bool idt_initialized = false;
 
 void kernel::x86::init_gdt(int corenum) {
