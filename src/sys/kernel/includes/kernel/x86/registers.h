@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#ifdef ARCH_X86
+#ifndef ARCH_X86
 typedef struct register_frame {
     unsigned int gs, fs, es, ds;
     unsigned int edi, esi, ebp, ebx, edx, ecx, eax;

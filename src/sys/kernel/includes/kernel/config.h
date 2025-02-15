@@ -1,5 +1,7 @@
 #pragma once
 
+#define ARCH_X86 1
+
 #define CONFIG_MAX_CORES 1
 #define CONFIG_KERNEL_VERSION "0.0.1"
 #define CONFIG_LOG_MAX_DEVICES 8
