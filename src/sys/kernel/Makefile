@@ -22,13 +22,35 @@ DEPS := $(OBJS:.o=.d)
 
 override ASFLAGS += -g -f elf64
 
+override CFLAGS += -g
+
+override CWARNINGS += -Wall -Weffc++ -pedantic  \
+-pedantic-errors -Wextra -Waggregate-return -Wcast-align \
+-Wcast-qual -Wconversion \
+-Wdisabled-optimization \
+-Werror -Wfloat-equal -Wformat=2 \
+-Wformat-nonliteral -Wformat-security  \
+-Wformat-y2k \
+-Wimplicit  -Wimport  -Winit-self  -Winline \
+-Winvalid-pch   \
+-Wlong-long \
+-Wmissing-field-initializers -Wmissing-format-attribute   \
+-Wmissing-include-dirs -Wmissing-noreturn \
+-Wpacked  -Wpadded -Wpointer-arith \
+-Wredundant-decls \
+-Wshadow -Wstack-protector \
+-Wstrict-aliasing=2 -Wswitch-default \
+-Wswitch-enum \
+-Wunreachable-code -Wunused \
+-Wunused-parameter \
+-Wvariadic-macros \
+-Wwrite-strings
+
 override CXXFLAGS += \
 	-MMD -MP \
 	-g \
-	-O0 \
-    -Wall \
-    -Wextra \
-	-Wconversion \
+	-Og \
+	-fvisibility=hidden \
 	-pipe \
     -std=c++20 \
     -ffreestanding \
@@ -82,7 +104,7 @@ $(OBJ_DIR)/%.c.o: %.c
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@echo -n "+"
 	@$(MKDIR_P) $(dir $@)
-	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CWARNINGS) -c $< -o $@
 
 
 .PHONY: clean
