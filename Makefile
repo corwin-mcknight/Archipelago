@@ -33,4 +33,5 @@ full-clean:
 	-@rm -r ${PWD}/.cache
 
 clangd:
+	@mkdir -p ${BUILD_DIR}
 	@bear --append --output ${BUILD_DIR}/compile_commands.json -- make build
