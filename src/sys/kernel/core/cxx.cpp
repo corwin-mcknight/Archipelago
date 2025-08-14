@@ -8,7 +8,8 @@ extern "C" void init_global_constructors_array(void) {
 }
 
 // Define cxa_pure_virtual to prevent undefined reference errors
-extern "C" void __cxa_pure_virtual() {
+
+extern "C" [[noreturn]] void __cxa_pure_virtual() {
     // Log the call
     g_log.error("Pure virtual function called");
     // Halt the system

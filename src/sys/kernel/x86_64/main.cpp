@@ -49,15 +49,13 @@ void core_init(int core_id) {
     g_log.debug("cpu{0}: Now running", core_id);
 }
 
-extern "C" void _start(void) {
+extern "C" [[noreturn]] void _start(void) {
     // Boot processor specific stuff...
     init_global_constructors_array();
     init_log();
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
     core_init(0);
-
-    while (true) {}
 
     // Kernel failed to start.
     panic("Boot processor exited early");

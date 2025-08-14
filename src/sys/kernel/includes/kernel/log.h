@@ -131,8 +131,9 @@ class system_log {
     ktl::static_vector<kernel::driver::logging_device*, CONFIG_LOG_MAX_DEVICES> devices;
 
    private:
-    bool m_autoflush = true;
     uint64_t last_flushed_sequence = 0;
+    bool m_autoflush = true;
+    [[maybe_unused]] char pad[7];  // Ensure 64-byte alignment
 };
 
 };  // namespace kernel

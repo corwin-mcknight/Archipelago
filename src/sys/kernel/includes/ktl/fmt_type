@@ -15,6 +15,7 @@ struct format_args {
     char specifier;
     bool zero_padded;
     bool right_aligned;
+    [[maybe_unused]] char padding[5];
 
     static void print_string(format_args args, char* buffer, size_t buffer_max, size_t& index,
                              const char* value) {

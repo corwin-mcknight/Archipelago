@@ -62,7 +62,7 @@ struct gdt {
     struct gdt_entry_high tss_entry;
     struct gdt_pointer pointer;
     struct tss_entry tss;
-} __attribute__((packed));
+};
 
 struct idt_entry {
     uint16_t base_lo;
