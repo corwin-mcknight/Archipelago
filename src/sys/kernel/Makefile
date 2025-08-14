@@ -69,7 +69,7 @@ override CXXFLAGS += \
     -mno-sse \
     -mno-sse2 \
     -mno-red-zone \
-    -mcmodel=medany \
+    -mcmodel=kernel \
 	-D OPTION_KTL_HARDEN \
 	-D ARCH_X86 \
 	-D ARCH_X86_64 \
@@ -104,7 +104,7 @@ $(OBJ_DIR)/%.c.o: %.c
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@echo -n "+"
 	@$(MKDIR_P) $(dir $@)
-	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CWARNINGS) -c $< -o $@
+	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 
 .PHONY: clean
