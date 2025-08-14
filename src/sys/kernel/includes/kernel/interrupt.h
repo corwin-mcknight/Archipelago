@@ -42,6 +42,8 @@ class interrupt_manager {
    private:
     InterruptHandlerEntry handlers[IM_MAX_HANDLERS];
     int core_reentrant_state[CONFIG_MAX_CORES];
+
+    [[maybe_unused]] int pad;  // purposefully unused
 };
 }  // namespace hal
 }  // namespace kernel
