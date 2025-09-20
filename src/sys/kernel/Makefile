@@ -25,10 +25,10 @@ override ASFLAGS += -g -f elf64
 override CFLAGS += -g
 
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
--pedantic-errors -Wextra -Waggregate-return -Wcast-align \
+-Wextra -Waggregate-return -Wcast-align \
 -Wcast-qual -Wconversion \
 -Wdisabled-optimization \
--Werror -Wfloat-equal -Wformat=2 \
+-Wfloat-equal -Wformat=2 \
 -Wformat-nonliteral -Wformat-security  \
 -Wformat-y2k \
 -Wimplicit  -Wimport  -Winit-self  -Winline \
@@ -104,7 +104,7 @@ $(OBJ_DIR)/%.c.o: %.c
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@echo -n "+"
 	@$(MKDIR_P) $(dir $@)
-	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CWARNINGS) -c $< -o $@
 
 
 .PHONY: clean
