@@ -41,14 +41,22 @@ class circular_buffer {
         return value;
     }
 
-    maybe<T> peek() { return !empty() ? buffer[head] : ktl::nothing; }
+    maybe<T> peek() {
+        if (empty()) { return ktl::nothing; }
+        return buffer[head];
+    }
 
     // Copy last N elements into the given buffer.
     size_t copy_last(T* buf, size_t n) {
-        size_t i = 0;
-        n = ktl::clamp(n, (size_t)0, ktl::min(count, N));  // Limit N to the number of elements in the buffer
-        for (int j = head; j < head + n; j++) { buf[i++] = buffer[j % N]; }  // Copy
-        return n;
+        if (n == 0 || count == 0) { return 0; }
+
+        size_t available = ktl::min(count, N);
+        size_t to_copy = ktl::clamp(n, (size_t)1, available);
+
+        size_t start = (head + available - to_copy) % N;
+        for (size_t i = 0; i < to_copy; ++i) { buf[i] = buffer[(start + i) % N]; }
+
+        return to_copy;
     }
 
     size_t size() const { return count; }

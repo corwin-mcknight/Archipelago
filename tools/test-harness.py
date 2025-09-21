@@ -684,6 +684,14 @@ def main(argv: Sequence[str]) -> int:
         artifact_dir = None
     else:
         artifact_dir = args.artifacts
+        if artifact_dir.exists():
+            for item in artifact_dir.iterdir():
+                if item.is_dir():
+                    for subitem in item.iterdir():
+                        subitem.unlink()
+                    item.rmdir()
+                else:
+                    item.unlink()
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
     harness = KernelHarness(
