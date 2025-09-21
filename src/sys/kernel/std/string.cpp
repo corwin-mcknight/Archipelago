@@ -72,11 +72,14 @@ extern "C" char *strncpy(char *dest, const char *src, size_t n) {
 }
 
 extern "C" size_t strlcpy(char *dest, const char *src, size_t n) {
-    size_t i = 0;
-    while (src[i] && i < n - 1) {
-        dest[i] = src[i];
-        i++;
-    }
-    dest[i] = 0;
-    return i;
+    size_t src_len = 0;
+    while (src[src_len]) { src_len++; }
+
+    if (n == 0) { return src_len; }
+
+    size_t copy_len = src_len < (n - 1) ? src_len : (n - 1);
+    for (size_t i = 0; i < copy_len; i++) { dest[i] = src[i]; }
+    dest[copy_len] = 0;
+
+    return src_len;
 }

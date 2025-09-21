@@ -32,8 +32,10 @@ SECTIONS
  
     .rodata ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(.rodata .rodata.*)
-         __start__ktests = .;
+        . = ALIGN(8);
+        __start__ktests = .;
         KEEP(*(.ktests))
+        . = ALIGN(8);
         __stop__ktests = .;
     } :rodata
 
