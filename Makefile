@@ -40,3 +40,7 @@ clangd: clean
 test: install
 	@echo -e "\n\nRunning tests...\n"
 	@python3 tools/test-harness.py 
+
+test-verbose: install
+	@echo -e "\n\nRunning tests...\n"
+	@python3 tools/test-harness.py --verbose
