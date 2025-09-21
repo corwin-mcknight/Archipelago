@@ -15,7 +15,8 @@ ARCH := x86_64
 ARCH_SRCS :=  $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp) $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp)
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp)
-SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS)
+TEST_SRCS := $(shell find $(SRC_DIRS)/tests -name *.cpp)
+SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)

@@ -14,8 +14,6 @@ class uart : public logging_device {
     const char* name() const override;
     void init() override;
     void write_byte(char c) override;
-
-   private:
     bool transmit_empty();
     int recieved_data();
     char read();

@@ -32,6 +32,11 @@ full-clean:
 	-@mkdir -p ${BUILD_DIR}
 	-@rm -r ${PWD}/.cache
 
-clangd:
+clangd: clean
 	@mkdir -p ${BUILD_DIR}
 	@bear --append --output ${BUILD_DIR}/compile_commands.json -- make build
+
+
+test: install
+	@echo -e "\n\nRunning tests...\n"
+	@python3 tools/test-harness.py 
