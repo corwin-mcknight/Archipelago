@@ -1,4 +1,4 @@
-#include <vendor/limine.h>
+#include <kernel/testing/testing.h>
 
 #include <ktl/circular_buffer>
 #include <ktl/fixed_string>
@@ -57,6 +57,9 @@ extern "C" [[noreturn]] void _start(void) {
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
     core_init(0);
 
+#if CONFIG_KERNEL_TESTING
+    kernel::testing::test_runner();
+#endif
     // Kernel failed to start.
     panic("Boot processor exited early");
     // Processor is halted.

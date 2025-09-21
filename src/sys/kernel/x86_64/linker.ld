@@ -32,6 +32,9 @@ SECTIONS
  
     .rodata ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(.rodata .rodata.*)
+         __start__ktests = .;
+        KEEP(*(.ktests))
+        __stop__ktests = .;
     } :rodata
 
     .data ALIGN(CONSTANT(MAXPAGESIZE)) : {
@@ -41,7 +44,6 @@ SECTIONS
     .bss ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(COMMON)
         *(.bss .bss.* .lbss .lbss.*)
-        
         . += 0x1000;
         . = ALIGN(CONSTANT(MAXPAGESIZE));
 

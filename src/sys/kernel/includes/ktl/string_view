@@ -52,17 +52,21 @@ class string_view {
     }
 
     constexpr int compare(const char* s) const {
-        const char* str1 = s;
-        const char* str2 = m_ptr;
+        size_t other_len = ktl::strlen(s);
+        size_t min_len = ktl::min(m_size, other_len);
 
-        for (size_t i = 0; i < m_size; i++) {
-            if (*str1 != *str2) { return *str1 - *str2; }
-            str1++;
-            str2++;
+        for (size_t i = 0; i < min_len; i++) {
+            unsigned char lhs = static_cast<unsigned char>(m_ptr[i]);
+            unsigned char rhs = static_cast<unsigned char>(s[i]);
+            if (lhs != rhs) { return lhs - rhs; }
         }
 
-        return 0;
+        if (m_size == other_len) { return 0; }
+        return (m_size < other_len) ? -1 : 1;
     }
+
+    constexpr bool operator==(const char* s) const { return compare(s) == 0; }
+    constexpr bool operator!=(const char* s) const { return compare(s) != 0; }
 
     // Copy the string into the destination buffer, up to c characters.
     size_t copy(char* destination, size_t c, size_t pos = 0) const {
@@ -70,6 +74,18 @@ class string_view {
         memcpy(destination, m_ptr + pos, rcount);
         return rcount;
     }
+
+    // Starts with
+    constexpr bool starts_with(const char* s) const {
+        size_t len = ktl::strlen(s);
+        if (len > m_size) { return false; }
+        for (size_t i = 0; i < len; i++) {
+            if (m_ptr[i] != s[i]) { return false; }
+        }
+        return true;
+    }
+
+    constexpr bool empty() const { return m_size == 0; }
 
     // Constants
     static const size_t npos = (size_t)-1;

@@ -49,7 +49,9 @@ void interrupt_manager::clear_handler(unsigned int id) {
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {
     const int core = 0;  // For now.
     core_reentrant_state[core]++;
-    g_log.trace("im: START int {0} rep: {1}", id, core_reentrant_state[core] - 1);
+
+    // Ignore if it's 32, the timer interrupt
+    if (id != 32) { g_log.trace("im: START int {0} rep: {1}", id, core_reentrant_state[core] - 1); }
 
     // Check if the interrupt is enabled
     if ((handlers[id].flags & InterruptHandlerEntry::ENABLED_MASK) == 0) {
@@ -70,7 +72,7 @@ void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* re
         }
     }
 
-    g_log.trace("Interrupt Manager: End {0}", id);
+    if (id != 32) { g_log.trace("Interrupt Manager: End {0}", id); }
     core_reentrant_state[core]--;
 }
 

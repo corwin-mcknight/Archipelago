@@ -11,7 +11,8 @@
                 "twxs.cmake",
                 "ms-vscode.cpptools",
                 "ms-vscode.makefile-tools",
-                "GitHub.copilot"
+                "GitHub.copilot",
+                "openai.chatgpt"
             ]
         }
     }

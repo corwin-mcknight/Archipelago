@@ -1,11 +1,13 @@
 #include "kernel/log.h"
 
+#include "kernel/config.h"
 #include "kernel/time.h"
 #include "ktl/fixed_string"
 
 kernel::system_log g_log;
 
 // Color codes for the log levels...
+#if CONFIG_KERNEL_LOG_COLORS
 static const char* log_level_colors[] = {
     "\033[0m",     // Reset
     "\033[0;37m",  // Debug
@@ -14,6 +16,7 @@ static const char* log_level_colors[] = {
     "\033[0;31m",  // Error
     "\033[1;91m",  // Fatal
 };
+#endif
 
 void kernel::system_log::flush() {
     this->last_flushed_sequence =
@@ -54,10 +57,16 @@ void kernel::system_log::flush() {
 
             // Render the front string
             ktl::fixed_string<32> front;
+
+#if CONFIG_KERNEL_LOG_COLORS
             ktl::format::format_to_buffer_raw(front.m_buffer, front.length(),
                                               "{0:s}{1:03d}.{2:03d} {3:1c} | ", log_level_colors[color],
                                               time_seconds, time_ms, status);
 
+#else 
+            ktl::format::format_to_buffer_raw(front.m_buffer, front.length(),
+                                                "{0:03d}.{1:03d} {2:1c} | ", time_seconds, time_ms, status);
+#endif
             for (auto dev : devices) {
                 dev->write_string(front);
                 message->text.for_each([&](char c) {
@@ -68,7 +77,10 @@ void kernel::system_log::flush() {
                         dev->write_byte(' ');
                     }
                 });
+
+#if CONFIG_KERNEL_LOG_COLORS
                 dev->write_string("\033[0m");
+#endif
                 dev->write_byte('\n');
             }
         });
