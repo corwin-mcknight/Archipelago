@@ -35,8 +35,7 @@ static void InterruptManagerTestInit() {
     g_function_handler_last_regs = nullptr;
 }
 
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesFunctionHandler, "x86_64/interrupts",
-                            InterruptManagerTestInit) {
+KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesFunctionHandler, "x86_64/interrupts", InterruptManagerTestInit) {
     register_frame_t frame{};
     frame.int_no = kFunctionInterrupt;
 
@@ -49,8 +48,7 @@ KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesFunctionHandler, "x86_64/i
     g_interrupt_manager.clear_handler(kFunctionInterrupt);
 }
 
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/interrupts",
-                            InterruptManagerTestInit) {
+KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/interrupts", InterruptManagerTestInit) {
     CountingHandler handler{};
     register_frame_t frame{};
     frame.int_no = kObjectInterrupt;
@@ -64,8 +62,7 @@ KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/int
     g_interrupt_manager.clear_handler(kObjectInterrupt);
 }
 
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerClearDisablesHandler, "x86_64/interrupts",
-                            InterruptManagerTestInit) {
+KTEST_WITH_INIT_INTEGRATION(InterruptManagerClearDisablesHandler, "x86_64/interrupts", InterruptManagerTestInit) {
     register_frame_t frame{};
     frame.int_no = kClearedInterrupt;
 

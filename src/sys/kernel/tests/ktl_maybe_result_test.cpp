@@ -6,7 +6,7 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_maybe_basic_operations, "ktl_maybe_result") {
+KTEST(ktl_maybe_basic_operations, "ktl/maybe") {
     ktl::maybe<int> empty;
     ktl::maybe<int> value{5};
 
@@ -53,7 +53,7 @@ KTEST(ktl_maybe_basic_operations, "ktl_maybe_result") {
     KTEST_EXPECT_TRUE(value != empty);
 }
 
-KTEST(ktl_maybe_filter_algorithm, "ktl_maybe_result") {
+KTEST(ktl_maybe_filter_algorithm, "ktl/maybe") {
     ktl::maybe<int> arr[4] = {ktl::maybe<int>(1), ktl::maybe<int>(4), ktl::nothing, ktl::maybe<int>(9)};
 
     ktl::filter(arr, 4, [](int v) { return v >= 4; });
@@ -66,7 +66,7 @@ KTEST(ktl_maybe_filter_algorithm, "ktl_maybe_result") {
     KTEST_EXPECT_EQUAL(arr[3].value(), 9);
 }
 
-KTEST(ktl_result_ok_flow, "ktl_maybe_result") {
+KTEST(ktl_result_ok_flow, "ktl/result") {
     auto ok_result = Result<int, const char*>::ok(10);
 
     KTEST_REQUIRE_TRUE(ok_result.is_ok());
@@ -93,7 +93,7 @@ KTEST(ktl_result_ok_flow, "ktl_maybe_result") {
     KTEST_EXPECT_TRUE(ok_result == another_ok);
 }
 
-KTEST(ktl_result_error_flow, "ktl_maybe_result") {
+KTEST(ktl_result_error_flow, "ktl/result") {
     auto err_result = Result<int, const char*>::err("boom");
 
     KTEST_REQUIRE_TRUE(err_result.is_err());

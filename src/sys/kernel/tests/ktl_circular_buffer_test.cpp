@@ -32,7 +32,7 @@ struct tracking_value {
 
 }  // namespace
 
-KTEST(ktl_circular_buffer_push_pop, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_push_pop, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 4> buf;
 
     KTEST_REQUIRE_TRUE(buf.empty());
@@ -56,7 +56,7 @@ KTEST(ktl_circular_buffer_push_pop, "ktl_circular_buffer") {
     KTEST_EXPECT_TRUE(buf.size() == 2);
 }
 
-KTEST(ktl_circular_buffer_overwrite_when_full, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_overwrite_when_full, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 3> buf;
 
     buf.push(1);
@@ -73,7 +73,7 @@ KTEST(ktl_circular_buffer_overwrite_when_full, "ktl_circular_buffer") {
     KTEST_EXPECT_EQUAL(v.value(), 2);
 }
 
-KTEST(ktl_circular_buffer_emplace_moves, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_emplace_moves, "ktl/circular_buffer") {
     ktl::circular_buffer<tracking_value, 2> buf;
 
     tracking_value source{7};
@@ -88,7 +88,7 @@ KTEST(ktl_circular_buffer_emplace_moves, "ktl_circular_buffer") {
     KTEST_EXPECT_TRUE(v.value().moved);
 }
 
-KTEST(ktl_circular_buffer_copy_last_limits, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_copy_last_limits, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 5> buf;
     for (int i = 0; i < 5; ++i) { buf.push(i); }
 
@@ -102,7 +102,7 @@ KTEST(ktl_circular_buffer_copy_last_limits, "ktl_circular_buffer") {
     KTEST_EXPECT_EQUAL(dest[2], 4);
 }
 
-KTEST(ktl_circular_buffer_copy_last_shortens, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_copy_last_shortens, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 4> buf;
     buf.push(99);
 
@@ -116,7 +116,7 @@ KTEST(ktl_circular_buffer_copy_last_shortens, "ktl_circular_buffer") {
     KTEST_EXPECT_EQUAL(dest[3], -1);
 }
 
-KTEST(ktl_circular_buffer_pop_empty, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_pop_empty, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 2> buf;
 
     auto empty_pop = buf.pop();
@@ -125,7 +125,7 @@ KTEST(ktl_circular_buffer_pop_empty, "ktl_circular_buffer") {
     KTEST_EXPECT_FALSE(empty_peek.has_value());
 }
 
-KTEST(ktl_circular_buffer_for_each, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_for_each, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 3> buf;
     buf.push(10);
     buf.push(11);
@@ -138,7 +138,7 @@ KTEST(ktl_circular_buffer_for_each, "ktl_circular_buffer") {
     KTEST_EXPECT_EQUAL(sum, 11 + 12 + 13);
 }
 
-KTEST(ktl_circular_buffer_load_factor, "ktl_circular_buffer") {
+KTEST(ktl_circular_buffer_load_factor, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 5> buf;
 
     buf.push(1);

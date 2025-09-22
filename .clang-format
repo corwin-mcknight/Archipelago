@@ -8,5 +8,5 @@ AllowShortFunctionsOnASingleLine: All
 AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLambdasOnASingleLine: All
 AllowShortLoopsOnASingleLine: 'true'
-ColumnLimit: '110'
+ColumnLimit: '120'
 AlignConsecutiveAssignments: 'false'
