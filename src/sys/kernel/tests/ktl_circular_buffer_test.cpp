@@ -1,5 +1,7 @@
 #include <kernel/testing/testing.h>
 
+#if CONFIG_KERNEL_TESTING
+
 #include <ktl/circular_buffer>
 #include <ktl/maybe>
 
@@ -154,3 +156,5 @@ KTEST(ktl_circular_buffer_load_factor, "ktl/circular_buffer") {
     KTEST_REQUIRE_TRUE(buf.full());
     KTEST_EXPECT_TRUE(buf.load_factor() == 1.0f);
 }
+
+#endif  // CONFIG_KERNEL_TESTING

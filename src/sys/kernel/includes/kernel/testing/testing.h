@@ -4,6 +4,8 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <stddef.h>
+
 namespace kernel::testing {
 
 using test_fn = void (*)();
@@ -21,7 +23,9 @@ struct alignas(alignof(void*)) ktest {
     test_fn fn;
 };
 
+[[noreturn]]
 void test_runner();
+[[noreturn]]
 void abort(unsigned char exit_code = 1);
 
 }  // namespace kernel::testing
@@ -42,15 +46,14 @@ void abort(unsigned char exit_code = 1);
     static void name_sym##_noop_init() {}                                                               \
     static void name_sym##_body()
 
-#define KTEST_WITH_INIT_FLAGS(name_sym, module_literal, init_sym, flags_value)                        \
-    static void name_sym##_body();                                                                    \
-    static void init_sym();                                                                           \
-    static kernel::testing::ktest _kt_##name_sym KTEST_SEC = {#name_sym, module_literal, flags_value, \
-                                                              &init_sym, &name_sym##_body};           \
+#define KTEST_WITH_INIT_FLAGS(name_sym, module_literal, init_sym, flags_value)                                   \
+    static void name_sym##_body();                                                                               \
+    static void init_sym();                                                                                      \
+    static kernel::testing::ktest _kt_##name_sym KTEST_SEC = {#name_sym, module_literal, flags_value, &init_sym, \
+                                                              &name_sym##_body};                                 \
     static void name_sym##_body()
 
-#define KTEST(name_sym, module_literal) \
-    KTEST_WITH_FLAGS(name_sym, module_literal, kernel::testing::KTEST_FLAG_NONE)
+#define KTEST(name_sym, module_literal) KTEST_WITH_FLAGS(name_sym, module_literal, kernel::testing::KTEST_FLAG_NONE)
 
 #define KTEST_WITH_INIT(name_sym, module_literal, init_sym) \
     KTEST_WITH_INIT_FLAGS(name_sym, module_literal, init_sym, kernel::testing::KTEST_FLAG_NONE)
@@ -74,6 +77,16 @@ void ktest_require_equal(int actual, int expected, const char* file, int line, c
 void ktest_expect_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
                             const char* expected_str);
 void ktest_require_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
+                             const char* expected_str);
+
+// size_t overrides
+void ktest_expect_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                        const char* expected_str);
+void ktest_require_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                         const char* expected_str);
+void ktest_expect_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                            const char* expected_str);
+void ktest_require_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
                              const char* expected_str);
 
 #define KTEST_EXPECT(condition) ktest_expect(condition, __FILE__, __LINE__, #condition)

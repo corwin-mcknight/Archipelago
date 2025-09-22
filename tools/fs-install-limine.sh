@@ -22,9 +22,10 @@ xorriso -as mkisofs -b limine-cd.bin \
         -no-emul-boot -boot-load-size 4 -boot-info-table \
         --efi-boot limine-cd-efi.bin \
         -efi-boot-part --efi-boot-image --protective-msdos-label \
+        --quiet \
         sysroot -o image.iso
 
-./tools/limine/limine-deploy image.iso
+./tools/limine/limine-deploy --quiet image.iso
 
 
 cd $TOOLS_DIR

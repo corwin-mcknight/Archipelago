@@ -26,11 +26,10 @@ void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* h
     handlers[id].flags |= 0b10;
 
     // Trace this
-    g_log.trace("Registered interrupt {0} with handler {1:p}", id, (uint64_t)handler);
+    g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
-void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*),
-                                           uint64_t flags) {
+void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*), uint64_t flags) {
     handlers[id].handler.function = handler;
     handlers[id].flags = flags;
 
@@ -51,11 +50,11 @@ void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* re
     core_reentrant_state[core]++;
 
     // Ignore if it's 32, the timer interrupt
-    if (id != 32) { g_log.trace("im: START int {0} rep: {1}", id, core_reentrant_state[core] - 1); }
+    if (id != 32) { g_log.trace("im: START int 0x{0:x} rep: {1}", id, core_reentrant_state[core] - 1); }
 
     // Check if the interrupt is enabled
     if ((handlers[id].flags & InterruptHandlerEntry::ENABLED_MASK) == 0) {
-        g_log.warn("Interrupt {0} is not enabled", id);
+        g_log.warn("Interrupt 0x{0:x} is not enabled", id);
         return;
     }
 
@@ -63,12 +62,12 @@ void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* re
         // Function handler
         if (!handlers[id].handler.function(registers)) {
             // If the handler returns false, we should log an error
-            g_log.error("Interrupt {0} was not handled successfully", id);
+            g_log.error("Interrupt 0x{0:x} was not handled successfully", id);
         }
     } else {
         // Object handler
         if (!handlers[id].handler.object->handle_interrupt(registers)) {
-            g_log.error("Interrupt {0} was not handled successfully", id);
+            g_log.error("Interrupt 0x{0:x} was not handled successfully", id);
         }
     }
 

@@ -1,5 +1,7 @@
-#include <kernel/drivers/uart.h>
+
 #include <kernel/testing/testing.h>
+
+#if CONFIG_KERNEL_TESTING
 
 #include <ktl/algorithm>
 #include <ktl/fixed_string>
@@ -7,11 +9,10 @@
 #include <ktl/string_view>
 
 #include "kernel/config.h"
+#include "kernel/drivers/uart.h"
 #include "kernel/log.h"
 #include "kernel/time.h"
 #include "kernel/x86/ioport.h"
-
-#if CONFIG_KERNEL_TESTING
 
 extern "C" kernel::testing::ktest __start__ktests[], __stop__ktests[];
 
@@ -22,6 +23,7 @@ namespace {
 
 class TestRunner {
    public:
+    [[noreturn]]
     void run() {
         g_log.info("Entered kernel testing mode...");
         g_log.flush();
@@ -40,13 +42,11 @@ class TestRunner {
 
                 const char* test_name_cstr = command_buffer_ + 4;
                 const size_t test_name_length = command.size() - 4;
-                if (kernel::testing::ktest* test =
-                        find_test(ktl::string_view(test_name_cstr, test_name_length))) {
+                if (kernel::testing::ktest* test = find_test(ktl::string_view(test_name_cstr, test_name_length))) {
                     execute_test(*test);
                 } else {
-                    emit_harness_event(
-                        "@@HARNESS {{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}\n",
-                        test_name_cstr);
+                    emit_harness_event("@@HARNESS {{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}\n",
+                                       test_name_cstr);
                 }
             } else {
                 emit_harness_event("@@HARNESS {{\"event\":\"error\",\"message\":\"Unknown command: {0}\"}}\n",
@@ -55,16 +55,16 @@ class TestRunner {
         }
     }
 
+    [[noreturn]]
     void notify_abort(unsigned char exit_code) {
         if (current_test_) {
             if (!failure_reason_recorded_) {
                 ktl::fixed_string<128> reason;
-                ktl::format::format_to_buffer_raw(reason.m_buffer, sizeof(reason.m_buffer),
-                                                  "abort({0}) requested", static_cast<unsigned>(exit_code));
+                ktl::format::format_to_buffer_raw(reason.m_buffer, sizeof(reason.m_buffer), "abort({0}) requested",
+                                                  static_cast<unsigned>(exit_code));
                 record_failure(reason.c_str());
             }
-            send_test_end(*current_test_, "fail",
-                          failure_reason_recorded_ ? failure_reason_.c_str() : nullptr);
+            send_test_end(*current_test_, "fail", failure_reason_recorded_ ? failure_reason_.c_str() : nullptr);
             current_test_ = nullptr;
         }
 
@@ -110,14 +110,13 @@ class TestRunner {
                 test.name, module);
             return;
         }
-        emit_harness_event("@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"}}\n",
-                           test.name, module);
+        emit_harness_event("@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"}}\n", test.name, module);
     }
 
     void send_test_start(const kernel::testing::ktest& test) {
         auto current_time = kernel::time::ns_since_boot();
-        emit_harness_event("@@HARNESS {{\"event\":\"test_start\",\"name\":\"{0}\", \"timestamp\": {1}}}\n",
-                           test.name, current_time);
+        emit_harness_event("@@HARNESS {{\"event\":\"test_start\",\"name\":\"{0}\", \"timestamp\": {1}}}\n", test.name,
+                           current_time);
     }
 
     void send_test_end(const kernel::testing::ktest& test, const char* status, const char* reason = nullptr) {
@@ -137,8 +136,7 @@ class TestRunner {
     }
 
     void send_abort_event(unsigned char exit_code) const {
-        emit_harness_event("@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n",
-                           static_cast<unsigned>(exit_code));
+        emit_harness_event("@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n", static_cast<unsigned>(exit_code));
     }
 
     ktl::string_view read_command() {
@@ -225,8 +223,8 @@ constexpr const char* kRequirementLabel = "Requirement";
 
 void format_condition_failure(ktl::fixed_string<256>& buffer, const char* label, const char* condition_str,
                               const char* file, int line) {
-    ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), "{0} failed: {1} at {2}:{3}",
-                                      label, condition_str, file, line);
+    ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), "{0} failed: {1} at {2}:{3}", label,
+                                      condition_str, file, line);
 }
 
 void format_equality_failure(ktl::fixed_string<256>& buffer, const char* label, bool expect_equal, int actual,
@@ -234,14 +232,14 @@ void format_equality_failure(ktl::fixed_string<256>& buffer, const char* label, 
                              int line) {
     if (expect_equal) {
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer),
-                                          "{0} failed: {1} == {2} (lhs {3}, rhs {4}) at {5}:{6}", label,
-                                          actual_str, expected_str, actual, expected, file, line);
+                                          "{0} failed: {1} == {2} (lhs {3}, rhs {4}) at {5}:{6}", label, actual_str,
+                                          expected_str, actual, expected, file, line);
         return;
     }
 
     ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer),
-                                      "{0} failed: {1} != {2} (both {3}) at {4}:{5}", label, actual_str,
-                                      expected_str, actual, file, line);
+                                      "{0} failed: {1} != {2} (both {3}) at {4}:{5}", label, actual_str, expected_str,
+                                      actual, file, line);
 }
 
 }  // namespace
@@ -261,13 +259,13 @@ void ktest_require(bool condition, const char* file, int line, const char* condi
         g_runner.handle_assertion_failure(reason.c_str(), true);
     }
 }
-
+// int versions (existing)
 void ktest_expect_equal(int actual, int expected, const char* file, int line, const char* actual_str,
                         const char* expected_str) {
     if (actual != expected) {
         ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, true, actual, expected, actual_str, expected_str,
-                                file, line);
+        format_equality_failure(reason, kExpectationLabel, true, actual, expected, actual_str, expected_str, file,
+                                line);
         g_runner.handle_assertion_failure(reason.c_str(), false);
     }
 }
@@ -276,8 +274,8 @@ void ktest_require_equal(int actual, int expected, const char* file, int line, c
                          const char* expected_str) {
     if (actual != expected) {
         ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, true, actual, expected, actual_str, expected_str,
-                                file, line);
+        format_equality_failure(reason, kRequirementLabel, true, actual, expected, actual_str, expected_str, file,
+                                line);
         g_runner.handle_assertion_failure(reason.c_str(), true);
     }
 }
@@ -286,8 +284,8 @@ void ktest_expect_not_equal(int actual, int expected, const char* file, int line
                             const char* expected_str) {
     if (actual == expected) {
         ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, false, actual, expected, actual_str, expected_str,
-                                file, line);
+        format_equality_failure(reason, kExpectationLabel, false, actual, expected, actual_str, expected_str, file,
+                                line);
         g_runner.handle_assertion_failure(reason.c_str(), false);
     }
 }
@@ -296,8 +294,49 @@ void ktest_require_not_equal(int actual, int expected, const char* file, int lin
                              const char* expected_str) {
     if (actual == expected) {
         ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, false, actual, expected, actual_str, expected_str,
-                                file, line);
+        format_equality_failure(reason, kRequirementLabel, false, actual, expected, actual_str, expected_str, file,
+                                line);
+        g_runner.handle_assertion_failure(reason.c_str(), true);
+    }
+}
+
+// size_t versions
+void ktest_expect_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                        const char* expected_str) {
+    if (actual != expected) {
+        ktl::fixed_string<256> reason;
+        format_equality_failure(reason, kExpectationLabel, true, static_cast<int>(actual), static_cast<int>(expected),
+                                actual_str, expected_str, file, line);
+        g_runner.handle_assertion_failure(reason.c_str(), false);
+    }
+}
+
+void ktest_require_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                         const char* expected_str) {
+    if (actual != expected) {
+        ktl::fixed_string<256> reason;
+        format_equality_failure(reason, kRequirementLabel, true, static_cast<int>(actual), static_cast<int>(expected),
+                                actual_str, expected_str, file, line);
+        g_runner.handle_assertion_failure(reason.c_str(), true);
+    }
+}
+
+void ktest_expect_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                            const char* expected_str) {
+    if (actual == expected) {
+        ktl::fixed_string<256> reason;
+        format_equality_failure(reason, kExpectationLabel, false, static_cast<int>(actual), static_cast<int>(expected),
+                                actual_str, expected_str, file, line);
+        g_runner.handle_assertion_failure(reason.c_str(), false);
+    }
+}
+
+void ktest_require_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
+                             const char* expected_str) {
+    if (actual == expected) {
+        ktl::fixed_string<256> reason;
+        format_equality_failure(reason, kRequirementLabel, false, static_cast<int>(actual), static_cast<int>(expected),
+                                actual_str, expected_str, file, line);
         g_runner.handle_assertion_failure(reason.c_str(), true);
     }
 }

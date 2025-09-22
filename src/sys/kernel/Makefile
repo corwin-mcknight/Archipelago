@@ -37,7 +37,7 @@ override CWARNINGS += -Wall -Weffc++ -pedantic  \
 -Wlong-long \
 -Wmissing-field-initializers -Wmissing-format-attribute   \
 -Wmissing-include-dirs -Wmissing-noreturn \
--Wpacked  -Wpadded -Wpointer-arith \
+-Wpointer-arith \
 -Wredundant-decls \
 -Wshadow -Wstack-protector \
 -Wstrict-aliasing=2 -Wswitch-default \
@@ -45,7 +45,8 @@ override CWARNINGS += -Wall -Weffc++ -pedantic  \
 -Wunreachable-code -Wunused \
 -Wunused-parameter \
 -Wvariadic-macros \
--Wwrite-strings
+-Wwrite-strings \
+# -Wpacked  -Wpadded 
 
 override CXXFLAGS += \
 	-MMD -MP \
