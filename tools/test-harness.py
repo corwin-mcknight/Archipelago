@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -37,6 +38,7 @@ class AttemptLog:
 class TestResult:
     name: str
     outcome: str
+    module: Optional[str] = None
     requires_clean_env: bool = False
     attempts: List[AttemptLog] = field(default_factory=list)
 
@@ -312,6 +314,7 @@ class KernelHarness:
         timeout: float,
         retries: int,
         requires_clean_env: bool = False,
+        module: Optional[str] = None,
     ) -> TestResult:
         attempts: List[AttemptLog] = []
         max_attempts = 1 + max(0, retries)
@@ -397,6 +400,7 @@ class KernelHarness:
                 result = TestResult(
                     name=test_name,
                     outcome=outcome,
+                    module=module,
                     requires_clean_env=requires_clean_env,
                     attempts=attempts,
                 )
@@ -443,6 +447,7 @@ class KernelHarness:
                 result = TestResult(
                     name=test_name,
                     outcome=outcome,
+                    module=module,
                     requires_clean_env=requires_clean_env,
                     attempts=attempts,
                 )
@@ -458,6 +463,7 @@ class KernelHarness:
             result = TestResult(
                 name=test_name,
                 outcome=final_outcome,
+                module=module,
                 requires_clean_env=requires_clean_env,
                 attempts=attempts,
             )
@@ -550,7 +556,12 @@ class KernelHarness:
 def write_artifacts(base_dir: Optional[Path], result: TestResult) -> None:
     if base_dir is None:
         return
-    case_dir = base_dir / result.name
+    artifact_root = base_dir
+    if result.module:
+        components = [component for component in result.module.split("/") if component not in ("", ".", "..")]
+        for component in components:
+            artifact_root = artifact_root / component
+    case_dir = artifact_root / result.name
     case_dir.mkdir(parents=True, exist_ok=True)
 
     final_attempt = result.final_attempt
@@ -570,6 +581,7 @@ def write_artifacts(base_dir: Optional[Path], result: TestResult) -> None:
     meta = {
         "test": result.name,
         "outcome": result.outcome,
+        "module": result.module,
         "requires_clean_env": result.requires_clean_env,
         "attempts": [
             {
@@ -687,9 +699,7 @@ def main(argv: Sequence[str]) -> int:
         if artifact_dir.exists():
             for item in artifact_dir.iterdir():
                 if item.is_dir():
-                    for subitem in item.iterdir():
-                        subitem.unlink()
-                    item.rmdir()
+                    shutil.rmtree(item)
                 else:
                     item.unlink()
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -747,6 +757,7 @@ def main(argv: Sequence[str]) -> int:
                 timeout=args.test_timeout,
                 retries=args.retries,
                 requires_clean_env=requires_clean_env,
+                module=descriptor.module if descriptor else None,
             )
             results.append(result)
             write_artifacts(artifact_dir, result)
