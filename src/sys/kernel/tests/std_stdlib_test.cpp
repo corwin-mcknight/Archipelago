@@ -2,6 +2,8 @@
 #include <std/stdlib.h>
 #include <stddef.h>
 
+#if CONFIG_KERNEL_TESTING
+
 using namespace kernel::testing;
 
 KTEST(std_atoi_positive_negative, "std/stdlib") {
@@ -35,3 +37,5 @@ KTEST(std_itoa_base_variants, "std/stdlib") {
     KTEST_EXPECT_EQUAL(buffer16[7], 'F');
     KTEST_EXPECT_EQUAL(buffer16[8], '\0');
 }
+
+#endif

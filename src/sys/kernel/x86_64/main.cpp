@@ -59,8 +59,8 @@ extern "C" [[noreturn]] void _start(void) {
 
 #if CONFIG_KERNEL_TESTING
     kernel::testing::test_runner();
-#endif
+#else
     // Kernel failed to start.
     panic("Boot processor exited early");
-    // Processor is halted.
+#endif
 }

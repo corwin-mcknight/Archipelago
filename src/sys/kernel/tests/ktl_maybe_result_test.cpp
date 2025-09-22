@@ -1,5 +1,7 @@
 #include <kernel/testing/testing.h>
 
+#if CONFIG_KERNEL_TESTING
+
 #include <ktl/maybe>
 #include <ktl/result>
 #include <ktl/string_view>
@@ -127,3 +129,5 @@ KTEST(ktl_result_error_flow, "ktl/result") {
     auto another_err = Result<int, const char*>::err("oops");
     KTEST_EXPECT_TRUE(err_result != another_err);
 }
+
+#endif  // CONFIG_KERNEL_TESTING

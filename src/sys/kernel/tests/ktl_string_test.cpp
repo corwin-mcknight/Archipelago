@@ -1,7 +1,10 @@
 #include <kernel/testing/testing.h>
 
-#include <ktl/string>
+#if CONFIG_KERNEL_TESTING
+
 #include <stddef.h>
+
+#include <ktl/string>
 
 using namespace kernel::testing;
 
@@ -27,3 +30,5 @@ KTEST(ktl_strlen_supports_wide_char_type, "ktl/string") {
 
     KTEST_EXPECT_TRUE(len == 3);
 }
+
+#endif  // CONFIG_KERNEL_TESTING

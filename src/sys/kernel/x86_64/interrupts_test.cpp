@@ -1,5 +1,7 @@
-#include <kernel/interrupt.h>
 #include <kernel/testing/testing.h>
+
+#if CONFIG_KERNEL_TESTING
+#include <kernel/interrupt.h>
 #include <kernel/x86/registers.h>
 
 namespace {
@@ -76,3 +78,5 @@ KTEST_WITH_INIT_INTEGRATION(InterruptManagerClearDisablesHandler, "x86_64/interr
 
     KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
 }
+
+#endif  // CONFIG_KERNEL_TESTING

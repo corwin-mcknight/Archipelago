@@ -1,4 +1,6 @@
 #include <kernel/testing/testing.h>
+
+#if CONFIG_KERNEL_TESTING
 #include <stddef.h>
 
 #include <ktl/string_view>
@@ -73,3 +75,5 @@ KTEST(ktl_string_view_compare_lexicographic, "ktl/string_view") {
     KTEST_EXPECT_TRUE(view.compare("kern") > 0);
     KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
 }
+
+#endif  // CONFIG_KERNEL_TESTING

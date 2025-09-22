@@ -15,6 +15,7 @@ namespace hal {
 class IInterruptHandler {
    public:
     virtual bool handle_interrupt(register_frame_t* regs) = 0;
+    virtual ~IInterruptHandler() = default;
 };
 
 struct InterruptHandlerEntry {

@@ -1,4 +1,4 @@
 #pragma once
 
-void panic(const char * s);
-void hcf();
+[[noreturn]] void panic(const char * s);
+[[noreturn]] void hcf();

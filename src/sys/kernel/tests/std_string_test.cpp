@@ -2,6 +2,8 @@
 #include <std/string.h>
 #include <stddef.h>
 
+#if CONFIG_KERNEL_TESTING
+
 using namespace kernel::testing;
 
 KTEST(std_memcpy_basic, "std/string") {
@@ -151,3 +153,5 @@ KTEST(std_memset_zero_length, "std/string") {
 }
 
 KTEST(std_memcmp_zero_length_nullptr, "std/string") { KTEST_EXPECT_EQUAL(memcmp(nullptr, nullptr, 0), 0); }
+
+#endif
