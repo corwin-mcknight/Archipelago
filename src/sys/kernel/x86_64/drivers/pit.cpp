@@ -9,6 +9,8 @@
 #include "kernel/interrupt.h"
 #include "kernel/x86/descriptor_tables.h"
 
+namespace kernel::x86::drivers {
+
 void pit_timer::init() {
     kernel::time::init(resolution_ns());
     g_interrupt_manager.register_interrupt(kernel::x86::IRQ0, this, 0);
@@ -30,3 +32,5 @@ void pit_timer::set_phase(unsigned int divisor) {
     outb(0x40, (uint8_t)(divisor & 0xFF));  // Send Divisor Lo
     outb(0x40, (uint8_t)(divisor >> 8));    // Send Divisor Hi
 }
+
+}  // namespace kernel::x86::drivers

@@ -20,7 +20,7 @@
 extern "C" void init_global_constructors_array(void);
 
 kernel::driver::uart uart;
-pit_timer timer;
+kernel::x86::drivers::pit_timer timer;
 
 void init_log() {
     uart.init();
