@@ -23,7 +23,8 @@ DEPS := $(OBJS:.o=.d)
 
 override ASFLAGS += -g -f elf64
 
-override CFLAGS += -g
+override CFLAGS += -g -DLIMINE_API_REVISION=3 
+
 
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
 -Wextra -Waggregate-return -Wcast-align \
