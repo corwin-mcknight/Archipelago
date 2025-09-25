@@ -1,0 +1,53 @@
+# Doxygen configuration for Archipelago kernel sources
+
+# Project identity
+PROJECT_NAME           = "Archipelago Kernel"
+PROJECT_BRIEF          = "Minimal, security-focused x86_64 kernel"
+PROJECT_NUMBER         = $(ARCHIPELAGO_VERSION)
+OUTPUT_DIRECTORY       = $(DOCS_OUTPUT_DIR)
+CREATE_SUBDIRS         = YES
+
+# Input
+INPUT                  = $(KERNEL_DOCS_DIR)/README.md \
+                        $(KERNEL_DOCS_DIR)/architecture.md \
+                        $(KERNEL_DOCS_DIR)/testing.md \
+                        $(KERNEL_SRC_DIR)
+INCLUDE_PATH           = $(KERNEL_INCLUDE_DIR)
+FILE_PATTERNS          = *.h *.hpp *.c *.cc *.cpp *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */tests/*
+
+# Build behavior
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_METHODS  = YES
+INLINE_SOURCES         = YES
+SOURCE_BROWSER         = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+HAVE_DOT               = YES
+
+# Output formats
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+GENERATE_RTF           = NO
+GENERATE_TAGFILE       = $(DOCS_OUTPUT_DIR)/kernel.tag
+
+# Warnings & logs
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_LOGFILE           = $(DOCS_OUTPUT_DIR)/doxygen-warnings.log
+
+# Misc
+ALPHABETICAL_INDEX     = YES
+SORT_BY_SCOPE_NAME     = YES
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = YES
+USE_MDFILE_AS_MAINPAGE = $(KERNEL_DOCS_DIR)/README.md

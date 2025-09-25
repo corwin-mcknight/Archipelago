@@ -4,6 +4,8 @@
 #include "kernel/time.h"
 
 /// Represents a timer
+namespace kernel::x86::drivers {
+
 class pit_timer : public kernel::hal::IInterruptHandler {
    public:
     void init();                //< Initialise
@@ -13,3 +15,5 @@ class pit_timer : public kernel::hal::IInterruptHandler {
    private:
     void set_phase(unsigned int hz);  //< Set the resolution
 };
+
+}  // namespace kernel::x86::drivers

@@ -44,6 +44,11 @@ Once inside the development container, you can use the following commands to bui
   ```bash
   make clangd
   ```
+
+- **Generate kernel docs**: This runs Doxygen for the kernel sources.
+  ```bash
+  make docs
+  ```
 - **Full clean**: This removes all build artifacts and resets the build environment.
   ```bash
   make full-clean
