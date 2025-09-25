@@ -22,6 +22,10 @@ extern "C" void init_global_constructors_array(void);
 kernel::driver::uart uart;
 kernel::x86::drivers::pit_timer timer;
 
+__attribute__((used, section(".limine_requests_start"))) static volatile LIMINE_REQUESTS_START_MARKER;
+__attribute__((used, section(".limine_requests"))) static volatile LIMINE_BASE_REVISION(3);
+__attribute__((used, section(".limine_requests_end"))) static volatile LIMINE_REQUESTS_END_MARKER;
+
 void init_log() {
     uart.init();
     g_log.devices.push_back(&uart);

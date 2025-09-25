@@ -9,6 +9,7 @@ ENTRY(_start)
 /* MMU permissions */
 PHDRS
 {
+    limine_requests PT_LOAD;
     text    PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ; /* Execute + Read */
     rodata  PT_LOAD    FLAGS((1 << 2)) ;            /* Read only */
     data    PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ; /* Write + Read */
@@ -18,6 +19,13 @@ SECTIONS
 {
     . = 0xffffffff80000000;
  
+    /* Define a section to contain the Limine requests and assign it to its own PHDR */
+    .limine_requests : {
+        KEEP(*(.limine_requests_start))
+        KEEP(*(.limine_requests))
+        KEEP(*(.limine_requests_end))
+    } :limine_requests
+
     .text ALIGN(CONSTANT(MAXPAGESIZE)) : {
         *(.text .text.*)
     } :text
