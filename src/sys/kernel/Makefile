@@ -23,7 +23,7 @@ DEPS := $(OBJS:.o=.d)
 
 override ASFLAGS += -g -f elf64
 
-override CFLAGS += -g -DLIMINE_API_REVISION=3 
+override CFLAGS += -g -DLIMINE_API_REVISION=3  -D__x86_64__
 
 
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
@@ -76,6 +76,8 @@ override CXXFLAGS += \
 	-D OPTION_KTL_HARDEN \
 	-D ARCH_X86 \
 	-D ARCH_X86_64 \
+	-DLIMINE_API_REVISION=3 \
+	-D__x86_64__ \
 	-I $(PWD)/includes/std \
 	-I $(PWD)/includes
 
