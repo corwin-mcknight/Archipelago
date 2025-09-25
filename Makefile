@@ -23,10 +23,10 @@ install: kernel
 
 run: 
 	@clear
-	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 64
+	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 4
 
 debug: install
-	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 64
+	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128
 
 clean:
 	-@rm -r ${BUILD_DIR}/obj

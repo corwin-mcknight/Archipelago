@@ -12,6 +12,7 @@
 
 #include "kernel/config.h"
 #include "kernel/drivers/logging_device.h"
+#include "kernel/syncronization/spinlock.h"
 #include "kernel/time.h"
 
 namespace kernel {
@@ -39,20 +40,14 @@ struct log_message {
 
     log_message() = default;
     explicit log_message(ktime_t time, log_level level, uint64_t sequence, const char* message)
-        : timestamp(time),
-          level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
-          text(message) {}
+        : timestamp(time), level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence), text(message) {}
 
     explicit log_message(ktime_t time, log_level level, uint64_t sequence, const ktl::string_view message)
-        : timestamp(time),
-          level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
-          text(message) {}
+        : timestamp(time), level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence), text(message) {}
 
     explicit log_message(ktime_t time, log_level level, uint64_t sequence,
                          const ktl::fixed_string<max_message_size> message)
-        : timestamp(time),
-          level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence),
-          text(message) {}
+        : timestamp(time), level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence), text(message) {}
 
     // Move constructor
     log_message(log_message&& other) noexcept
@@ -88,9 +83,12 @@ class system_log {
     static constexpr size_t max_messages = 32;
     uint64_t last_seq = 0;
     ktl::circular_buffer<log_message, max_messages> messages;
+    kernel::synchronization::spinlock log_lock;
+    kernel::synchronization::spinlock flush_lock;
 
     template <log_level level, typename... Args>
     inline void log(const ktl::string_view fmt, Args... args) {
+        log_lock.lock();
         uint64_t seq = last_seq++;
 
         ktl::fixed_string<log_message::max_message_size> string;
@@ -99,6 +97,7 @@ class system_log {
         messages.emplace(log_message(kernel::time::now(), level, seq, string));
 
         if (this->m_autoflush) { this->flush(); }
+        log_lock.unlock();
     }
 
 // Specialize for log_level::debug
