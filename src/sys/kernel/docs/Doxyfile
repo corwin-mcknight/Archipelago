@@ -13,15 +13,23 @@ INPUT                  = $(KERNEL_DOCS_DIR)/README.md \
                         $(KERNEL_DOCS_DIR)/testing.md \
                         $(KERNEL_SRC_DIR)
 INCLUDE_PATH           = $(KERNEL_INCLUDE_DIR)
-FILE_PATTERNS          = *.h *.hpp *.c *.cc *.cpp *.md
+FILE_PATTERNS          = *.h *.hpp *.c *.cc *.cpp *.md \
+                        */ktl/*
+
+# Enable ktl-specific suffixes when present (extensionless headers are matched above)
+EXTENSION_MAPPING      = no_extension=C++
 RECURSIVE              = YES
-EXCLUDE_PATTERNS       = */tests/*
+EXCLUDE_PATTERNS       = 
 
 # Build behavior
-EXTRACT_ALL            = YES
+EXTRACT_ALL            = NO
 EXTRACT_PRIVATE        = YES
 EXTRACT_STATIC         = YES
 EXTRACT_LOCAL_METHODS  = YES
+EXTRACT_ANON_NSPACES   = YES
+INTERNAL_DOCS		   = YES
+SHOW_GROUPED_MEMB_INC  = YES
+SORT_MEMBERS_CTORS_1ST  = YES
 INLINE_SOURCES         = YES
 SOURCE_BROWSER         = YES
 REFERENCED_BY_RELATION = YES
@@ -34,14 +42,14 @@ HAVE_DOT               = YES
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 GENERATE_LATEX         = NO
-GENERATE_MAN           = NO
+GENERATE_MAN           = YES
 GENERATE_XML           = NO
 GENERATE_RTF           = NO
 GENERATE_TAGFILE       = $(DOCS_OUTPUT_DIR)/kernel.tag
 
 # Warnings & logs
 WARNINGS               = YES
-WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_UNDOCUMENTED   = YES
 WARN_IF_DOC_ERROR      = YES
 WARN_LOGFILE           = $(DOCS_OUTPUT_DIR)/doxygen-warnings.log
 
