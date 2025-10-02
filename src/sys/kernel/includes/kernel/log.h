@@ -12,6 +12,7 @@
 
 #include "kernel/config.h"
 #include "kernel/drivers/logging_device.h"
+#include "kernel/syncronization/semaphore.h"
 #include "kernel/syncronization/spinlock.h"
 #include "kernel/time.h"
 
@@ -80,24 +81,24 @@ struct log_message {
 
 class system_log {
    public:
-    static constexpr size_t max_messages = 32;
+    static constexpr size_t max_messages = 64;
     uint64_t last_seq = 0;
     ktl::circular_buffer<log_message, max_messages> messages;
-    kernel::synchronization::spinlock log_lock;
+    kernel::synchronization::Semaphore message_gate;
     kernel::synchronization::spinlock flush_lock;
 
     template <log_level level, typename... Args>
     inline void log(const ktl::string_view fmt, Args... args) {
-        log_lock.lock();
+        message_gate.acquire();
         uint64_t seq = last_seq++;
 
         ktl::fixed_string<log_message::max_message_size> string;
         ktl::format::format_to_buffer_raw(string.m_buffer, log_message::max_message_size, fmt, args...);
 
         messages.emplace(log_message(kernel::time::now(), level, seq, string));
+        message_gate.release();
 
-        if (this->m_autoflush) { this->flush(); }
-        log_lock.unlock();
+        if (this->m_autoflush) { flush(); }
     }
 
 // Specialize for log_level::debug

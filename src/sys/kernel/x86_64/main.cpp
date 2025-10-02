@@ -13,6 +13,7 @@
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 #include "kernel/panic.h"
+#include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
 #include "vendor/limine.h"  // IWYU pragma: keep
@@ -21,6 +22,7 @@ extern "C" void init_global_constructors_array(void);
 
 kernel::driver::uart uart;
 kernel::x86::drivers::pit_timer timer;
+kernel::cpu_core cpu_cores[CONFIG_MAX_CORES];
 
 __attribute__((used, section(".limine_requests_start"))) static volatile LIMINE_REQUESTS_START_MARKER;
 
@@ -35,6 +37,9 @@ void init_log() {
 }
 
 void core_init(uint32_t core_id) {
+    assert(core_id < CONFIG_MAX_CORES, "Core ID exceeds maximum cores");
+    cpu_cores[core_id].lapic_id = core_id;
+
     // Start basic hardware initialisation
     g_log.debug("cpu{0}: Initializing", core_id);
     kernel::x86::init_gdt(core_id);
@@ -52,6 +57,7 @@ void core_init(uint32_t core_id) {
     }
 
     g_log.debug("cpu{0}: Now running", core_id);
+    cpu_cores[core_id].initialized = true;
 }
 
 extern "C" [[noreturn]] void ap_startup(struct limine_mp_info* info) {
@@ -64,6 +70,11 @@ extern "C" [[noreturn]] void _start(void) {
     // Boot processor specific stuff...
     init_global_constructors_array();
     init_log();
+
+    for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
+        cpu_cores[i].initialized = false;
+        cpu_cores[i].lapic_id = 0xFFFFFFFF;
+    }
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
 
@@ -92,6 +103,21 @@ extern "C" [[noreturn]] void _start(void) {
     }
 
 #if CONFIG_KERNEL_TESTING
+    g_log.info("Waiting for all cores to initialize...");
+    // Wait for all cores to initialize by checking the initialized flag in cpu_cores
+    while (true) {
+        bool all_initialized = true;
+        for (size_t i = 0; i < mp_request.response->cpu_count; i++) {
+            if (!cpu_cores[i].initialized) {
+                all_initialized = false;
+                break;
+            }
+        }
+        if (all_initialized) { break; }
+    }
+
+    g_log.info("All {0} cores initialized", mp_request.response->cpu_count);
+    g_log.info("Starting kernel tests...");
     kernel::testing::test_runner();
 #else
     // Kernel failed to start.

@@ -12,10 +12,12 @@ SRC_DIRS  ?= ./
 ARCH := x86_64
 
 # Glob all CPP files in src
-ARCH_SRCS :=  $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp) $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
-CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp)
-STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp)
-TEST_SRCS := $(shell find $(SRC_DIRS)/tests -name *.cpp)
+ARCH_CPP_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp -not -path '*/tests/*')
+ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
+ARCH_SRCS := $(ARCH_CPP_SRCS) $(ARCH_ASM_SRCS)
+CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
+STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp -not -path '*/tests/*')
+TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/*.cpp')
 SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)

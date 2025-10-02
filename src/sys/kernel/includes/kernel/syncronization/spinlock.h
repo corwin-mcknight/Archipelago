@@ -27,7 +27,7 @@ class spinlock {
    private:
     static constexpr uint8_t unlocked_state = 0;
     static constexpr uint8_t locked_state = 1;
-    alignas(CONFIG_CPU_CACHE_LINE_SIZE) mutable uint8_t m_state;
+    alignas(CONFIG_CPU_CACHE_LINE_SIZE) mutable volatile uint8_t m_state;
 };
 
 }  // namespace kernel::synchronization

@@ -20,6 +20,7 @@ static const char* log_level_colors[] = {
 
 void kernel::system_log::flush() {
     flush_lock.lock();
+    message_gate.acquire();
     this->last_flushed_sequence = this->for_each(this->last_flushed_sequence, [&](const log_message* message) {
         char status = '-';
 
@@ -54,11 +55,11 @@ void kernel::system_log::flush() {
         ktl::fixed_string<32> front;
 
 #if CONFIG_KERNEL_LOG_COLORS
-        ktl::format::format_to_buffer_raw(front.m_buffer, front.length(), "{0:s}{1:03d}.{2:03d} {3:1c} | ",
+        ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:s}{1:03d}.{2:03d} {3:1c} | ",
                                           log_level_colors[color], time_seconds, time_ms, status);
 
 #else 
-            ktl::format::format_to_buffer_raw(front.m_buffer, front.length(),
+            ktl::format::format_to_buffer_raw(front.m_buffer, front.size(),
                                                 "{0:03d}.{1:03d} {2:1c} | ", time_seconds, time_ms, status);
 #endif
         for (auto dev : devices) {
@@ -77,7 +78,7 @@ void kernel::system_log::flush() {
 #endif
             dev->write_byte('\n');
         }
-
-        flush_lock.unlock();
     });
+    message_gate.release();
+    flush_lock.unlock();
 }

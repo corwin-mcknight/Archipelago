@@ -21,12 +21,12 @@ install: kernel
 	@ cd src/sys/kernel && make install BUILD_DIR=${BUILD_DIR}
 	@cd tools && ./fs-install-limine.sh
 
-run: 
+run:  install
 	@clear
 	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 4
 
 debug: install
-	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128
+	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128 -smp 4
 
 clean:
 	-@rm -r ${BUILD_DIR}/obj
