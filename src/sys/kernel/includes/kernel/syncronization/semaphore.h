@@ -6,12 +6,19 @@
 
 namespace kernel::synchronization {
 
-class Semaphore {
+/**
+ * A semaphore utilizing an atomic counter to manage access to a resource.
+ * This implementation utilizes a spin-wait mechanism to block threads when the
+ * semaphore count is zero.
+ * @author Corwin McKnight
+ */
+class semaphore {
    public:
-    explicit constexpr Semaphore(uint32_t initial_count = 1) : m_count(initial_count) {}
-    Semaphore(const Semaphore&) = delete;
-    Semaphore& operator=(const Semaphore&) = delete;
+    explicit constexpr semaphore(uint32_t initial_count = 1) : m_count(initial_count) {}
+    semaphore(const semaphore&) = delete;
+    semaphore& operator=(const semaphore&) = delete;
 
+    /// Acquire the semaphore, blocking if necessary.
     void acquire() {
         while (true) {
             uint32_t current = __atomic_load_n(&m_count, __ATOMIC_RELAXED);
@@ -23,6 +30,8 @@ class Semaphore {
         }
     }
 
+    /// Try to acquire the semaphore without blocking.
+    /// @return true if the semaphore was acquired, false otherwise.
     bool try_acquire() {
         uint32_t current = __atomic_load_n(&m_count, __ATOMIC_RELAXED);
         while (current != 0) {

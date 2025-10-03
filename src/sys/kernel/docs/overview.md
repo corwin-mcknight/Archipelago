@@ -26,11 +26,11 @@ Entitlements on the handle can be modified via system calls. However, a handle c
 ## Memory allocation
 Archipelago's kernel contains the page-frame allocator, the physical memory manager, the virtual memory manager, and allows access via handles to VMOs.
 
-Generally, kernel objects are allocated via a SLAB arena allocator created for each specific kernel object type. A minimum amount is statically allocated at boot time until the kernel is fully initialized and can manage it's memory dynamically. The system that allows for this to happen safely is the Archipelago Unified Memory Interface  (AUMI, pronounced oo-me). As kernel objects are allocated and perfectly aligned to the page, there is no fragmentation and all of memory can be perfectly used by them.
+Generally, kernel objects are allocated via a SLAB arena allocator created for each specific kernel object type. A minimum amount is statically allocated at boot time until the kernel is fully initialized and can manage it's memory dynamically. The system that allows for this to happen safely is the Archipelago Unified Memory Interface  (UMI, pronounced oo-me). As kernel objects are allocated and perfectly aligned to the page, there is no fragmentation and all of memory can be perfectly used by them.
 
 Dynamic data can be allocated on the kernel's unified heap. The kernel has a dynamic temporary memory pool that can be used for buffers.
 
-AUMI handles wiping of previous data, as it tracks on a per proto-object basis it's allocation status. Freeing is also handled by AUMI, as it will mark the object as free and wipe it at some point before it's next use. This means that allocating and de-allocating a kernel object is incredibly fast, as it is just a matter of updating a bitmask.
+UMI handles wiping of previous data, as it tracks on a per proto-object basis it's allocation status. Freeing is also handled by UMI, as it will mark the object as free and wipe it at some point before it's next use. This means that allocating and de-allocating a kernel object is incredibly fast, as it is just a matter of updating a bitmask.
 
 ## The Scheduler
 
