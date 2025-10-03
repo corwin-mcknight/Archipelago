@@ -85,5 +85,18 @@ struct kfmt_printer<char> {
     }
 };
 
+template <>
+struct kfmt_printer<unsigned char> {
+    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, unsigned char value) {
+        if (args.specifier == 'c') {
+            buffer[index++] = (char)value;
+            return;
+        } else {
+            // Invoke int printer
+            kfmt_printer<unsigned int>::print(args, buffer, buffer_max, index, (unsigned int)value);
+        }
+    }
+};
+
 }  // namespace format
 }  // namespace ktl

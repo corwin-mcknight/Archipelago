@@ -39,9 +39,9 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
         }
 
         format_args fmtargs;
-        fmtargs.specifier = 'd';
-        fmtargs.width = 0;
-        fmtargs.zero_padded = false;
+        fmtargs.specifier     = 'd';
+        fmtargs.width         = 0;
+        fmtargs.zero_padded   = false;
         fmtargs.right_aligned = true;
 
         // We have an argument specifier, parse it.
@@ -84,10 +84,10 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
         }
 
         if (argument_index < sizeof...(args)) {
-            size_t i = 0;
+            size_t i   = 0;
             bool found = false;
-            ((i++ == argument_index ? found = true, kfmt_printer<ktl::decay_t<decltype(args)>>::print(
-                                                        fmtargs, buffer, buffer_max, buffer_index, args)
+            ((i++ == argument_index ? found = true,
+              kfmt_printer<ktl::decay_t<decltype(args)>>::print(fmtargs, buffer, buffer_max, buffer_index, args)
                                     : void()),
              ...);
             if (!found) { --format_index; }

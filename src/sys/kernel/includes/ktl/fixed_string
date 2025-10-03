@@ -7,8 +7,7 @@
 
 namespace ktl {
 
-template <size_t N>
-class fixed_string {
+template <size_t N> class fixed_string {
    public:
     char m_buffer[N];
 
@@ -43,8 +42,7 @@ class fixed_string {
 
     size_t size() const { return N; }
 
-    template <typename F>
-    void for_each(F func) const {
+    template <typename F> void for_each(F func) const {
         size_t len = length();
         for (size_t i = 0; i < len; i++) { func(m_buffer[i]); }
     }

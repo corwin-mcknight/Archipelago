@@ -11,15 +11,11 @@ class string_view {
     constexpr string_view(const string_view& other) = default;
     constexpr string_view(const char* str, size_t count) : m_ptr(str), m_size(count) {}
     constexpr string_view(const char* str) : m_ptr(str), m_size(ktl::strlen(str)) {}
-    // string_view(const ktl::string str) : m_ptr(str.data()), m_size(str.size()) {}
 
     // Copy assignment
     constexpr string_view& operator=(const string_view& other) = default;
-
     constexpr const char* data() const { return m_ptr; }
     constexpr size_t size() const { return m_size; }
-
-    // operator ktl::string() const { return std::string(m_ptr, m_size); }
 
     constexpr size_t find(char c) const {
         for (size_t i = 0; i < m_size; i++) {
@@ -53,7 +49,7 @@ class string_view {
 
     constexpr int compare(const char* s) const {
         size_t other_len = ktl::strlen(s);
-        size_t min_len = ktl::min(m_size, other_len);
+        size_t min_len   = ktl::min(m_size, other_len);
 
         for (size_t i = 0; i < min_len; i++) {
             unsigned char lhs = static_cast<unsigned char>(m_ptr[i]);
