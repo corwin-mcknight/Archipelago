@@ -22,8 +22,8 @@ namespace kernel {
 enum class log_level : uint8_t {
     trace = 0b000,
     debug = 0b001,
-    info = 0b010,
-    warn = 0b011,
+    info  = 0b010,
+    warn  = 0b011,
     error = 0b100,
     fatal = 0b101,
 };
@@ -31,9 +31,9 @@ enum class log_level : uint8_t {
 /// A log message is a 256 byte structure that contains a
 /// timestamp, a level, a sequence number, and a message.
 struct log_message {
-    constexpr static size_t max_size = 256;
+    constexpr static size_t max_size         = 256;
     constexpr static size_t max_message_size = max_size - 16;
-    constexpr static size_t sequence_bits = 60;
+    constexpr static size_t sequence_bits    = 60;
 
     ktime_t timestamp;   // 8 bytes
     uint64_t level_seq;  // 8 bytes, 60 bits for sequence, a nibble for level
@@ -62,7 +62,7 @@ struct log_message {
     log_message& operator=(const log_message& other) noexcept {
         timestamp = other.timestamp;
         level_seq = other.level_seq;
-        text = other.text;
+        text      = other.text;
         return *this;
     }
 
@@ -70,7 +70,7 @@ struct log_message {
     log_message& operator=(log_message&& other) noexcept {
         timestamp = other.timestamp;
         level_seq = other.level_seq;
-        text = ktl::move(other.text);
+        text      = ktl::move(other.text);
         return *this;
     }
 
@@ -82,14 +82,13 @@ struct log_message {
 class system_log {
    public:
     static constexpr size_t max_messages = 64;
-    uint64_t last_seq = 0;
+    uint64_t last_seq                    = 0;
 
     ktl::circular_buffer<log_message, max_messages> messages;
     kernel::synchronization::semaphore message_gate;
     kernel::synchronization::spinlock flush_lock;
 
-    template <log_level level, typename... Args>
-    inline void log(const ktl::string_view fmt, Args... args) {
+    template <log_level level, typename... Args> inline void log(const ktl::string_view fmt, Args... args) {
         message_gate.acquire();
         uint64_t seq = last_seq++;
 
@@ -103,10 +102,9 @@ class system_log {
     }
 
 // Specialize for log_level::debug
-#define LOG_LEVEL_HELPER(thelevel)                                   \
-    template <typename... Args>                                      \
-    inline void thelevel(const ktl::string_view fmt, Args... args) { \
-        log<log_level::thelevel>(fmt, args...);                      \
+#define LOG_LEVEL_HELPER(thelevel)                                                               \
+    template <typename... Args> inline void thelevel(const ktl::string_view fmt, Args... args) { \
+        log<log_level::thelevel>(fmt, args...);                                                  \
     }
 
     LOG_LEVEL_HELPER(trace)
@@ -116,8 +114,7 @@ class system_log {
     LOG_LEVEL_HELPER(error)
     LOG_LEVEL_HELPER(fatal)
 
-    template <typename F>
-    uint64_t for_each(uint64_t minimum_sequence_id, F func) {
+    template <typename F> uint64_t for_each(uint64_t minimum_sequence_id, F func) {
         uint64_t next_sequence = minimum_sequence_id;
         messages.for_each([&next_sequence, func](const log_message message) {
             if (message.sequence() >= next_sequence) {
@@ -133,7 +130,7 @@ class system_log {
 
    private:
     uint64_t last_flushed_sequence = 0;
-    bool m_autoflush = true;
+    bool m_autoflush               = true;
     [[maybe_unused]] char pad[7];  // Ensure 64-byte alignment
 };
 

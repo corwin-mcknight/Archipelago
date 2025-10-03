@@ -23,8 +23,7 @@ typedef intptr_t result_t;
 
 enum class ResultType { Ok, Err };
 
-template <typename T, typename E>
-struct Result {
+template <typename T, typename E> struct Result {
     union {
         T ok;
         E err;
@@ -75,14 +74,14 @@ struct Result {
     static Result<T, E> ok(T value) {
         Result<T, E> res;
         res.value.ok = value;
-        res.type = ResultType::Ok;
+        res.type     = ResultType::Ok;
         return res;
     }
 
     static Result<T, E> err(E value) {
         Result<T, E> res;
         res.value.err = value;
-        res.type = ResultType::Err;
+        res.type      = ResultType::Err;
         return res;
     }
 
@@ -95,24 +94,20 @@ struct Result {
 
     bool operator!=(const Result<T, E>& other) const { return !(*this == other); }
 
-    template <typename F>
-    auto map(F&& func) const -> Result<decltype(func(value.ok)), E> {
+    template <typename F> auto map(F&& func) const -> Result<decltype(func(value.ok)), E> {
         if (is_err()) { return Result<decltype(func(value.ok)), E>::err(value.err); }
         return Result<decltype(func(value.ok)), E>::ok(func(value.ok));
     }
 
     // This function assumes that the function returns a Result
-    template <typename F>
-    auto and_then(F&& func) const -> decltype(func(value.ok)) {
+    template <typename F> auto and_then(F&& func) const -> decltype(func(value.ok)) {
         if (is_err()) {
-            return Result<decltype(func(value.ok).value.ok), decltype(func(value.ok).value.err)>::err(
-                value.err);
+            return Result<decltype(func(value.ok).value.ok), decltype(func(value.ok).value.err)>::err(value.err);
         }
         return func(value.ok);
     }
 
-    template <typename F>
-    auto or_else(F&& func) const -> decltype(func(value.err)) {
+    template <typename F> auto or_else(F&& func) const -> decltype(func(value.err)) {
         if (is_ok()) { return ok(value.ok); }
         return func(value.err);
     }

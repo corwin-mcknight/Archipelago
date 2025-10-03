@@ -4,8 +4,7 @@
 
 namespace ktl {
 
-template <typename T, size_t N>
-class static_vector : public static_array<T, N> {
+template <typename T, size_t N> class static_vector : public static_array<T, N> {
    public:
     void push_back(T value) {
         if (m_count == N) { return; }

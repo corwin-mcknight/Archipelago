@@ -2,18 +2,9 @@
 
 namespace ktl {
 
-template <typename T>
-constexpr T const& max(T const& a, T const& b) {
-    return a > b ? a : b;
-}
-
-template <typename T>
-constexpr T const& min(T const& a, T const& b) {
-    return a < b ? a : b;
-}
-
-template <class T>
-constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
+template <typename T> constexpr T const& max(T const& a, T const& b) { return a > b ? a : b; }
+template <typename T> constexpr T const& min(T const& a, T const& b) { return a < b ? a : b; }
+template <class T> constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
     return (v < lo) ? lo : (hi < v) ? hi : v;
 }
 

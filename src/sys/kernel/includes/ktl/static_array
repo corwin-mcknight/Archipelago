@@ -7,8 +7,7 @@
 
 namespace ktl {
 
-template <typename T, size_t N>
-class static_array {
+template <typename T, size_t N> class static_array {
    public:
     void clear() { memset(&m_buffer, 0, sizeof(T) * N); }
     size_t capacity() const { return N; }

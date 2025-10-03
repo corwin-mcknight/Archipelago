@@ -23,7 +23,7 @@ install: kernel
 
 run:  install
 	@clear
-	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 4
+	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 1
 
 debug: install
 	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128 -smp 4

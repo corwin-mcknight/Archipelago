@@ -9,12 +9,11 @@
 
 namespace ktl {
 
-template <typename T, size_t N>
-class circular_buffer {
+template <typename T, size_t N> class circular_buffer {
    public:
     void push(T value) {
         buffer[tail] = value;
-        tail = (tail + 1) % N;
+        tail         = (tail + 1) % N;
         if (!full()) {
             count++;
         } else {
@@ -24,7 +23,7 @@ class circular_buffer {
 
     void emplace(T&& value) {
         buffer[tail] = ktl::move(value);
-        tail = (tail + 1) % N;
+        tail         = (tail + 1) % N;
         if (count < N) {
             count++;
         } else {
@@ -36,7 +35,7 @@ class circular_buffer {
         if (empty()) { return ktl::nothing; }
 
         T value = buffer[head];
-        head = (head + 1) % N;
+        head    = (head + 1) % N;
         count--;
         return value;
     }
@@ -51,9 +50,9 @@ class circular_buffer {
         if (n == 0 || count == 0) { return 0; }
 
         size_t available = ktl::min(count, N);
-        size_t to_copy = ktl::clamp(n, (size_t)1, available);
+        size_t to_copy   = ktl::clamp(n, (size_t)1, available);
 
-        size_t start = (head + available - to_copy) % N;
+        size_t start     = (head + available - to_copy) % N;
         for (size_t i = 0; i < to_copy; ++i) { buf[i] = buffer[(start + i) % N]; }
 
         return to_copy;
@@ -65,13 +64,12 @@ class circular_buffer {
     bool full() const { return count >= N; }
     float load_factor() const { return static_cast<float>(count) / static_cast<float>(N); }
 
-    template <typename F>
-    void for_each(F callback) {
+    template <typename F> void for_each(F callback) {
         for (size_t i = 0; i < count; i++) { callback(buffer[(head + i) % N]); }
     }
 
    private:
-    size_t count = 0;
+    size_t count      = 0;
     unsigned int head = 0;
     unsigned int tail = 0;
     T buffer[N];

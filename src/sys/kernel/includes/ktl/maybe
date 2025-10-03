@@ -6,21 +6,16 @@
 
 namespace ktl {
 
-template <typename T>
-class maybe;
+template <typename T> class maybe;
 
 struct nothing_t {
     explicit constexpr nothing_t(int) {}
-    template <typename T>
-    operator maybe<T>() const {
-        return maybe<T>();
-    }
+    template <typename T> operator maybe<T>() const { return maybe<T>(); }
 };
 
 inline constexpr nothing_t nothing{0xBADC0DE};
 
-template <typename T>
-class maybe {
+template <typename T> class maybe {
    private:
     bool m_has_value;
     T m_value;
@@ -51,33 +46,28 @@ class maybe {
 
     // Monadic operations
 
-    template <typename U>
-    T value_or(U&& default_value) const {
+    template <typename U> T value_or(U&& default_value) const {
         if (m_has_value) { return m_value; }
         return static_cast<T>(default_value);
     }
 
-    template <typename F>
-    auto map(F&& func) const -> maybe<decltype(func(m_value))> {
+    template <typename F> auto map(F&& func) const -> maybe<decltype(func(m_value))> {
         if (!m_has_value) { return nothing; }
         return maybe<decltype(func(m_value))>(func(m_value));
     }
 
     /// Flat map
-    template <typename F>
-    auto and_then(F&& func) const -> decltype(func(m_value)) {
+    template <typename F> auto and_then(F&& func) const -> decltype(func(m_value)) {
         if (!m_has_value) { return nothing; }
         return func(m_value);
     }
 
-    template <typename F>
-    maybe<T> or_else(F&& func) const {
+    template <typename F> maybe<T> or_else(F&& func) const {
         if (m_has_value) { return *this; }
         return func();
     }
 
-    template <typename F>
-    auto map_or(F&& func, const T& default_value) const {
+    template <typename F> auto map_or(F&& func, const T& default_value) const {
         if (!m_has_value) { return func(default_value); }
         return func(m_value);
     }
@@ -86,23 +76,20 @@ class maybe {
     /// @tparam F
     /// @param predicate The predicate
     /// @return Original maybe or nothing
-    template <typename F>
-    auto filter(F&& predicate) const -> maybe<T> {
+    template <typename F> auto filter(F&& predicate) const -> maybe<T> {
         if (!m_has_value) { return nothing; }
         if (predicate(m_value)) { return *this; }
         return nothing;
     }
 };
 
-template <typename T, typename F>
-void filter(maybe<T>* arr, int count, F&& func) {
+template <typename T, typename F> void filter(maybe<T>* arr, int count, F&& func) {
     for (int i = 0; i < count; i++) { arr[i] = arr[i].filter(func); }
 }
 
 };  // namespace ktl
 
-template <>
-struct ktl::format::kfmt_printer<ktl::nothing_t> {
+template <> struct ktl::format::kfmt_printer<ktl::nothing_t> {
     static void print(format_args args, char* buffer, size_t& index, ktl::nothing_t value) {
         UNUSED(args);
         UNUSED(value);
@@ -112,8 +99,7 @@ struct ktl::format::kfmt_printer<ktl::nothing_t> {
     }
 };
 
-template <typename T>
-struct ktl::format::kfmt_printer<ktl::maybe<T>> {
+template <typename T> struct ktl::format::kfmt_printer<ktl::maybe<T>> {
     static void print(format_args args, char* buffer, size_t& index, ktl::maybe<T>& arg) {
         if (arg.has_value()) {
             return kfmt_printer<T>::print(args, buffer, index, arg.value());

@@ -12,12 +12,12 @@
 #include "kernel/drivers/uart.h"
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
+#include "kernel/mm/page.h"
 #include "kernel/panic.h"
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
 #include "vendor/limine.h"  // IWYU pragma: keep
-
 extern "C" void init_global_constructors_array(void);
 
 kernel::driver::uart uart;
@@ -73,7 +73,7 @@ extern "C" [[noreturn]] void _start(void) {
 
     for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
         cpu_cores[i].initialized = false;
-        cpu_cores[i].lapic_id = 0xFFFFFFFF;
+        cpu_cores[i].lapic_id    = 0xFFFFFFFF;
     }
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
@@ -101,6 +101,8 @@ extern "C" [[noreturn]] void _start(void) {
                              __ATOMIC_SEQ_CST);
         }
     }
+
+    kernel::mm::vm_page test_page(0x1400, kernel::mm::vm_page_state::WIRED, 0b111);
 
 #if CONFIG_KERNEL_TESTING
     g_log.info("Waiting for all cores to initialize...");
