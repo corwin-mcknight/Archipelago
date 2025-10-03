@@ -5,20 +5,18 @@
 #include <kernel/x86/registers.h>
 
 namespace {
-constexpr unsigned kFunctionInterrupt = 45;
-constexpr unsigned kObjectInterrupt = 46;
-constexpr unsigned kClearedInterrupt = 47;
+constexpr unsigned kernel_test_interrupt_no = 45;
 
 int g_function_handler_calls;
 register_frame_t* g_function_handler_last_regs;
 
-bool TestFunctionHandler(register_frame_t* regs) {
+bool interrupt_test_function(register_frame_t* regs) {
     ++g_function_handler_calls;
     g_function_handler_last_regs = regs;
     return true;
 }
 
-struct CountingHandler : kernel::hal::IInterruptHandler {
+struct counting_handler : kernel::hal::IInterruptHandler {
     bool return_value = true;
     int call_count = 0;
     register_frame_t* last_regs = nullptr;
@@ -39,42 +37,42 @@ static void InterruptManagerTestInit() {
 
 KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesFunctionHandler, "x86_64/interrupts", InterruptManagerTestInit) {
     register_frame_t frame{};
-    frame.int_no = kFunctionInterrupt;
+    frame.int_no = kernel_test_interrupt_no;
 
-    g_interrupt_manager.register_interrupt(kFunctionInterrupt, &TestFunctionHandler, 0);
-    g_interrupt_manager.dispatch_interrupt(kFunctionInterrupt, &frame);
+    g_interrupt_manager.register_interrupt(kernel_test_interrupt_no, &interrupt_test_function, 0);
+    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
 
     KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
     KTEST_EXPECT_TRUE(g_function_handler_last_regs == &frame);
 
-    g_interrupt_manager.clear_handler(kFunctionInterrupt);
+    g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
 }
 
 KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/interrupts", InterruptManagerTestInit) {
-    CountingHandler handler{};
+    counting_handler handler{};
     register_frame_t frame{};
-    frame.int_no = kObjectInterrupt;
+    frame.int_no = kernel_test_interrupt_no;
 
-    g_interrupt_manager.register_interrupt(kObjectInterrupt, &handler, 0);
-    g_interrupt_manager.dispatch_interrupt(kObjectInterrupt, &frame);
+    g_interrupt_manager.register_interrupt(kernel_test_interrupt_no, &handler, 0);
+    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
 
     KTEST_EXPECT_EQUAL(handler.call_count, 1);
     KTEST_EXPECT_TRUE(handler.last_regs == &frame);
 
-    g_interrupt_manager.clear_handler(kObjectInterrupt);
+    g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
 }
 
 KTEST_WITH_INIT_INTEGRATION(InterruptManagerClearDisablesHandler, "x86_64/interrupts", InterruptManagerTestInit) {
     register_frame_t frame{};
-    frame.int_no = kClearedInterrupt;
+    frame.int_no = kernel_test_interrupt_no;
 
-    g_interrupt_manager.register_interrupt(kClearedInterrupt, &TestFunctionHandler, 0);
-    g_interrupt_manager.dispatch_interrupt(kClearedInterrupt, &frame);
+    g_interrupt_manager.register_interrupt(kernel_test_interrupt_no, &interrupt_test_function, 0);
+    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
 
     KTEST_REQUIRE_EQUAL(g_function_handler_calls, 1);
 
-    g_interrupt_manager.clear_handler(kClearedInterrupt);
-    g_interrupt_manager.dispatch_interrupt(kClearedInterrupt, &frame);
+    g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
+    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
 
     KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
 }

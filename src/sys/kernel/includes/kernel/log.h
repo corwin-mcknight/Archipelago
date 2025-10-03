@@ -83,8 +83,9 @@ class system_log {
    public:
     static constexpr size_t max_messages = 64;
     uint64_t last_seq = 0;
+
     ktl::circular_buffer<log_message, max_messages> messages;
-    kernel::synchronization::Semaphore message_gate;
+    kernel::synchronization::semaphore message_gate;
     kernel::synchronization::spinlock flush_lock;
 
     template <log_level level, typename... Args>
