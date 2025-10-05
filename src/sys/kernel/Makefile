@@ -17,8 +17,9 @@ ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
 ARCH_SRCS := $(ARCH_CPP_SRCS) $(ARCH_ASM_SRCS)
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp -not -path '*/tests/*')
+MM_SRCS := $(shell find $(SRC_DIRS)/mm -name *.cpp -not -path '*/tests/*')
 TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/*.cpp')
-SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(TEST_SRCS)
+SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(MM_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
@@ -54,7 +55,7 @@ override CWARNINGS += -Wall -Weffc++ -pedantic  \
 override CXXFLAGS += \
 	-MMD -MP \
 	-g \
-	-Og \
+	-O2 \
 	-fvisibility=hidden \
 	-pipe \
     -std=c++20 \
@@ -63,6 +64,7 @@ override CXXFLAGS += \
 	-nostdlib \
     -fno-stack-protector \
     -fno-stack-check \
+	-fno-exceptions \
     -fno-lto \
 	-fno-rtti \
     -fno-PIE \
@@ -76,6 +78,7 @@ override CXXFLAGS += \
     -mno-red-zone \
     -mcmodel=kernel \
 	-D OPTION_KTL_HARDEN \
+	-D PRODUCT_DEBUG \
 	-D ARCH_X86 \
 	-D ARCH_X86_64 \
 	-DLIMINE_API_REVISION=3 \
