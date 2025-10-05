@@ -81,6 +81,8 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
 
+    g_early_heap.debug_print_state();
+
 #if CONFIG_KERNEL_TESTING
     g_log.info("Starting kernel tests...");
     kernel::testing::test_runner();

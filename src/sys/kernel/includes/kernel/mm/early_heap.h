@@ -3,22 +3,23 @@
 #include <stdint.h>
 
 namespace kernel::mm {
+
+struct early_heap_block;
+
 class early_heap {
    public:
-    void on_boot(uintptr_t start, size_t size);
+    void on_boot(uintptr_t start, uintptr_t end);
     void debug_print_state();
 
-    void *alloc_from_head(size_t size, size_t alignment = 1);
-    void *alloc_from_tail(size_t size, size_t alignment = 1);
-    void *alloc_page(size_t count);
+    void *alloc(size_t size, size_t alignment = 1);
+    void free(void *ptr);
 
-    template <typename T> T *alloc_object() { return static_cast<T *>(alloc_from_head(sizeof(T), alignof(T))); }
+    template <typename T> T *alloc_object() { return static_cast<T *>(alloc(sizeof(T), alignof(T))); }
 
    private:
+    early_heap_block *m_head;
     uintptr_t heap_start;
     uintptr_t heap_end;
-    uintptr_t current_head;
-    uintptr_t current_tail;
 };
 }  // namespace kernel::mm
 
