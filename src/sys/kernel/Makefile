@@ -50,18 +50,23 @@ override CWARNINGS += -Wall -Weffc++ -pedantic  \
 -Wunused-parameter \
 -Wvariadic-macros \
 -Wwrite-strings \
-# -Wpacked  -Wpadded 
+-Wframe-larger-than=2048
 
 override CXXFLAGS += \
 	-MMD -MP \
 	-g \
-	-O2 \
+	-Og \
 	-fvisibility=hidden \
 	-pipe \
     -std=c++20 \
     -ffreestanding \
 	-fno-builtin \
 	-nostdlib \
+	-fno-omit-frame-pointer \
+	-fvisibility=hidden -fvisibility-inlines-hidden \
+	-fstrict-vtable-pointers \
+	-ftrivial-auto-var-init=pattern \
+	-fstrict-aliasing -Wstrict-aliasing=2 \
     -fno-stack-protector \
     -fno-stack-check \
 	-fno-exceptions \
@@ -77,7 +82,6 @@ override CXXFLAGS += \
     -mno-sse2 \
     -mno-red-zone \
     -mcmodel=kernel \
-	-D OPTION_KTL_HARDEN \
 	-D PRODUCT_DEBUG \
 	-D ARCH_X86 \
 	-D ARCH_X86_64 \
