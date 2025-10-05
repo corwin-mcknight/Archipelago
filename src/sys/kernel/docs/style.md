@@ -10,6 +10,8 @@ Coding in C++:
 * Variables, functions, methods, files, directories, namespaces, and types should use `snake_case`.
 * Classes and structs should use `CamelCase`.
 * Constants and macros should use `UPPER_SNAKE_CASE`.
+* Do not use prefixes like kAppleStyle or m_ for member variables.
+* Use `this->` to access member variables and methods within class methods.
 * Use `PascalCase` for enum types and `UPPER_SNAKE_CASE` for enum values.
 * Use `this->` to access member variables and methods within class methods.
 * Comment only with `//` for single line comments and `/* ... */` for multi-line comments.

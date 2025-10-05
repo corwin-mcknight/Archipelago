@@ -74,5 +74,9 @@ struct vm_page {
 
 static_assert(sizeof(vm_page) == sizeof(vm_paddr_t), "vm_page must pack into a pointer size");
 
-struct vm_page_region {};
+struct vm_page_region {
+    vm_page_id_t start_frame;
+    size_t count;
+};
+
 }  // namespace kernel::mm
