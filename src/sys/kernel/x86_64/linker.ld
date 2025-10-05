@@ -57,9 +57,9 @@ SECTIONS
         . += 0x1000;
         . = ALIGN(CONSTANT(MAXPAGESIZE));
 
-        _.initial_heap_start = .;
-        . += 0x20000;
-        _.initial_heap_end = .;
+        _initial_heap_start = .;
+        . += 0x40000;
+        _initial_heap_end = .;
     } :data
  
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */

@@ -7,18 +7,13 @@ namespace kernel {
 namespace hal {
 
 void interrupt_manager::initialize() {
-    for (unsigned int i = 0; i < IM_MAX_HANDLERS; i++) {
-        handlers[i].handler.function = nullptr;
-        handlers[i].flags = 0;
-    }
-
-    // Wipe out core stats
-    for (int i = 0; i < CONFIG_MAX_CORES; i++) { core_reentrant_state[i] = 0; }
+    memset(handlers, 0, sizeof(handlers));
+    memset(core_reentrant_state, 0, sizeof(core_reentrant_state));
 }
 
 void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* handler, uint64_t flags) {
     handlers[id].handler.object = handler;
-    handlers[id].flags = flags;
+    handlers[id].flags          = flags;
 
     // Enable this interrupt
     handlers[id].flags |= InterruptHandlerEntry::ENABLED_MASK;
@@ -31,7 +26,7 @@ void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* h
 
 void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*), uint64_t flags) {
     handlers[id].handler.function = handler;
-    handlers[id].flags = flags;
+    handlers[id].flags            = flags;
 
     // Enable this interrupt
     handlers[id].flags |= InterruptHandlerEntry::ENABLED_MASK;
@@ -42,7 +37,7 @@ void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(regi
 
 void interrupt_manager::clear_handler(unsigned int id) {
     handlers[id].handler.function = nullptr;
-    handlers[id].flags = 0;
+    handlers[id].flags            = 0;
 }
 
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {

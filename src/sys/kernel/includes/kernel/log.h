@@ -88,7 +88,8 @@ class system_log {
     kernel::synchronization::semaphore message_gate;
     kernel::synchronization::spinlock flush_lock;
 
-    template <log_level level, typename... Args> inline void log(const ktl::string_view fmt, Args... args) {
+    template <log_level level, typename... Args>
+    INLINE_RELEASE_ONLY void log(const ktl::string_view fmt, Args... args) {
         message_gate.acquire();
         uint64_t seq = last_seq++;
 
@@ -102,9 +103,9 @@ class system_log {
     }
 
 // Specialize for log_level::debug
-#define LOG_LEVEL_HELPER(thelevel)                                                               \
-    template <typename... Args> inline void thelevel(const ktl::string_view fmt, Args... args) { \
-        log<log_level::thelevel>(fmt, args...);                                                  \
+#define LOG_LEVEL_HELPER(thelevel)                                                                            \
+    template <typename... Args> INLINE_RELEASE_ONLY void thelevel(const ktl::string_view fmt, Args... args) { \
+        log<log_level::thelevel>(fmt, args...);                                                               \
     }
 
     LOG_LEVEL_HELPER(trace)

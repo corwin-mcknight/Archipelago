@@ -35,16 +35,4 @@ void kernel_assert(T condition, const char* message, const char* message_text, c
 #define assert(x, msg) kernel_assert(x, msg, #x, __FILE__, __LINE__)
 #define assert_and(x, msg, y) kernel_assert(x, msg, #x, __FILE__, __LINE__, y)
 
-// TODO: Assertions I'd like to implement:
-// - assert
-// - assert_eq
-// - assert_ne
-// - assert_lt
-// - assert_gt
-// - assert_le
-// - assert_ge
-// - assert_null
-// - assert_not_null
-// - assert_warn
-
 #endif
