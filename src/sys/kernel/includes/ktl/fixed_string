@@ -11,22 +11,14 @@ template <size_t N> class fixed_string {
    public:
     char m_buffer[N];
 
-    fixed_string() {
-#ifdef OPTION_KTL_HARDEN
-        memset(m_buffer, 0, N);
-#endif
-    }
+    fixed_string() { memset(m_buffer, 0, N); }
     fixed_string(const char* str) {
-#ifdef OPTION_KTL_HARDEN
         memset(m_buffer, 0, N);
-#endif
         for (size_t i = 0; i < strlen(str); i++) { m_buffer[i] = str[i]; }
     }
 
     fixed_string(const ktl::string_view str) {
-#ifdef OPTION_KTL_HARDEN
         memset(m_buffer, 0, N);
-#endif
         str.copy(m_buffer, N);
     }
 
