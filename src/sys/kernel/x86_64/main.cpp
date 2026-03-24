@@ -14,6 +14,7 @@
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
+#include "kernel/mm/pmm.h"
 #include "kernel/panic.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
@@ -80,6 +81,34 @@ extern "C" [[noreturn]] void _start(void) {
     core_init(mp_request.response->bsp_lapic_id);
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
+
+    kernel::mm::g_page_frame_allocator.add_region(
+        {.start = 0x100000, .count = 256});  // Add first 1MiB of RAM for testing
+
+    auto pg = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    pg      = kernel::mm::g_page_frame_allocator.alloc();
+    if (!pg.has_value()) { panic("Failed to allocate page"); }
+    g_log.info("Allocated page at 0x{0:p}", pg.value());
+
+    kernel::mm::g_page_frame_allocator.free(pg.value());
+
+    kernel::mm::g_page_frame_allocator.debug_print_state();
 
     g_early_heap.debug_print_state();
 

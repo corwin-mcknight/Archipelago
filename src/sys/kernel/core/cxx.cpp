@@ -9,9 +9,14 @@ extern initfunc_t *__init_array_start[], *__init_array_end[];
 extern "C" void init_global_constructors_array(void) {
     for (initfunc_t **p = __init_array_start; p != __init_array_end; p++) (*p)();
 }
+extern "C" void __cxa_atexit(void (*f)(void *), void *obj, void *d) {
+    // We don't support shared libraries, so we can ignore this.
+    (void)f;
+    (void)obj;
+    (void)d;
+}
 
 // Define cxa_pure_virtual to prevent undefined reference errors
-
 extern "C" [[noreturn]] void __cxa_pure_virtual() {
     // Log the call
     g_log.error("Pure virtual function called");

@@ -71,3 +71,6 @@ xcuserdata/
 # Other files
 generated/
 AGENTS.md 
+CLAUDE.md
+.claude
+.codex
