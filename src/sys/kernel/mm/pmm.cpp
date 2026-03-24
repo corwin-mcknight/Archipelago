@@ -1,7 +1,11 @@
 #include "kernel/mm/pmm.h"
 
+#include <std/string.h>
+
 #include "kernel/log.h"
 #include "kernel/mm/page.h"
+
+extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
@@ -36,7 +40,7 @@ void page_frame_allocator::free(vm_paddr_t addr) {
 }
 
 void page_frame_allocator::zero_page(vm_paddr_t addr) {
-    // TODO: Implement.
+    memset(reinterpret_cast<void*>(addr + g_hhdm_offset), 0, 0x1000);
 }
 
 void page_frame_allocator::update_dirty_pages() {

@@ -28,6 +28,11 @@ extern "C" void init_global_constructors_array(void);
 __attribute__((used, section(".limine_requests"))) volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
 
+__attribute__((used, section(".limine_requests"))) volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST, .revision = 0, .response = nullptr};
+
+uintptr_t g_hhdm_offset = 0;
+
 void core_init(uint32_t core_id) {
     assert(core_id < CONFIG_MAX_CORES, "Core ID exceeds maximum cores");
     g_cpu_cores[core_id].lapic_id = core_id;
@@ -72,6 +77,9 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::cpu_init_cores();
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
+
+    if (hhdm_request.response == nullptr) { panic("Limine HHDM request failed"); }
+    g_hhdm_offset = hhdm_request.response->offset;
 
     if (mp_request.response == nullptr) { panic("Limine MP request failed"); }
 
