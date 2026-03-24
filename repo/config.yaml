@@ -5,7 +5,6 @@ config:
   tmp_path: ./build/tmp
   tools_path: ./build/tools
   source_dir: ./src
-  media_dir: ./media
   repo_path: ./repo
   iso_output: ./build/image.iso
   cc: clang

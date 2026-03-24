@@ -12,10 +12,13 @@ DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 all: install
 
 build:
-	@$(PLUME) build
+	@$(PLUME) build @system
 
-install:
-	@$(PLUME) install
+rebuild:
+	@$(PLUME) rebuild @system
+
+install: build
+	@$(PLUME) install @system
 	@$(PLUME) image
 
 test:
@@ -49,3 +52,9 @@ docs:
 	KERNEL_DOCS_DIR="${KERNEL_DOCS_DIR}" \
 	DOCS_OUTPUT_DIR="${DOCS_OUTPUT_DIR}" doxygen ${DOCS_DOXYFILE}
 	@echo 'Kernel documentation available in ${DOCS_OUTPUT_DIR}/html'
+
+run: install
+	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 1
+
+debug: install
+	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128 -smp 4

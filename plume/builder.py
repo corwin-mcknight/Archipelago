@@ -22,19 +22,47 @@ STAGES = [
 
 
 def is_built(config: Config, package: Package) -> bool:
-    """Check whether a package has already been built (has a populated $D)."""
+    """Check whether a package has already been built."""
     env = get_build_env(config, package)
     d = env["D"]
-    return os.path.isdir(d) and bool(os.listdir(d))
+    if os.path.isdir(d) and bool(os.listdir(d)):
+        return True
+    # Build tools install to TOOL_INSTALL, not $D
+    if package.is_build_tool:
+        tool_dir = env.get("TOOL_INSTALL", "")
+        pkg_tool_dir = os.path.join(tool_dir, package.name)
+        return os.path.isdir(pkg_tool_dir) and bool(os.listdir(pkg_tool_dir))
+    return False
 
 
-def build_package(config: Config, package: Package, verbose: bool = False) -> tuple[bool, float]:
+def is_installed(config: Config, package: Package) -> bool:
+    """Check whether a package is built and installed into the sysroot."""
+    if not is_built(config, package):
+        return False
+    if package.is_build_tool:
+        return True  # build tools don't go in world
+    world = World(config.get("sysroot"))
+    return world.contains(package.full_name)
+
+
+def clean_package(config: Config, package: Package):
+    """Remove a package's working directory so it will be fully rebuilt."""
+    env = get_build_env(config, package)
+    workdir = env["WORKDIR"]
+    if os.path.exists(workdir):
+        shutil.rmtree(workdir)
+
+
+def build_package(config: Config, package: Package, verbose: bool = False, force: bool = False) -> tuple[bool, float]:
     """Build a single package by running its Makefile stages.
 
     This only builds — it does NOT install into the sysroot.
     Returns (success, elapsed_seconds).
     """
     env = get_build_env(config, package)
+
+    if force and os.path.isdir(env["D"]):
+        shutil.rmtree(env["D"])
 
     # Create working directories
     for d in [env["WORKDIR"], env["S"], env["D"]]:
@@ -55,7 +83,7 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
     return True, time.monotonic() - pkg_start
 
 
-def install_package(config: Config, package: Package, verbose: bool = False) -> tuple[bool, float]:
+def install_package(config: Config, package: Package, verbose: bool = False, force: bool = False) -> tuple[bool, float]:
     """Install a package into the sysroot. Builds first if needed.
 
     Copies the package's $D tree into the sysroot and records it in the
@@ -64,16 +92,16 @@ def install_package(config: Config, package: Package, verbose: bool = False) -> 
     """
     total_start = time.monotonic()
 
-    # Build first if the package hasn't been built yet
-    if not is_built(config, package):
-        ok, _ = build_package(config, package, verbose)
+    # Build first if the package hasn't been built yet (or force)
+    if force or not is_built(config, package):
+        ok, _ = build_package(config, package, verbose, force=force)
         if not ok:
             return False, time.monotonic() - total_start
 
     env = get_build_env(config, package)
 
     # Copy $D contents into sysroot (skip for build tools with no $D output)
-    if os.listdir(env["D"]):
+    if os.path.isdir(env["D"]) and os.listdir(env["D"]):
         _copy_tree(env["D"], env["SYSROOT"])
 
     # Update world file (build tools don't live in the sysroot)
