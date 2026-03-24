@@ -31,8 +31,31 @@ def cyan(text: str) -> str:
     return ansi(text, 36)
 
 
+def yellow(text: str) -> str:
+    return ansi(text, 33)
+
+
 def dim(text: str) -> str:
     return ansi(text, 2)
+
+
+def fmt_timing_table(timings: list[tuple[str, float]], total: float) -> str:
+    """Format a build timing summary table.
+
+    timings is a list of (package_name, elapsed_seconds).
+    """
+    if not timings:
+        return ""
+
+    name_width = max(len(name) for name, _ in timings)
+    name_width = max(name_width, 5)  # minimum width
+
+    lines = [bold("Build timing:")]
+    for name, elapsed in timings:
+        lines.append(f"  {name:<{name_width}}  {fmt_duration(elapsed):>8}")
+    lines.append(f"  {'─' * (name_width + 10)}")
+    lines.append(f"  {'Total':<{name_width}}  {bold(fmt_duration(total)):>8}")
+    return "\n".join(lines)
 
 
 def fmt_duration(seconds: float) -> str:

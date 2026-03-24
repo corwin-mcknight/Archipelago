@@ -7,6 +7,25 @@ from graphlib import TopologicalSorter
 from plume.package import Package
 
 
+def expand_with_deps(selected: list[Package], all_packages: list[Package]) -> list[Package]:
+    """Expand a package list to include all transitive dependencies.
+
+    Packages already in selected are kept; missing deps are pulled from all_packages.
+    """
+    by_name = {p.full_name: p for p in all_packages}
+    result = {}
+    queue = list(selected)
+    while queue:
+        pkg = queue.pop()
+        if pkg.full_name in result:
+            continue
+        result[pkg.full_name] = pkg
+        for dep_name in pkg.dependencies:
+            if dep_name not in result and dep_name in by_name:
+                queue.append(by_name[dep_name])
+    return list(result.values())
+
+
 def resolve_build_order(packages: list[Package]) -> list[Package]:
     """Return packages in dependency order (dependencies first)."""
     by_name = {p.full_name: p for p in packages}

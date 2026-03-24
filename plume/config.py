@@ -17,7 +17,7 @@ class Config:
         # Resolve relative paths against project root
         path_keys = [
             "sysroot", "build_dir", "tmp_path", "tools_path",
-            "source_dir", "media_dir", "repo_path", "iso_output",
+            "source_dir", "repo_path", "iso_output",
         ]
         for key in path_keys:
             if key in self.config:

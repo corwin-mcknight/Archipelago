@@ -7,9 +7,15 @@ boot/limine-10.0:
     branch: "v10.x-binary"
     depth: 1
 
+boot/limine-boot-files-x86-1.0:
+  description: "Limine bootloader configuration for x86_64"
+  supports_live_sources: true
+  live_source_path: "boot/limine-boot-files-x86"
+
 sys/kernel-0.0.1:
   description: "The Archipelago kernel"
   supports_live_sources: true
   live_source_path: "sys/kernel"
   dependencies:
     - "boot/limine-10.0"
+    - "boot/limine-boot-files-x86-1.0"

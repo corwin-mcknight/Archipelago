@@ -8,20 +8,17 @@ import sys
 from plume.config import Config
 
 
-def assemble_iso(config: Config):
+def assemble_iso(config: Config, verbose: bool = False):
     """Build a bootable ISO from the sysroot."""
     sysroot = config.get("sysroot")
     tools_path = config.get("tools_path")
-    media_dir = config.get("media_dir")
     iso_output = config.get("iso_output")
     limine_dir = os.path.join(tools_path, "limine")
 
-    # 1. Copy media files (limine.conf, etc.) into sysroot
-    os.makedirs(sysroot, exist_ok=True)
-    if os.path.isdir(media_dir):
-        shutil.copytree(media_dir, sysroot, dirs_exist_ok=True)
+    capture = {} if verbose else {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
 
-    # 2. Copy limine boot binaries into sysroot/boot/
+    # 1. Copy limine boot binaries into sysroot/boot/
+    #    (limine.conf and boot/ structure are installed by the limine-boot-files-x86 package)
     boot_dir = os.path.join(sysroot, "boot")
     os.makedirs(boot_dir, exist_ok=True)
     for f in ["limine-bios-cd.bin", "limine-uefi-cd.bin", "limine-bios.sys"]:
@@ -29,7 +26,7 @@ def assemble_iso(config: Config):
         if os.path.exists(src):
             shutil.copy2(src, boot_dir)
 
-    # 3. Create ISO with xorriso
+    # 2. Create ISO with xorriso
     os.makedirs(os.path.dirname(iso_output), exist_ok=True)
     result = subprocess.run([
         "xorriso", "-as", "mkisofs",
@@ -39,16 +36,20 @@ def assemble_iso(config: Config):
         "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label",
         "--quiet",
         sysroot, "-o", iso_output,
-    ])
+    ], **capture)
     if result.returncode != 0:
         print("error: xorriso failed", file=sys.stderr)
+        if not verbose and result.stdout:
+            print(result.stdout, end="")
         return False
 
-    # 4. Install limine BIOS bootcode
+    # 3. Install limine BIOS bootcode
     limine_bin = os.path.join(limine_dir, "limine")
-    result = subprocess.run([limine_bin, "bios-install", iso_output])
+    result = subprocess.run([limine_bin, "bios-install", iso_output], **capture)
     if result.returncode != 0:
         print("error: limine bios-install failed", file=sys.stderr)
+        if not verbose and result.stdout:
+            print(result.stdout, end="")
         return False
 
     return True
