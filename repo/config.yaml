@@ -1,0 +1,20 @@
+config:
+  arch: x86_64
+  sysroot: ./build/sysroot
+  build_dir: ./build
+  tmp_path: ./build/tmp
+  tools_path: ./build/tools
+  source_dir: ./src
+  media_dir: ./media
+  repo_path: ./repo
+  iso_output: ./build/image.iso
+  cc: clang
+  cxx: clang++
+  ld: ld.lld
+  as: nasm
+  make: make
+
+  arch_configs:
+    x86_64:
+      qemu: qemu-system-x86_64
+      target_triple: x86_64-unknown-none
