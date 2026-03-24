@@ -2,6 +2,12 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
+    "mounts": [
+        "source=vscode-extensions-${devcontainerId},target=/root/.vscode-server/extensions,type=volume",
+        "source=vscode-server-data-${devcontainerId},target=/root/.vscode-server/data,type=volume",
+        "source=vscode-claude-cache-${devcontainerId},target=/root/.claude,type=volume",
+        "type=bind,source=${localWorkspaceFolder}/.claude/auth/.claude.json,target=/root/.claude.json,consistency=cached"
+    ],
     "customizations": {
         "vscode": {
             "extensions": [
@@ -12,7 +18,7 @@
                 "ms-vscode.cpptools",
                 "ms-vscode.makefile-tools",
                 "GitHub.copilot",
-                "openai.chatgpt"
+                "anthropic.claude-code"
             ]
         }
     }
