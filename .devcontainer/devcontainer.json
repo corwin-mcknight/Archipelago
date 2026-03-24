@@ -2,6 +2,10 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
+    "mounts": [
+        "source=vscode-extensions-${devcontainerId},target=/root/.vscode-server/extensions,type=volume",
+        "source=vscode-server-data-${devcontainerId},target=/root/.vscode-server/data,type=volume"
+    ],
     "customizations": {
         "vscode": {
             "extensions": [
@@ -11,8 +15,7 @@
                 "twxs.cmake",
                 "ms-vscode.cpptools",
                 "ms-vscode.makefile-tools",
-                "GitHub.copilot",
-                "openai.chatgpt"
+                "GitHub.copilot"
             ]
         }
     }
