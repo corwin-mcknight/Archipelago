@@ -1,0 +1,447 @@
+#pragma once
+
+#include <stddef.h>
+
+#include <ktl/algorithm>
+#include <ktl/maybe>
+#include <ktl/utility>
+#include <ktl/vector>
+
+namespace ktl {
+
+template <typename T> class deque {
+   private:
+    static constexpr size_t k_block_capacity = 16;
+
+    struct block {
+        ktl::vector<T> values;
+
+        size_t size() const { return values.size(); }
+        bool empty() const { return size() == 0; }
+    };
+
+   public:
+    class const_iterator;
+
+    class iterator {
+       public:
+        using difference_type = ptrdiff_t;
+        using value_type      = T;
+        using reference       = T&;
+        using pointer         = T*;
+
+        iterator()            = default;
+        iterator(deque* owner, size_t index) : m_owner(owner), m_index(index) {}
+
+        reference operator*() const { return (*m_owner)[m_index]; }
+        pointer operator->() const { return &(*m_owner)[m_index]; }
+
+        iterator& operator++() {
+            ++m_index;
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator tmp(*this);
+            ++(*this);
+            return tmp;
+        }
+
+        iterator& operator--() {
+            --m_index;
+            return *this;
+        }
+
+        iterator operator--(int) {
+            iterator tmp(*this);
+            --(*this);
+            return tmp;
+        }
+
+        iterator& operator+=(difference_type n) {
+            if (n >= 0) {
+                m_index += static_cast<size_t>(n);
+            } else {
+                m_index -= static_cast<size_t>(-n);
+            }
+            return *this;
+        }
+
+        iterator& operator-=(difference_type n) {
+            if (n >= 0) {
+                m_index -= static_cast<size_t>(n);
+            } else {
+                m_index += static_cast<size_t>(-n);
+            }
+            return *this;
+        }
+
+        iterator operator+(difference_type n) const {
+            iterator tmp(*this);
+            tmp += n;
+            return tmp;
+        }
+
+        iterator operator-(difference_type n) const {
+            iterator tmp(*this);
+            tmp -= n;
+            return tmp;
+        }
+
+        friend iterator operator+(difference_type n, iterator it) { return it + n; }
+
+        difference_type operator-(const iterator& other) const {
+            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.m_index);
+        }
+
+        reference operator[](difference_type n) const {
+            return (*m_owner)[static_cast<size_t>(static_cast<difference_type>(m_index) + n)];
+        }
+
+        bool operator==(const iterator& other) const { return m_owner == other.m_owner && m_index == other.m_index; }
+        bool operator!=(const iterator& other) const { return !(*this == other); }
+        bool operator<(const iterator& other) const { return m_index < other.m_index; }
+        bool operator>(const iterator& other) const { return other < *this; }
+        bool operator<=(const iterator& other) const { return !(other < *this); }
+        bool operator>=(const iterator& other) const { return !(*this < other); }
+
+        size_t index() const { return m_index; }
+        const deque* owner() const { return m_owner; }
+
+       private:
+        deque* m_owner = nullptr;
+        size_t m_index = 0;
+    };
+
+    class const_iterator {
+       public:
+        using difference_type = ptrdiff_t;
+        using value_type      = const T;
+        using reference       = const T&;
+        using pointer         = const T*;
+
+        const_iterator()      = default;
+        const_iterator(const deque* owner, size_t index) : m_owner(owner), m_index(index) {}
+        const_iterator(const iterator& other) : m_owner(other.owner()), m_index(other.index()) {}
+
+        const_iterator& operator=(const iterator& other) {
+            m_owner = other.owner();
+            m_index = other.index();
+            return *this;
+        }
+
+        reference operator*() const { return (*m_owner)[m_index]; }
+        pointer operator->() const { return &(*m_owner)[m_index]; }
+
+        const_iterator& operator++() {
+            ++m_index;
+            return *this;
+        }
+
+        const_iterator operator++(int) {
+            const_iterator tmp(*this);
+            ++(*this);
+            return tmp;
+        }
+
+        const_iterator& operator--() {
+            --m_index;
+            return *this;
+        }
+
+        const_iterator operator--(int) {
+            const_iterator tmp(*this);
+            --(*this);
+            return tmp;
+        }
+
+        const_iterator& operator+=(difference_type n) {
+            if (n >= 0) {
+                m_index += static_cast<size_t>(n);
+            } else {
+                m_index -= static_cast<size_t>(-n);
+            }
+            return *this;
+        }
+
+        const_iterator& operator-=(difference_type n) {
+            if (n >= 0) {
+                m_index -= static_cast<size_t>(n);
+            } else {
+                m_index += static_cast<size_t>(-n);
+            }
+            return *this;
+        }
+
+        const_iterator operator+(difference_type n) const {
+            const_iterator tmp(*this);
+            tmp += n;
+            return tmp;
+        }
+
+        const_iterator operator-(difference_type n) const {
+            const_iterator tmp(*this);
+            tmp -= n;
+            return tmp;
+        }
+
+        friend const_iterator operator+(difference_type n, const_iterator it) { return it + n; }
+
+        difference_type operator-(const const_iterator& other) const {
+            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.m_index);
+        }
+
+        difference_type operator-(const iterator& other) const {
+            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.index());
+        }
+
+        reference operator[](difference_type n) const {
+            return (*m_owner)[static_cast<size_t>(static_cast<difference_type>(m_index) + n)];
+        }
+
+        bool operator==(const const_iterator& other) const {
+            return m_owner == other.m_owner && m_index == other.m_index;
+        }
+        bool operator!=(const const_iterator& other) const { return !(*this == other); }
+        bool operator<(const const_iterator& other) const { return m_index < other.m_index; }
+        bool operator>(const const_iterator& other) const { return other < *this; }
+        bool operator<=(const const_iterator& other) const { return !(other < *this); }
+        bool operator>=(const const_iterator& other) const { return !(*this < other); }
+
+        bool operator==(const iterator& other) const { return m_owner == other.owner() && m_index == other.index(); }
+        bool operator!=(const iterator& other) const { return !(*this == other); }
+        bool operator<(const iterator& other) const { return m_index < other.index(); }
+        bool operator>(const iterator& other) const { return other < *this; }
+        bool operator<=(const iterator& other) const { return !(other < *this); }
+        bool operator>=(const iterator& other) const { return !(*this < other); }
+
+        size_t index() const { return m_index; }
+        const deque* owner() const { return m_owner; }
+
+       private:
+        const deque* m_owner = nullptr;
+        size_t m_index       = 0;
+    };
+
+    friend bool operator==(const iterator& lhs, const const_iterator& rhs) {
+        return lhs.owner() == rhs.owner() && lhs.index() == rhs.index();
+    }
+
+    friend bool operator!=(const iterator& lhs, const const_iterator& rhs) { return !(lhs == rhs); }
+
+    friend bool operator<(const iterator& lhs, const const_iterator& rhs) { return lhs.index() < rhs.index(); }
+
+    friend bool operator>(const iterator& lhs, const const_iterator& rhs) { return rhs < lhs; }
+
+    friend bool operator<=(const iterator& lhs, const const_iterator& rhs) { return !(rhs < lhs); }
+
+    friend bool operator>=(const iterator& lhs, const const_iterator& rhs) { return !(lhs < rhs); }
+
+    friend typename iterator::difference_type operator-(const iterator& lhs, const const_iterator& rhs) {
+        return -(rhs - lhs);
+    }
+
+    deque() = default;
+
+    bool push_back(T value) { return emplace_back_internal(ktl::move(value)); }
+    bool emplace_back(T&& value) { return emplace_back_internal(ktl::move(value)); }
+
+    bool push_front(T value) { return emplace_front_internal(ktl::move(value)); }
+    bool emplace_front(T&& value) { return emplace_front_internal(ktl::move(value)); }
+
+    ktl::maybe<T> pop_back() {
+        if (empty()) { return ktl::nothing; }
+
+        size_t back_block_index = last_non_empty_block_index();
+        block& back_block       = m_blocks[back_block_index];
+
+        ktl::maybe<T> value     = back_block.values.pop_back();
+        if (value.has_value()) {
+            --m_size;
+            remove_empty_back_blocks();
+        }
+        return value;
+    }
+
+    ktl::maybe<T> pop_front() {
+        if (empty()) { return ktl::nothing; }
+
+        size_t front_index = first_non_empty_block_index();
+        block& front_block = m_blocks[front_index];
+
+        T result           = ktl::move(front_block.values[0]);
+        for (size_t i = 1; i < front_block.size(); ++i) {
+            front_block.values[i - 1] = ktl::move(front_block.values[i]);
+        }
+        auto discard = front_block.values.pop_back();
+        (void)discard;
+
+        --m_size;
+        remove_empty_front_blocks();
+        return result;
+    }
+
+    ktl::maybe<T> front() const {
+        if (empty()) { return ktl::nothing; }
+        size_t index = first_non_empty_block_index();
+        return m_blocks[index].values[0];
+    }
+
+    ktl::maybe<T> back() const {
+        if (empty()) { return ktl::nothing; }
+        size_t index            = last_non_empty_block_index();
+        const block& back_block = m_blocks[index];
+        return back_block.values[back_block.size() - 1];
+    }
+
+    void clear() {
+        for (size_t i = 0; i < m_blocks.size(); ++i) { m_blocks[i].values.clear(); }
+        m_blocks.clear();
+        m_size = 0;
+    }
+
+    size_t size() const { return m_size; }
+    bool empty() const { return m_size == 0; }
+
+    size_t capacity() const {
+        size_t total = 0;
+        for (size_t i = 0; i < m_blocks.size(); ++i) { total += m_blocks[i].values.capacity(); }
+        return total;
+    }
+
+    bool reserve(size_t new_capacity) {
+        size_t required_blocks = (new_capacity + k_block_capacity - 1) / k_block_capacity;
+        if (!m_blocks.reserve(required_blocks)) { return false; }
+
+        while (m_blocks.size() < required_blocks) {
+            if (!append_empty_block_back()) { return false; }
+        }
+
+        return true;
+    }
+
+    T& operator[](size_t index) { return element_at_mutable(index); }
+    const T& operator[](size_t index) const { return element_at_const(index); }
+
+    ktl::maybe<T> at(size_t index) const {
+        if (index >= m_size) { return ktl::nothing; }
+        return element_at_const(index);
+    }
+
+    iterator begin() { return iterator(this, 0); }
+    iterator end() { return iterator(this, m_size); }
+
+    const_iterator begin() const { return const_iterator(this, 0); }
+    const_iterator end() const { return const_iterator(this, m_size); }
+
+    const_iterator cbegin() const { return begin(); }
+    const_iterator cend() const { return end(); }
+
+   private:
+    bool emplace_back_internal(T&& value) {
+        if (!ensure_back_block()) { return false; }
+        block& back_block = m_blocks[m_blocks.size() - 1];
+        if (!back_block.values.push_back(ktl::move(value))) { return false; }
+        ++m_size;
+        return true;
+    }
+
+    bool emplace_front_internal(T&& value) {
+        if (!ensure_front_block()) { return false; }
+        block& front_block = m_blocks[0];
+        if (!front_block.values.push_back(ktl::move(value))) { return false; }
+        if (front_block.size() > 1) {
+            for (size_t i = front_block.size() - 1; i > 0; --i) {
+                ktl::swap(front_block.values[i], front_block.values[i - 1]);
+            }
+        }
+        ++m_size;
+        return true;
+    }
+
+    bool ensure_back_block() {
+        if (m_blocks.empty()) { return append_empty_block_back(); }
+
+        block& back_block = m_blocks[m_blocks.size() - 1];
+        if (back_block.size() < k_block_capacity) { return true; }
+        return append_empty_block_back();
+    }
+
+    bool ensure_front_block() {
+        if (m_blocks.empty()) { return append_empty_block_back(); }
+        block& front_block = m_blocks[0];
+        if (front_block.size() < k_block_capacity) { return true; }
+        return append_empty_block_front();
+    }
+
+    bool append_empty_block_back() {
+        block new_block;
+        if (!new_block.values.reserve(k_block_capacity)) { return false; }
+        return m_blocks.push_back(ktl::move(new_block));
+    }
+
+    bool append_empty_block_front() {
+        block new_block;
+        if (!new_block.values.reserve(k_block_capacity)) { return false; }
+
+        block placeholder;
+        if (!m_blocks.push_back(ktl::move(placeholder))) { return false; }
+
+        for (size_t i = m_blocks.size() - 1; i > 0; --i) { m_blocks[i] = ktl::move(m_blocks[i - 1]); }
+
+        m_blocks[0] = ktl::move(new_block);
+        return true;
+    }
+
+    void remove_empty_front_blocks() {
+        while (m_blocks.size() > 1 && m_blocks[0].empty()) {
+            for (size_t i = 0; i + 1 < m_blocks.size(); ++i) { m_blocks[i] = ktl::move(m_blocks[i + 1]); }
+            m_blocks[m_blocks.size() - 1].values.clear();
+        }
+    }
+
+    void remove_empty_back_blocks() {
+        if (m_blocks.size() > 1 && m_blocks[m_blocks.size() - 1].empty()) {
+            m_blocks[m_blocks.size() - 1].values.clear();
+        }
+    }
+
+    size_t first_non_empty_block_index() const {
+        for (size_t i = 0; i < m_blocks.size(); ++i) {
+            if (!m_blocks[i].empty()) { return i; }
+        }
+        return 0;
+    }
+
+    size_t last_non_empty_block_index() const {
+        for (size_t i = m_blocks.size(); i > 0; --i) {
+            if (!m_blocks[i - 1].empty()) { return i - 1; }
+        }
+        return 0;
+    }
+
+    T& element_at_mutable(size_t index) {
+        size_t remaining = index;
+        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
+            block& blk = m_blocks[block_index];
+            if (remaining < blk.size()) { return blk.values[remaining]; }
+            remaining -= blk.size();
+        }
+        return m_blocks[0].values[0];
+    }
+
+    const T& element_at_const(size_t index) const {
+        size_t remaining = index;
+        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
+            const block& blk = m_blocks[block_index];
+            if (remaining < blk.size()) { return blk.values[remaining]; }
+            remaining -= blk.size();
+        }
+        return m_blocks[0].values[0];
+    }
+
+    ktl::vector<block> m_blocks;
+    size_t m_size = 0;
+};
+
+}  // namespace ktl

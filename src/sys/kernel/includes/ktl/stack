@@ -1,9 +1,59 @@
 #pragma once
 
+#include <stddef.h>
+
+#include <ktl/deque>
+#include <ktl/utility>
+
 namespace ktl {
 
-class stack {
+template <typename T, typename Container = ktl::deque<T>> class stack {
+    template <typename U> static U&& declval();
 
+    using pop_return_type        = decltype(declval<Container&>().pop_back());
+    using back_return_type       = decltype(declval<Container&>().back());
+    using const_back_return_type = decltype(declval<const Container&>().back());
+
+   public:
+    using value_type     = T;
+    using container_type = Container;
+    using size_type      = size_t;
+
+    stack()              = default;
+
+    explicit stack(const Container& container) : m_container(container) {}
+    explicit stack(Container&& container) : m_container(ktl::move(container)) {}
+
+    stack(const stack&)                = default;
+    stack& operator=(const stack&)     = default;
+    stack(stack&&) noexcept            = default;
+    stack& operator=(stack&&) noexcept = default;
+
+    template <typename Value> bool push(Value&& value) { return push_back_impl(ktl::forward<Value>(value)); }
+
+    bool emplace(T&& value) { return emplace_back_impl(ktl::move(value)); }
+
+    auto pop() -> pop_return_type { return m_container.pop_back(); }
+
+    auto top() -> back_return_type { return m_container.back(); }
+    auto top() const -> const_back_return_type { return m_container.back(); }
+
+    bool empty() const { return m_container.empty(); }
+    size_t size() const { return m_container.size(); }
+
+    void clear() { m_container.clear(); }
+
+    container_type& container() { return m_container; }
+    const container_type& container() const { return m_container; }
+
+   private:
+    template <typename Value> bool push_back_impl(Value&& value) {
+        return m_container.push_back(ktl::forward<Value>(value));
+    }
+
+    bool emplace_back_impl(T&& value) { return m_container.emplace_back(ktl::move(value)); }
+
+    Container m_container;
 };
 
-}
+}  // namespace ktl

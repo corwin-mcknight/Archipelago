@@ -38,7 +38,7 @@ namespace format {
             memset(number_temp, 0, MAX_BUFFER);                                             \
             if (value < 0) {                                                                \
                 buffer[index++] = '-';                                                      \
-                value = -value;                                                             \
+                value = static_cast<KFMT_TYPE>(-value);                                      \
             }                                                                               \
             unsigned int base;                                                              \
             switch (args.specifier) {                                                       \
