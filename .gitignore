@@ -67,6 +67,8 @@ xcuserdata/
 *.swp
 *~
 
+# Plume
+__pycache__
 
 # Other files
 generated/
@@ -74,3 +76,4 @@ AGENTS.md
 CLAUDE.md
 .claude
 .codex
+/example/

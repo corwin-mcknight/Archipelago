@@ -1,0 +1,15 @@
+boot/limine-10.0:
+  description: "The Limine bootloader"
+  is_build_tool: true
+  source:
+    type: git
+    url: "https://github.com/limine-bootloader/limine.git"
+    branch: "v10.x-binary"
+    depth: 1
+
+sys/kernel-0.0.1:
+  description: "The Archipelago kernel"
+  supports_live_sources: true
+  live_source_path: "sys/kernel"
+  dependencies:
+    - "boot/limine-10.0"
