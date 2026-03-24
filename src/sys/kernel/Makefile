@@ -118,7 +118,7 @@ $(OBJ_DIR)/%.c.o: %.c
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@echo -n "+"
 	@$(MKDIR_P) $(dir $@)
-	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CWARNINGS) -c $< -o $@
+	@$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CWARNINGS) -MJ $(OBJ_DIR)/$*.json -c $< -o $@
 
 
 .PHONY: clean
