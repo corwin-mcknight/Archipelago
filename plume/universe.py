@@ -1,10 +1,38 @@
 """Dependency resolution via topological sort."""
 
 import os
+from collections import deque
 
 from graphlib import TopologicalSorter
 
 from plume.package import Package
+
+
+def reverse_deps(targets: list[Package], all_packages: list[Package]) -> list[Package]:
+    """Return targets plus all packages that transitively depend on them.
+
+    Builds a reverse adjacency map and BFS-expands from targets.
+    """
+    # Build reverse map: dep_name -> set of packages that depend on it
+    rev: dict[str, set[str]] = {}
+    by_name = {p.full_name: p for p in all_packages}
+    for pkg in all_packages:
+        for dep_name in pkg.dependencies:
+            rev.setdefault(dep_name, set()).add(pkg.full_name)
+
+    # BFS from targets through reverse edges
+    visited: set[str] = set()
+    queue = deque(t.full_name for t in targets)
+    while queue:
+        name = queue.popleft()
+        if name in visited:
+            continue
+        visited.add(name)
+        for rdep in rev.get(name, ()):
+            if rdep not in visited:
+                queue.append(rdep)
+
+    return [by_name[n] for n in visited if n in by_name]
 
 
 def expand_with_deps(selected: list[Package], all_packages: list[Package]) -> list[Package]:
@@ -41,6 +69,27 @@ def resolve_build_order(packages: list[Package]) -> list[Package]:
 
     sorter = TopologicalSorter(graph)
     return list(sorter.static_order())
+
+
+def create_build_sorter(packages: list[Package]) -> TopologicalSorter:
+    """Return a prepared TopologicalSorter for level-based parallel execution.
+
+    The caller drives the sorter with get_ready() / done().
+    """
+    by_name = {p.full_name: p for p in packages}
+
+    graph = {}
+    for pkg in packages:
+        deps = set()
+        for dep_name in pkg.dependencies:
+            if dep_name not in by_name:
+                raise ValueError(f"Unknown dependency '{dep_name}' required by {pkg}")
+            deps.add(by_name[dep_name])
+        graph[pkg] = deps
+
+    sorter = TopologicalSorter(graph)
+    sorter.prepare()
+    return sorter
 
 
 def filter_packages(all_packages: list[Package], requested: list[str]) -> list[Package]:

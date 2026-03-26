@@ -30,6 +30,7 @@ def get_build_env(config: Config, package: Package) -> dict:
     env["AS"] = config.get("as", "nasm")
     env["MAKE"] = config.get("make", "make")
     env["MAKE_JOBS"] = str(os.cpu_count() or 1)
+    env["TOOLS_PATH"] = config.get("tools_path")
 
     if package.is_build_tool:
         env["TOOL_INSTALL"] = config.get("tools_path")

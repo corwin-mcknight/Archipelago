@@ -13,6 +13,7 @@ class Package:
     category: str           # e.g. "sys"
     name: str               # e.g. "kernel"
     version: str            # e.g. "0.0.1"
+    arch: str = ""          # e.g. "x86_64", set at load time from config
     description: str = ""
     is_build_tool: bool = False
     supports_live_sources: bool = False
@@ -20,8 +21,15 @@ class Package:
     dependencies: list = field(default_factory=list)
     source: dict = field(default_factory=dict)
 
+    @property
+    def qualified_name(self) -> str:
+        """Full name with architecture, e.g. 'sys/kernel-0.0.1~x86_64'."""
+        if self.arch:
+            return f"{self.full_name}~{self.arch}"
+        return self.full_name
+
     @staticmethod
-    def parse(full_name: str, data: dict) -> "Package":
+    def parse(full_name: str, data: dict, arch: str = "") -> "Package":
         """Parse a package from its manifest key and YAML data."""
         info = Package.split_name(full_name)
         return Package(
@@ -29,6 +37,7 @@ class Package:
             category=info["category"],
             name=info["name"],
             version=info["version"],
+            arch=arch,
             description=data.get("description", ""),
             is_build_tool=data.get("is_build_tool", False),
             supports_live_sources=data.get("supports_live_sources", False),
@@ -54,6 +63,22 @@ class Package:
             "version": match.group(3),
         }
 
+    @staticmethod
+    def split_qualified_name(qname: str) -> dict:
+        """Split 'category/name-version~arch' into components.
+
+        Examples:
+            'sys/kernel-0.0.1~x86_64' -> {'category': 'sys', 'name': 'kernel',
+                                           'version': '0.0.1', 'arch': 'x86_64'}
+        """
+        if "~" in qname:
+            base, arch = qname.rsplit("~", 1)
+        else:
+            base, arch = qname, ""
+        info = Package.split_name(base)
+        info["arch"] = arch
+        return info
+
     def __hash__(self):
         return hash(self.full_name)
 
@@ -61,4 +86,4 @@ class Package:
         return isinstance(other, Package) and self.full_name == other.full_name
 
     def __str__(self):
-        return self.full_name
+        return self.qualified_name
