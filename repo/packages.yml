@@ -1,5 +1,5 @@
-boot/limine-10.0:
-  description: "The Limine bootloader"
+boot/limine-tools-10.0:
+  description: "Limine bootloader host tools"
   is_build_tool: true
   source:
     type: git
@@ -7,10 +7,15 @@ boot/limine-10.0:
     branch: "v10.x-binary"
     depth: 1
 
-boot/limine-boot-files-x86-1.0:
-  description: "Limine bootloader configuration for x86_64"
+boot/limine-10.0:
+  description: "Limine bootloader boot binaries"
+  dependencies:
+    - "boot/limine-tools-10.0"
+
+boot/limine-config-1.0:
+  description: "Limine bootloader configuration"
   supports_live_sources: true
-  live_source_path: "boot/limine-boot-files-x86"
+  live_source_path: "boot/limine-config"
 
 sys/kernel-0.0.1:
   description: "The Archipelago kernel"
@@ -18,4 +23,9 @@ sys/kernel-0.0.1:
   live_source_path: "sys/kernel"
   dependencies:
     - "boot/limine-10.0"
-    - "boot/limine-boot-files-x86-1.0"
+    - "boot/limine-config-1.0"
+
+sys/kernel-src-0.0.1:
+  description: "Kernel source archive"
+  supports_live_sources: true
+  live_source_path: "sys/kernel"

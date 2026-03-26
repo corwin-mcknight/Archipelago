@@ -6,8 +6,9 @@ import os
 class World:
     """Read and write the world file at {sysroot}/var/plume/world.
 
-    The world file is a newline-separated list of name-version entries,
-    one per installed package (e.g. "sys/kernel-0.0.1").
+    The world file is a newline-separated list of qualified name entries,
+    one per installed package (e.g. "sys/kernel-0.0.1~x86_64").
+    Backward-compatible with unqualified entries from older installs.
     """
 
     def __init__(self, sysroot: str):
@@ -20,31 +21,36 @@ class World:
         with open(self.path, "r", encoding="utf-8") as f:
             return [line.strip() for line in f if line.strip()]
 
-    def contains(self, full_name: str) -> bool:
-        """Check whether a package is recorded in the world file."""
-        return full_name in self.read()
+    def contains(self, name: str) -> bool:
+        """Check whether a package is recorded in the world file.
 
-    def add(self, full_name: str):
+        Matches by category/name prefix so both qualified and unqualified
+        entries are found regardless of arch suffix.
+        """
+        prefix = _name_prefix(name)
+        return any(_name_prefix(e) == prefix for e in self.read())
+
+    def add(self, name: str):
         """Add or update a package entry in the world file.
 
         If another version of the same category/name exists it is replaced.
         """
         entries = self.read()
 
-        # Strip version to get "category/name" prefix
-        prefix = _name_prefix(full_name)
+        # Strip version (and arch) to get "category/name" prefix
+        prefix = _name_prefix(name)
 
         # Remove any existing entry for this package (possibly older version)
         entries = [e for e in entries if _name_prefix(e) != prefix]
-        entries.append(full_name)
+        entries.append(name)
         entries.sort()
 
         self._write(entries)
 
-    def remove(self, full_name: str):
+    def remove(self, name: str):
         """Remove a package entry from the world file."""
         entries = self.read()
-        prefix = _name_prefix(full_name)
+        prefix = _name_prefix(name)
         entries = [e for e in entries if _name_prefix(e) != prefix]
         self._write(entries)
 
@@ -55,9 +61,12 @@ class World:
                 f.write(entry + "\n")
 
 
-def _name_prefix(full_name: str) -> str:
-    """Extract 'category/name' from 'category/name-version'."""
-    dash = full_name.rfind("-")
+def _name_prefix(entry: str) -> str:
+    """Extract 'category/name' from 'category/name-version[~arch]'."""
+    # Strip ~arch if present
+    if "~" in entry:
+        entry = entry.rsplit("~", 1)[0]
+    dash = entry.rfind("-")
     if dash == -1:
-        return full_name
-    return full_name[:dash]
+        return entry
+    return entry[:dash]

@@ -9,8 +9,8 @@ import time
 from plume.config import Config
 from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_timing_table
 from plume.repository import load_packages
-from plume.universe import resolve_build_order, filter_packages, expand_with_deps
-from plume.builder import build_package, install_package, clean_package, is_built, is_installed
+from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
+from plume.builder import build_package, install_package, uninstall_package, clean_package, is_built, is_installed
 from plume.image import assemble_iso
 from plume.world import World
 from plume.validate import validate_packages, validate_package_yaml
@@ -51,7 +51,7 @@ def _load(args):
     for w in key_warnings:
         print(f"{yellow('plume: warning')}: {w}", file=sys.stderr)
 
-    packages = load_packages(packages_yml)
+    packages = load_packages(packages_yml, arch=config.get_arch())
 
     # Run structural validation
     errors, warnings = validate_packages(config, packages)
@@ -92,6 +92,25 @@ def cmd_build(args):
             print(f"  [{i}/{len(shown)}] {pkg}")
         return 0
 
+    jobs = getattr(args, "jobs", 1)
+
+    if jobs > 1:
+        from plume.parallel import parallel_build
+        force_set = requested_names if args.force else set()
+        total_start = time.monotonic()
+        ok, timings = parallel_build(
+            config, selected, max_workers=jobs,
+            verbose=args.verbose, force_set=force_set,
+        )
+        total = time.monotonic() - total_start
+        if not timings:
+            print("Nothing to build.")
+        else:
+            _print_timing(timings, total)
+            if ok:
+                print(f"\n{green('Built')} {len(timings)} package(s) in {fmt_duration(total)}")
+        return 0 if ok else 1
+
     total_start = time.monotonic()
     timings = []
     built_count = 0
@@ -131,8 +150,24 @@ def cmd_install(args):
         return 1
 
     show_all = not args.packages
+    jobs = getattr(args, "jobs", 1)
+    no_binary = getattr(args, "no_binary", False)
 
     total_start = time.monotonic()
+
+    # Parallel build phase (if -j > 1), then sequential install
+    if jobs > 1:
+        from plume.parallel import parallel_build
+        force_set = requested_names if args.force else set()
+        ok, build_timings = parallel_build(
+            config, selected, max_workers=jobs,
+            verbose=args.verbose, force_set=force_set,
+        )
+        if not ok:
+            print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}")
+            return 1
+
+    # Sequential install to sysroot
     timings = []
     installed_count = 0
     for pkg in ordered:
@@ -143,7 +178,11 @@ def cmd_install(args):
         if is_target:
             installed_count += 1
             print(bold(cyan(f"\n[{installed_count}] {pkg}")))
-        ok, elapsed = install_package(config, pkg, verbose=args.verbose if is_target else False, force=force)
+        ok, elapsed = install_package(
+            config, pkg,
+            verbose=args.verbose if is_target else False,
+            force=force, no_binary=no_binary,
+        )
         if is_target:
             timings.append((str(pkg), elapsed))
         if not ok:
@@ -160,12 +199,25 @@ def cmd_install(args):
 
 
 def cmd_rebuild(args):
-    """Clean and rebuild specific packages, building deps only if needed."""
+    """Clean and rebuild specific packages, building deps only if needed.
+
+    Unless --no-propagate is given, packages that depend on the targets
+    (transitively) are also cleaned and rebuilt.
+    """
     config, packages = _load(args)
     try:
         requested = filter_packages(packages, args.packages)
         requested_names = {p.full_name for p in requested}
-        selected = expand_with_deps(requested, packages)
+
+        # Propagate: also rebuild everything that depends on the targets
+        if getattr(args, "no_propagate", False):
+            rebuild_set = requested
+        else:
+            rebuild_set = reverse_deps(requested, packages)
+        rebuild_names = {p.full_name for p in rebuild_set}
+
+        # Include forward deps so they are built before the targets
+        selected = expand_with_deps(rebuild_set, packages)
         ordered = resolve_build_order(selected)
     except ValueError as e:
         print(f"{red('plume: error')}: {e}", file=sys.stderr)
@@ -173,27 +225,66 @@ def cmd_rebuild(args):
 
     total_start = time.monotonic()
     timings = []
-    count = len(requested)
+    rebuild_count = len(rebuild_set)
     idx = 0
     for pkg in ordered:
-        is_target = pkg.full_name in requested_names
-        if is_target:
+        is_rebuild_target = pkg.full_name in rebuild_names
+        if is_rebuild_target:
             idx += 1
-            print(bold(cyan(f"\n[{idx}/{count}] {pkg}")))
+            print(bold(cyan(f"\n[{idx}/{rebuild_count}] {pkg}")))
             print(dim(f"  Cleaning {pkg}..."))
             clean_package(config, pkg)
             ok, elapsed = build_package(config, pkg, verbose=args.verbose)
             timings.append((str(pkg), elapsed))
         else:
-            # Silently ensure deps are built
-            ok, elapsed = build_package(config, pkg)
+            # Silently ensure forward deps are built
+            if not is_built(config, pkg):
+                ok, elapsed = build_package(config, pkg)
+            else:
+                continue
         if not ok:
             print(f"\n{red('Rebuild failed for')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
             return 1
 
     total = time.monotonic() - total_start
     _print_timing(timings, total)
-    print(f"\n{green('Rebuilt')} {count} package(s) in {fmt_duration(total)}")
+    print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(total)}")
+    return 0
+
+
+def cmd_uninstall(args):
+    """Remove packages from the sysroot."""
+    config, packages = _load(args)
+    try:
+        requested = filter_packages(packages, args.packages)
+    except ValueError as e:
+        print(f"{red('plume: error')}: {e}", file=sys.stderr)
+        return 1
+
+    # Safety: warn if installed packages depend on targets
+    if not args.force:
+        world = World(config.get("sysroot"))
+        installed_names = set(world.read())
+        installed_pkgs = [p for p in packages if world.contains(p.qualified_name)]
+        target_names = {p.full_name for p in requested}
+
+        for pkg in installed_pkgs:
+            if pkg.full_name in target_names:
+                continue
+            for dep in pkg.dependencies:
+                if dep in target_names:
+                    print(
+                        f"{red('plume: error')}: {pkg.qualified_name} depends on {dep}; "
+                        f"use --force to uninstall anyway"
+                    )
+                    return 1
+
+    for pkg in requested:
+        print(bold(cyan(f"Uninstalling {pkg}")))
+        if not uninstall_package(config, pkg):
+            return 1
+        print(f"  {green('Removed')} {pkg}")
+
     return 0
 
 
@@ -216,7 +307,10 @@ def cmd_test(args):
     timings = []
     for i, pkg in enumerate(ordered, 1):
         print(bold(cyan(f"\n[{i}/{len(ordered)}] {pkg}")))
-        ok, elapsed = install_package(config, pkg, verbose=args.verbose, force=args.force)
+        ok, elapsed = install_package(
+            config, pkg, verbose=args.verbose, force=args.force,
+            no_binary=getattr(args, "no_binary", False),
+        )
         timings.append((str(pkg), elapsed))
         if not ok:
             print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}", file=sys.stderr)
@@ -368,17 +462,27 @@ def main(argv=None):
     build_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     build_p.add_argument("--dry-run", "-n", action="store_true", help="Print build order without building")
     build_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
+    build_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
 
     install_p = sub.add_parser("install", help="Install packages into sysroot (builds if needed)")
     install_p.add_argument("packages", nargs="*", help="Packages to install (default: all, supports @set)")
     install_p.add_argument("--config", default=None)
     install_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     install_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
+    install_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+    install_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
 
     rebuild_p = sub.add_parser("rebuild", help="Clean and rebuild specific packages")
     rebuild_p.add_argument("packages", nargs="*", help="Packages to rebuild (default: all, supports @set)")
     rebuild_p.add_argument("--config", default=None)
     rebuild_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
+    rebuild_p.add_argument("--no-propagate", action="store_true", help="Only rebuild named packages, not reverse deps")
+    rebuild_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+
+    uninstall_p = sub.add_parser("uninstall", help="Remove packages from sysroot")
+    uninstall_p.add_argument("packages", nargs="+", help="Packages to uninstall")
+    uninstall_p.add_argument("--config", default=None)
+    uninstall_p.add_argument("--force", "-f", action="store_true", help="Uninstall even if other packages depend on it")
 
     image_p = sub.add_parser("image", help="Assemble ISO image")
     image_p.add_argument("--config", default=None)
@@ -389,6 +493,8 @@ def main(argv=None):
     test_p.add_argument("--verbose", action="store_true")
     test_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     test_p.add_argument("--config", default=None)
+    test_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+    test_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
 
     status_p = sub.add_parser("status", help="Show build and install state of all packages")
     status_p.add_argument("--config", default=None)
@@ -417,6 +523,7 @@ def main(argv=None):
     commands = {
         "build": cmd_build,
         "install": cmd_install,
+        "uninstall": cmd_uninstall,
         "rebuild": cmd_rebuild,
         "image": cmd_image,
         "test": cmd_test,
