@@ -1,4 +1,4 @@
-"""Plume CLI — the Archipelago package manager."""
+"""Plume CLI -- the Archipelago package manager."""
 
 import argparse
 import os
@@ -453,7 +453,7 @@ def cmd_clangd(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="plume", description="Plume — the Archipelago package manager")
+    parser = argparse.ArgumentParser(prog="plume", description="Plume -- the Archipelago package manager")
     sub = parser.add_subparsers(dest="command")
 
     build_p = sub.add_parser("build", help="Build packages (does not install to sysroot)")

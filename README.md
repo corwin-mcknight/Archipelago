@@ -12,13 +12,13 @@ Archipelago currently only supports x86_64, live cd, and Limine as a bootloader.
 ## Building
 The easiest way to build the operating system currently is to use the provided Dockerfile, or devcontainer.
 
-Instructions for setting up a proper build environemnt are a TODO item.
+Instructions for setting up a proper build environment are a TODO item.
 
 ### Build Instructions
     
 ```bash
 make clean   # Start with a fresh environment.
 make build   # Build the operating system.
-make install # Create's the system root and packages it into an iso
+make install # Creates the system root and packages it into an iso
 make run     # Runs the operating system in QEMU
 ```

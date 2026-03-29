@@ -69,7 +69,7 @@ def clean_package(config: Config, package: Package):
 def build_package(config: Config, package: Package, verbose: bool = False, force: bool = False) -> tuple[bool, float]:
     """Build a single package by running its Makefile stages.
 
-    This only builds — it does NOT install into the sysroot.
+    This only builds -- it does NOT install into the sysroot.
     Returns (success, elapsed_seconds).
     """
     env = get_build_env(config, package)

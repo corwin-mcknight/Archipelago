@@ -25,10 +25,10 @@ void uart::write_byte(char c) {
     outb(port, (uint8_t)c);
 }
 
-int uart::recieved_data() { return inb(port + 5) & 1; }
+int uart::received_data() { return inb(port + 5) & 1; }
 bool uart::transmit_empty() { return inb(port + 5) & 0x20; }
 
 char uart::read() {
-    while (recieved_data() == 0) {}
+    while (received_data() == 0) {}
     return (char)inb(port);
 }

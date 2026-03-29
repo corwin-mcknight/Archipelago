@@ -12,8 +12,8 @@
 
 #include "kernel/config.h"
 #include "kernel/drivers/logging_device.h"
-#include "kernel/syncronization/semaphore.h"
-#include "kernel/syncronization/spinlock.h"
+#include "kernel/synchronization/semaphore.h"
+#include "kernel/synchronization/spinlock.h"
 #include "kernel/time.h"
 
 namespace kernel {

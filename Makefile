@@ -4,7 +4,7 @@ KERNEL_SRC_DIR     := ${PWD}/src/sys/kernel
 KERNEL_INCLUDE_DIR := ${KERNEL_SRC_DIR}/includes
 KERNEL_DOCS_DIR    := ${KERNEL_SRC_DIR}/docs
 ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
-DOCS_DOXYFILE      := ${KERNEL_DOCS_DIR}/Doxyfile
+DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
 .PHONY: all build install test test-verbose clean full-clean clangd format docs
