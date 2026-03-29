@@ -1,8 +1,8 @@
 """Binary package creation and extraction.
 
 A binary package is a .tar.xz archive containing:
-    manifest.json       — package metadata and file list
-    data/               — the install tree (sysroot-relative paths)
+    manifest.json       -- package metadata and file list
+    data/               -- the install tree (sysroot-relative paths)
 """
 
 import io

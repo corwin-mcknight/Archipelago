@@ -26,16 +26,17 @@ The development container provides everything needed. For host builds, you need:
 ## Build Commands
 
 ```bash
-make build                   # Build all packages (kernel + limine)
-make install                 # Build + assemble bootable ISO
-make test                    # Build, assemble ISO, run full test suite
-make test TEST=<name>        # Run a single test by name
-make test-verbose            # Tests with verbose harness output
-make clean                   # Remove build artifacts (obj, sysroot, ISO)
-make full-clean              # Remove entire build/ directory
-make format                  # Run clang-format on kernel sources
-make clangd                  # Regenerate compile_commands.json for IDE support
-make docs                    # Generate Doxygen documentation
+make build                     # Build all packages (kernel + limine)
+make install                   # Build + assemble bootable ISO
+make test                      # Build, assemble ISO, run full test suite
+make test TEST=<name>          # Run a single test by name
+make test-verbose              # Tests with verbose harness output
+make test-verbose TEST=<name>  # Run a single test by name
+make clean                     # Remove build artifacts (obj, sysroot, ISO)
+make full-clean                # Remove entire build/ directory
+make format                    # Run clang-format on kernel sources
+make clangd                    # Regenerate compile_commands.json for IDE support
+make docs                      # Generate Doxygen documentation
 ```
 
 ### Using Plume directly
@@ -64,17 +65,14 @@ Plume reads package definitions from `repo/packages.yml`. Each package has a Mak
 
 After all stages succeed, the staging directory is merged into the shared sysroot at `build/sysroot/`. The ISO is then assembled from the sysroot.
 
-### Current packages
+### Packages
 
-| Package | Description |
-|---------|-------------|
-| `boot/limine-10.0` | Limine bootloader (cloned from GitHub, build tool) |
-| `sys/kernel-0.0.1` | Archipelago kernel (built from `src/sys/kernel/`) |
+Package definitions live in `repo/packages.yml`. See `docs/Plume.md` for the full list and details on the package format.
 
 ### Configuration
 
-- `repo/config.yaml` — architecture, paths, toolchain settings
-- `repo/packages.yml` — package manifest with dependencies
+- `repo/config.yaml` -- architecture, paths, toolchain settings
+- `repo/packages.yml` -- package manifest with dependencies
 
 ## Build Output
 

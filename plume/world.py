@@ -1,4 +1,4 @@
-"""World file management — tracks packages installed into the sysroot."""
+"""World file management -- tracks packages installed into the sysroot."""
 
 import os
 

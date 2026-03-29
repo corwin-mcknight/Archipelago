@@ -3,7 +3,6 @@
 
 .DS_Store
 
-
 # Various other build files...
 
 # Compiled Object files
@@ -77,3 +76,6 @@ CLAUDE.md
 .claude
 .codex
 /example/
+
+# Documentation.
+.obsidian

@@ -15,7 +15,7 @@ class uart : public logging_device {
     void init() override;
     void write_byte(char c) override;
     bool transmit_empty();
-    int recieved_data();
+    int received_data();
     char read();
 };
 
