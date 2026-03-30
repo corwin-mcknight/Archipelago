@@ -62,18 +62,18 @@
 - Provide fuzzing or chaos harness hooks for scheduler, memory, and syscall interfaces.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - Extend test coverage for `std/ctype.cpp`, `std/stdlib.cpp`, `std/string.cpp` boundary conditions.
-- Add scenario coverage for `x86_64/descriptor_tables.cpp`, `x86_64/drivers/pit.cpp`, `x86_64/interrupts.cpp`, `x86_64/main.cpp`, `x86_64/test_runner.cpp`, and `x86_64/uart.cpp`.
+- Add scenario coverage for `x86_64/descriptor_tables.cpp`, `x86_64/drivers/pit.cpp`, `x86_64/interrupts.cpp`, `x86_64/main.cpp`, and `x86_64/uart.cpp`.
 
 ## Tooling & Developer Experience
 - Provide scripts for log capture, tracing, and structured debugging workflows.
 - Document usage of GDB/LLDB with QEMU, and keep `make clangd` artefacts current.
 - Improve build caching, dependency tracking, and multi-target build matrix support.
-- Kernel Shell, built in shell that merges the testing suite with an interactive command line for diagnostics and experimentation of the kernel.
-    - Built in commands to poke VMM, scheduler, handle tables, and other core subsystems.
-    - Object Inspection
-    - Table Dumps
-    - Runtime Metrics
-    - Debugging Aids
+- ~~Kernel Shell, built in shell that merges the testing suite with an interactive command line for diagnostics and experimentation of the kernel.~~ Done.
+    - ~~Built in commands to poke VMM, scheduler, handle tables, and other core subsystems.~~ Done (mem, handle, obj, cpu, log commands).
+    - Object Inspection -- expand handle inspect and obj inspect with detailed views
+    - Table Dumps -- add full handle table dump with object details
+    - Runtime Metrics -- add interrupt counts, allocation stats, tick rates
+    - Debugging Aids -- add memory dump, stack trace, register dump commands
 
 ## Documentation & Governance
 - Expand architecture and design docs to cover scheduler, memory management, and handle models.

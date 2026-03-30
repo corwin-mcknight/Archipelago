@@ -45,6 +45,11 @@ SECTIONS
         KEEP(*(.ktests))
         . = ALIGN(8);
         __stop__ktests = .;
+        . = ALIGN(8);
+        __start__kshell_cmds = .;
+        KEEP(*(.kshell_cmds))
+        . = ALIGN(8);
+        __stop__kshell_cmds = .;
     } :rodata
 
     .data ALIGN(CONSTANT(MAXPAGESIZE)) : {

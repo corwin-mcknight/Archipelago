@@ -1,3 +1,4 @@
+#include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 
 #include <ktl/circular_buffer>
@@ -120,10 +121,9 @@ extern "C" [[noreturn]] void _start(void) {
 
     g_early_heap.debug_print_state();
 
-#if CONFIG_KERNEL_TESTING
-    g_log.info("Starting kernel tests...");
-    kernel::testing::test_runner();
-#else
-    panic("Boot processor exited early");
+#if CONFIG_KERNEL_SHELL
+    kernel::shell::shell_main();
 #endif
+
+    panic("Boot processor exited early");
 }
