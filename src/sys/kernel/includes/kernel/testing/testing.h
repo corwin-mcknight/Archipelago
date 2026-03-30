@@ -103,6 +103,59 @@ void ktest_require_not_equal(size_t actual, size_t expected, const char* file, i
 #define KTEST_REQUIRE_TRUE(condition) KTEST_REQUIRE(condition)
 #define KTEST_REQUIRE_FALSE(condition) KTEST_REQUIRE(!(condition))
 
+// Batch boolean assertions -- each condition is checked and reported individually.
+// KTEST_EXPECT_ALL(a, b, c) expands to KTEST_EXPECT(a); KTEST_EXPECT(b); KTEST_EXPECT(c);
+#define KTEST_EA_1(a) KTEST_EXPECT(a)
+#define KTEST_EA_2(a, b) \
+    KTEST_EXPECT(a);     \
+    KTEST_EXPECT(b)
+#define KTEST_EA_3(a, b, c) \
+    KTEST_EXPECT(a);        \
+    KTEST_EXPECT(b);        \
+    KTEST_EXPECT(c)
+#define KTEST_EA_4(a, b, c, d) \
+    KTEST_EXPECT(a);           \
+    KTEST_EXPECT(b);           \
+    KTEST_EXPECT(c);           \
+    KTEST_EXPECT(d)
+#define KTEST_EA_5(a, b, c, d, e) \
+    KTEST_EXPECT(a);              \
+    KTEST_EXPECT(b);              \
+    KTEST_EXPECT(c);              \
+    KTEST_EXPECT(d);              \
+    KTEST_EXPECT(e)
+#define KTEST_EA_N(_1, _2, _3, _4, _5, N, ...) N
+#define KTEST_EXPECT_ALL(...) \
+    KTEST_EA_N(__VA_ARGS__, KTEST_EA_5, KTEST_EA_4, KTEST_EA_3, KTEST_EA_2, KTEST_EA_1)(__VA_ARGS__)
+
+// Unwrap a Result<T,E>, requiring is_ok(). Declares `var` with the unwrapped value.
+// Usage: KTEST_UNWRAP(id, table.emplace<ObjA>(RIGHTS_ALL));
+#define KTEST_UNWRAP(var, expr)                   \
+    auto _ktest_res_##var = (expr);               \
+    KTEST_REQUIRE_TRUE(_ktest_res_##var.is_ok()); \
+    auto var = _ktest_res_##var.unwrap()
+
+// Check that a maybe/optional expression has a value equal to expected.
+// Usage: KTEST_EXPECT_VALUE(dq.pop_front(), 0);
+#define KTEST_EXPECT_VALUE(expr, expected)                 \
+    do {                                                   \
+        auto _ktest_mv = (expr);                           \
+        KTEST_REQUIRE_TRUE(_ktest_mv.has_value());         \
+        KTEST_EXPECT_EQUAL(_ktest_mv.value(), (expected)); \
+    } while (0)
+
+// Extract value from a maybe/optional, requiring has_value(). Declares `var`.
+// Usage: KTEST_REQUIRE_VALUE(front, dq.front());  // then use `front` directly
+#define KTEST_REQUIRE_VALUE(var, expr)               \
+    auto _ktest_mv_##var = (expr);                   \
+    KTEST_REQUIRE_TRUE(_ktest_mv_##var.has_value()); \
+    auto var = _ktest_mv_##var.value()
+
+// Check pointer alignment.
+// Usage: KTEST_EXPECT_ALIGNED(ptr, 16);
+#define KTEST_EXPECT_ALIGNED(ptr, alignment) \
+    KTEST_EXPECT_EQUAL(reinterpret_cast<uintptr_t>(ptr) & ((alignment) - 1), static_cast<uintptr_t>(0))
+
 #else  // CONFIG_KERNEL_TESTING
 
 #define KTEST(name_sym, module_literal) \
@@ -139,5 +192,11 @@ void ktest_require_not_equal(size_t actual, size_t expected, const char* file, i
 #define KTEST_REQUIRE_NOT_EQUAL(actual, expected) ((void)0)
 #define KTEST_REQUIRE_TRUE(condition) ((void)0)
 #define KTEST_REQUIRE_FALSE(condition) ((void)0)
+
+#define KTEST_EXPECT_ALL(...) ((void)0)
+#define KTEST_UNWRAP(var, expr) auto var = (expr).unwrap()
+#define KTEST_EXPECT_VALUE(expr, expected) ((void)0)
+#define KTEST_REQUIRE_VALUE(var, expr) auto var = (expr).value()
+#define KTEST_EXPECT_ALIGNED(ptr, alignment) ((void)0)
 
 #endif  // CONFIG_KERNEL_TESTING
