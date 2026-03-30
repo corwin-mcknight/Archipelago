@@ -58,7 +58,6 @@ KTEST_WITH_INIT(obj_handle_table_get_returns_object, "obj/handle_table", handle_
     auto id  = table.emplace<ObjA>(RIGHTS_ALL).unwrap();
     auto got = table.get<ObjA>(id);
     KTEST_REQUIRE_TRUE(got.is_ok());
-    KTEST_EXPECT_TRUE(got.unwrap() != nullptr);
     KTEST_EXPECT_TRUE(got.unwrap()->type_id() == TEST_TYPE_A);
 }
 
@@ -158,6 +157,38 @@ KTEST_WITH_INIT(obj_handle_table_invalid_handle, "obj/handle_table", handle_tabl
     auto got = table.get<ObjA>(HandleId::invalid());
     KTEST_EXPECT_TRUE(got.is_err());
     KTEST_EXPECT_TRUE(got.unwrap_err() == RESULT_HANDLE_INVALID);
+}
+
+KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_table_init) {
+    size_t before = g_handle_table.count();
+    auto result   = g_handle_table.emplace<ObjA>(RIGHTS_ALL);
+    KTEST_REQUIRE_TRUE(result.is_ok());
+    KTEST_EXPECT_TRUE(g_handle_table.count() == before + 1);
+    g_handle_table.close(result.unwrap());
+    KTEST_EXPECT_TRUE(g_handle_table.count() == before);
+}
+
+KTEST_WITH_INIT(obj_handle_table_emplace_and_get, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    auto result = table.emplace<ObjA>(RIGHTS_ALL);
+    KTEST_REQUIRE_TRUE(result.is_ok());
+    auto id = result.unwrap();
+    KTEST_EXPECT_TRUE(id.is_valid());
+    auto got = table.get<ObjA>(id);
+    KTEST_REQUIRE_TRUE(got.is_ok());
+    KTEST_EXPECT_TRUE(got.unwrap()->type_id() == TEST_TYPE_A);
+    KTEST_EXPECT_TRUE(table.count() == 1);
+}
+
+KTEST_WITH_INIT(obj_handle_table_emplace_with_args, "obj/handle_table", handle_table_init) {
+    bool destroyed = false;
+    HandleTable table;
+    auto result = table.emplace<ObjA>(RIGHTS_ALL, &destroyed);
+    KTEST_REQUIRE_TRUE(result.is_ok());
+    auto id = result.unwrap();
+    KTEST_EXPECT_TRUE(table.get<ObjA>(id).is_ok());
+    table.close(id);
+    KTEST_EXPECT_TRUE(destroyed);
 }
 
 KTEST_WITH_INIT(obj_handle_table_destructor_closes_all, "obj/handle_table", handle_table_init) {

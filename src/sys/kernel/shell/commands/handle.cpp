@@ -16,7 +16,7 @@ void handle_handler(int argc, const char* const argv[], kernel::shell::ShellOutp
     }
     ktl::string_view sub(argv[1]);
     if (sub == "stats") {
-        output.print("Handle table inspection not yet available (no global table)\n");
+        output.print("Kernel handle table: {0} handles\n", kernel::obj::g_handle_table.count());
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);
     }

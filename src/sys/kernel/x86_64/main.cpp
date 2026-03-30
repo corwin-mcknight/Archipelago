@@ -1,3 +1,4 @@
+#include <kernel/obj/handle_table.h>
 #include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 
@@ -16,6 +17,7 @@
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/obj/event.h"
 #include "kernel/panic.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
@@ -91,35 +93,14 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
 
+    kernel::obj::obj_init();
+    g_log.info("Object subsystem initialized");
+
     kernel::mm::g_page_frame_allocator.add_region(
         {.start = 0x100000, .count = 256});  // Add first 1MiB of RAM for testing
 
-    auto pg = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    pg      = kernel::mm::g_page_frame_allocator.alloc();
-    if (!pg.has_value()) { panic("Failed to allocate page"); }
-    g_log.info("Allocated page at 0x{0:p}", pg.value());
-
-    kernel::mm::g_page_frame_allocator.free(pg.value());
-
-    kernel::mm::g_page_frame_allocator.debug_print_state();
-
-    g_early_heap.debug_print_state();
+    auto evt_id = kernel::obj::g_handle_table.emplace<kernel::obj::Event>(kernel::obj::RIGHTS_ALL).unwrap();
+    kernel::obj::g_handle_table.get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
 #if CONFIG_KERNEL_SHELL
     kernel::shell::shell_main();

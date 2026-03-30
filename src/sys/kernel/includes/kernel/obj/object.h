@@ -32,4 +32,6 @@ class Object {
     static ObjectId allocate_id();
 };
 
+void obj_init();
+
 }  // namespace kernel::obj
