@@ -1,7 +1,14 @@
+#include <kernel/obj/counter.h>
+#include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
 
 namespace kernel::obj {
+
+void obj_init() {
+    Event::register_type(g_type_registry);
+    Counter::register_type(g_type_registry);
+}
 
 namespace { ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace
 

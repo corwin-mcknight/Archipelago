@@ -2,11 +2,9 @@
 
 namespace kernel::obj {
 
-HandleTable::~HandleTable() {
-    for (size_t i = 0; i < m_entries.size(); i++) {
-        if (m_entries[i].object) { m_entries[i].object.reset(); }
-    }
-}
+HandleTable g_handle_table;
+
+HandleTable::~HandleTable() = default;
 
 Result<bool, result_t> HandleTable::grow() {
     size_t old_size = m_entries.size();
@@ -28,14 +26,11 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
 }
 
 Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
-    m_lock.lock();
+    kernel::synchronization::lock_guard guard(m_lock);
 
     if (m_free_head == -1) {
         auto grow_result = grow();
-        if (grow_result.is_err()) {
-            m_lock.unlock();
-            return Result<HandleId, result_t>::err(grow_result.unwrap_err());
-        }
+        if (grow_result.is_err()) { return Result<HandleId, result_t>::err(grow_result.unwrap_err()); }
     }
 
     int32_t slot    = m_free_head;
@@ -48,35 +43,29 @@ Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, R
     m_count++;
 
     HandleId id{static_cast<uint32_t>(slot), entry.generation};
-
-    m_lock.unlock();
     return Result<HandleId, result_t>::ok(id);
 }
 
 Result<HandleId, result_t> HandleTable::duplicate(HandleId source, Rights rights_mask) {
-    m_lock.lock();
+    ktl::ref<Object> obj_copy;
+    Rights new_rights;
 
-    HandleEntry* src = lookup_entry(source);
-    if (!src) {
-        m_lock.unlock();
-        return Result<HandleId, result_t>::err(RESULT_HANDLE_INVALID);
+    {
+        kernel::synchronization::lock_guard guard(m_lock);
+        HandleEntry* src = lookup_entry(source);
+        if (!src) { return Result<HandleId, result_t>::err(RESULT_HANDLE_INVALID); }
+        new_rights = src->rights & rights_mask;
+        obj_copy   = src->object;
     }
 
-    Rights new_rights         = src->rights & rights_mask;
-    ktl::ref<Object> obj_copy = src->object;
-
-    m_lock.unlock();
     return create_handle(ktl::move(obj_copy), new_rights);
 }
 
 Result<bool, result_t> HandleTable::close(HandleId id) {
-    m_lock.lock();
+    kernel::synchronization::lock_guard guard(m_lock);
 
     HandleEntry* entry = lookup_entry(id);
-    if (!entry) {
-        m_lock.unlock();
-        return Result<bool, result_t>::err(RESULT_HANDLE_INVALID);
-    }
+    if (!entry) { return Result<bool, result_t>::err(RESULT_HANDLE_INVALID); }
 
     entry->object.reset();
     entry->rights = 0;
@@ -85,18 +74,14 @@ Result<bool, result_t> HandleTable::close(HandleId id) {
     m_free_head      = static_cast<int32_t>(id.index);
     m_count--;
 
-    m_lock.unlock();
     return Result<bool, result_t>::ok(true);
 }
 
 ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {
-    m_lock.lock();
+    kernel::synchronization::lock_guard guard(m_lock);
 
     HandleEntry* entry = lookup_entry(id);
-    if (!entry) {
-        m_lock.unlock();
-        return ktl::nothing;
-    }
+    if (!entry) { return ktl::nothing; }
 
     HandleInfo result;
     result.id        = id;
@@ -104,15 +89,17 @@ ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {
     result.type_id   = entry->object->type_id();
     result.object_id = entry->object->id();
 
-    m_lock.unlock();
     return result;
 }
 
+size_t HandleTable::count() {
+    kernel::synchronization::lock_guard guard(m_lock);
+    return m_count;
+}
+
 bool HandleTable::is_valid(HandleId id) {
-    m_lock.lock();
-    HandleEntry* entry = lookup_entry(id);
-    m_lock.unlock();
-    return entry != nullptr;
+    kernel::synchronization::lock_guard guard(m_lock);
+    return lookup_entry(id) != nullptr;
 }
 
 }  // namespace kernel::obj

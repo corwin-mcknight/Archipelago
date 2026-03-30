@@ -42,11 +42,11 @@ class HandleTable {
     Result<HandleId, result_t> duplicate(HandleId source, Rights rights_mask);
     Result<bool, result_t> close(HandleId id);
 
-    template <typename T> Result<T*, result_t> get(HandleId id, Rights required_rights = 0);
+    template <typename T> Result<ktl::ref<T>, result_t> get(HandleId id, Rights required_rights = 0);
 
     ktl::maybe<HandleInfo> info(HandleId id);
     bool is_valid(HandleId id);
-    size_t count() const { return m_count; }
+    size_t count();
 
    private:
     struct HandleEntry {
@@ -76,24 +76,17 @@ template <typename T, typename... Args> Result<HandleId, result_t> HandleTable::
     return create_handle(ktl::move(base_ref), rights);
 }
 
-template <typename T> Result<T*, result_t> HandleTable::get(HandleId id, Rights required_rights) {
-    m_lock.lock();
+template <typename T> Result<ktl::ref<T>, result_t> HandleTable::get(HandleId id, Rights required_rights) {
+    kernel::synchronization::lock_guard guard(m_lock);
     HandleEntry* entry = lookup_entry(id);
-    if (!entry) {
-        m_lock.unlock();
-        return Result<T*, result_t>::err(RESULT_HANDLE_INVALID);
-    }
-    if (entry->object->type_id() != T::TYPE_ID) {
-        m_lock.unlock();
-        return Result<T*, result_t>::err(RESULT_WRONG_TYPE);
-    }
+    if (!entry) { return Result<ktl::ref<T>, result_t>::err(RESULT_HANDLE_INVALID); }
+    if (entry->object->type_id() != T::TYPE_ID) { return Result<ktl::ref<T>, result_t>::err(RESULT_WRONG_TYPE); }
     if ((entry->rights & required_rights) != required_rights) {
-        m_lock.unlock();
-        return Result<T*, result_t>::err(RESULT_RIGHTS_VIOLATION);
+        return Result<ktl::ref<T>, result_t>::err(RESULT_RIGHTS_VIOLATION);
     }
-    T* ptr = static_cast<T*>(entry->object.get());
-    m_lock.unlock();
-    return Result<T*, result_t>::ok(ptr);
+    return Result<ktl::ref<T>, result_t>::ok(ktl::static_ref_cast<T>(entry->object));
 }
+
+extern HandleTable g_handle_table;
 
 }  // namespace kernel::obj

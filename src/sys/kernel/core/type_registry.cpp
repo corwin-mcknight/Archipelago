@@ -18,34 +18,19 @@ TypeRegistry g_type_registry;
 
 Result<TypeId, result_t> TypeRegistry::register_type(TypeId id, const char* name, Rights valid_rights,
                                                      Rights default_rights) {
-    m_lock.lock();
+    kernel::synchronization::lock_guard guard(m_lock);
 
-    // Check ID not already taken
+    if (m_count >= MAX_TYPES) { return Result<TypeId, result_t>::err(RESULT_REGISTRY_FULL); }
+
     for (size_t i = 0; i < m_count; i++) {
-        if (m_types[i].id == id) {
-            m_lock.unlock();
+        if (m_types[i].id == id || str_equal(m_types[i].name, name)) {
             return Result<TypeId, result_t>::err(RESULT_ALREADY_REGISTERED);
         }
-    }
-
-    // Check name uniqueness
-    for (size_t i = 0; i < m_count; i++) {
-        if (str_equal(m_types[i].name, name)) {
-            m_lock.unlock();
-            return Result<TypeId, result_t>::err(RESULT_ALREADY_REGISTERED);
-        }
-    }
-
-    // Check capacity
-    if (m_count >= MAX_TYPES) {
-        m_lock.unlock();
-        return Result<TypeId, result_t>::err(RESULT_REGISTRY_FULL);
     }
 
     m_types[m_count] = {id, name, valid_rights, default_rights};
     m_count++;
 
-    m_lock.unlock();
     return Result<TypeId, result_t>::ok(id);
 }
 

@@ -30,4 +30,15 @@ class spinlock {
     alignas(CONFIG_CPU_CACHE_LINE_SIZE) mutable volatile uint8_t m_state;
 };
 
+class lock_guard {
+   public:
+    explicit lock_guard(spinlock& lock) : m_lock(lock) { m_lock.lock(); }
+    ~lock_guard() { m_lock.unlock(); }
+    lock_guard(const lock_guard&)            = delete;
+    lock_guard& operator=(const lock_guard&) = delete;
+
+   private:
+    spinlock& m_lock;
+};
+
 }  // namespace kernel::synchronization

@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 #include <ktl/maybe>
+#include <ktl/utility>
+#include <std/new.h>
 
 #include "kernel/panic.h"
 
@@ -27,13 +29,68 @@ typedef intptr_t result_t;
 enum class ResultType { Ok, Err };
 
 template <typename T, typename E> struct Result {
-    union {
+   private:
+    union Storage {
         T ok;
         E err;
+        Storage() {}
+        ~Storage() {}
     } value;
     ResultType type;
 
+    void destroy() {
+        if (type == ResultType::Ok) {
+            value.ok.~T();
+        } else {
+            value.err.~E();
+        }
+    }
+
    public:
+    ~Result() { destroy(); }
+
+    Result(const Result& other) : type(other.type) {
+        if (type == ResultType::Ok) {
+            new (&value.ok) T(other.value.ok);
+        } else {
+            new (&value.err) E(other.value.err);
+        }
+    }
+
+    Result(Result&& other) noexcept : type(other.type) {
+        if (type == ResultType::Ok) {
+            new (&value.ok) T(ktl::move(other.value.ok));
+        } else {
+            new (&value.err) E(ktl::move(other.value.err));
+        }
+    }
+
+    Result& operator=(const Result& other) {
+        if (this != &other) {
+            destroy();
+            type = other.type;
+            if (type == ResultType::Ok) {
+                new (&value.ok) T(other.value.ok);
+            } else {
+                new (&value.err) E(other.value.err);
+            }
+        }
+        return *this;
+    }
+
+    Result& operator=(Result&& other) noexcept {
+        if (this != &other) {
+            destroy();
+            type = other.type;
+            if (type == ResultType::Ok) {
+                new (&value.ok) T(ktl::move(other.value.ok));
+            } else {
+                new (&value.err) E(ktl::move(other.value.err));
+            }
+        }
+        return *this;
+    }
+
     // Boolean
     bool is_ok() const { return type == ResultType::Ok; }
     bool is_err() const { return type == ResultType::Err; }
@@ -47,7 +104,7 @@ template <typename T, typename E> struct Result {
 
     T unwrap() {
         if (is_err()) { panic("Result unwrap failed"); }
-        return value.ok;
+        return ktl::move(value.ok);
     }
 
     T unwrap() const {
@@ -69,22 +126,24 @@ template <typename T, typename E> struct Result {
     ktl::maybe<T> ok() const { return is_ok() ? ktl::maybe<T>(value.ok) : ktl::nothing; }
     ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
 
-    // Default initalizer
-    Result() : type(ResultType::Err) {}
-    explicit Result(T val) : type(ResultType::Ok) { value.ok = val; }
-    explicit Result(E val) : type(ResultType::Err) { value.err = val; }
+    // Construction
+    Result() : type(ResultType::Err) { new (&value.err) E(); }
+    explicit Result(T val) : type(ResultType::Ok) { new (&value.ok) T(ktl::move(val)); }
+    explicit Result(E val) : type(ResultType::Err) { new (&value.err) E(ktl::move(val)); }
 
-    static Result<T, E> ok(T value) {
+    static Result<T, E> ok(T val) {
         Result<T, E> res;
-        res.value.ok = value;
-        res.type     = ResultType::Ok;
+        res.destroy();
+        res.type = ResultType::Ok;
+        new (&res.value.ok) T(ktl::move(val));
         return res;
     }
 
-    static Result<T, E> err(E value) {
+    static Result<T, E> err(E val) {
         Result<T, E> res;
-        res.value.err = value;
-        res.type      = ResultType::Err;
+        res.destroy();
+        res.type = ResultType::Err;
+        new (&res.value.err) E(ktl::move(val));
         return res;
     }
 

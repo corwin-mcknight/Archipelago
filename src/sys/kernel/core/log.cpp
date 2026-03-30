@@ -19,7 +19,7 @@ static const char* log_level_colors[] = {
 #endif
 
 void kernel::system_log::flush() {
-    flush_lock.lock();
+    kernel::synchronization::lock_guard guard(flush_lock);
     message_gate.acquire();
     this->last_flushed_sequence = this->for_each(this->last_flushed_sequence, [&](const log_message* message) {
         char status = '-';
@@ -80,5 +80,4 @@ void kernel::system_log::flush() {
         }
     });
     message_gate.release();
-    flush_lock.unlock();
 }

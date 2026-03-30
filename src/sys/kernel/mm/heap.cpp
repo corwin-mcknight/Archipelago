@@ -3,6 +3,8 @@
 
 void* operator new(size_t size) { return g_early_heap.alloc(size, sizeof(void*)); }
 void* operator new[](size_t size) { return g_early_heap.alloc(size, sizeof(void*)); }
+void* operator new(size_t, void* ptr) noexcept { return ptr; }
+void* operator new[](size_t, void* ptr) noexcept { return ptr; }
 
 void operator delete(void* ptr) noexcept {
     if (ptr == nullptr) {

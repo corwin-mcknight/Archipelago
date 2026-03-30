@@ -50,8 +50,8 @@ KTEST_WITH_INIT(obj_event_wrong_type, "obj/event", obj_event_init) {
 
 KTEST_WITH_INIT(obj_event_signals, "obj/event", obj_event_init) {
     HandleTable table;
-    auto id   = table.emplace<Event>(RIGHTS_ALL).unwrap();
-    auto* evt = table.get<Event>(id).unwrap();
+    auto id  = table.emplace<Event>(RIGHTS_ALL).unwrap();
+    auto evt = table.get<Event>(id).unwrap();
     evt->signal_set(0x05);
     KTEST_EXPECT_TRUE(evt->signals() == 0x05);
     evt->signal_clear(0x01);
@@ -81,8 +81,8 @@ KTEST_WITH_INIT(obj_event_duplicate_survives_close, "obj/event", obj_event_init)
 
 KTEST_WITH_INIT(obj_event_set_name, "obj/event", obj_event_init) {
     HandleTable table;
-    auto id   = table.emplace<Event>(RIGHTS_ALL).unwrap();
-    auto* evt = table.get<Event>(id).unwrap();
+    auto id  = table.emplace<Event>(RIGHTS_ALL).unwrap();
+    auto evt = table.get<Event>(id).unwrap();
     evt->set_name("test_event");
     KTEST_EXPECT_TRUE(evt->name() != nullptr);
 }

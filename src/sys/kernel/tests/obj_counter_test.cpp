@@ -27,15 +27,15 @@ KTEST_WITH_INIT(obj_counter_register_type, "obj/counter", obj_counter_init) {
 
 KTEST_WITH_INIT(obj_counter_emplace_with_initial, "obj/counter", obj_counter_init) {
     HandleTable table;
-    auto id   = table.emplace<Counter>(RIGHTS_ALL, static_cast<uint64_t>(42)).unwrap();
-    auto* ctr = table.get<Counter>(id).unwrap();
+    auto id  = table.emplace<Counter>(RIGHTS_ALL, static_cast<uint64_t>(42)).unwrap();
+    auto ctr = table.get<Counter>(id).unwrap();
     KTEST_EXPECT_TRUE(ctr->value() == 42);
 }
 
 KTEST_WITH_INIT(obj_counter_increment, "obj/counter", obj_counter_init) {
     HandleTable table;
     auto id       = table.emplace<Counter>(RIGHTS_ALL, static_cast<uint64_t>(10)).unwrap();
-    auto* ctr     = table.get<Counter>(id).unwrap();
+    auto ctr      = table.get<Counter>(id).unwrap();
     uint64_t prev = ctr->increment(5);
     KTEST_EXPECT_TRUE(prev == 10);
     KTEST_EXPECT_TRUE(ctr->value() == 15);
@@ -43,8 +43,8 @@ KTEST_WITH_INIT(obj_counter_increment, "obj/counter", obj_counter_init) {
 
 KTEST_WITH_INIT(obj_counter_reset, "obj/counter", obj_counter_init) {
     HandleTable table;
-    auto id   = table.emplace<Counter>(RIGHTS_ALL, static_cast<uint64_t>(99)).unwrap();
-    auto* ctr = table.get<Counter>(id).unwrap();
+    auto id  = table.emplace<Counter>(RIGHTS_ALL, static_cast<uint64_t>(99)).unwrap();
+    auto ctr = table.get<Counter>(id).unwrap();
     ctr->reset();
     KTEST_EXPECT_TRUE(ctr->value() == 0);
 }
