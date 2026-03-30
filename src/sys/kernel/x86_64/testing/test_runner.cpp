@@ -40,7 +40,7 @@ class TestRunner {
                     continue;
                 }
 
-                const char* test_name_cstr = command_buffer_ + 4;
+                const char* test_name_cstr    = command_buffer_ + 4;
                 const size_t test_name_length = command.size() - 4;
                 if (kernel::testing::ktest* test = find_test(ktl::string_view(test_name_cstr, test_name_length))) {
                     execute_test(*test);
@@ -90,8 +90,7 @@ class TestRunner {
     static kernel::testing::ktest* tests_begin() { return __start__ktests; }
     static kernel::testing::ktest* tests_end() { return __stop__ktests; }
 
-    template <typename... Args>
-    static void emit_harness_event(const char* fmt, const Args&... args) {
+    template <typename... Args> static void emit_harness_event(const char* fmt, const Args&... args) {
         ktl::fixed_string<kHarnessBufferSize> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
         uart.write_string(buffer.c_str());
@@ -185,13 +184,13 @@ class TestRunner {
 
     char command_buffer_[kCommandBufferSize]{};
     kernel::testing::ktest* current_test_ = nullptr;
-    bool current_test_failed_ = false;
-    bool failure_reason_recorded_ = false;
+    bool current_test_failed_             = false;
+    bool failure_reason_recorded_         = false;
     ktl::fixed_string<256> failure_reason_{};
 
     void reset_current_test_state() {
-        current_test_failed_ = false;
-        failure_reason_recorded_ = false;
+        current_test_failed_        = false;
+        failure_reason_recorded_    = false;
         failure_reason_.m_buffer[0] = '\0';
     }
 
@@ -202,7 +201,7 @@ class TestRunner {
             size_t copy_len = ktl::min(msg_view.size(), sizeof(failure_reason_.m_buffer) - 1);
             msg_view.copy(failure_reason_.m_buffer, copy_len);
             failure_reason_.m_buffer[copy_len] = '\0';
-            failure_reason_recorded_ = true;
+            failure_reason_recorded_           = true;
         }
         send_error(message);
     }

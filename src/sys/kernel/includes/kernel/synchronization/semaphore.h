@@ -15,7 +15,7 @@ namespace kernel::synchronization {
 class semaphore {
    public:
     explicit constexpr semaphore(uint32_t initial_count = 1) : m_count(initial_count) {}
-    semaphore(const semaphore&) = delete;
+    semaphore(const semaphore&)            = delete;
     semaphore& operator=(const semaphore&) = delete;
 
     /// Acquire the semaphore, blocking if necessary.

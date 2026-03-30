@@ -7,9 +7,9 @@ typedef void initfunc_t(void);
 extern initfunc_t *__init_array_start[], *__init_array_end[];
 
 extern "C" void init_global_constructors_array(void) {
-    for (initfunc_t **p = __init_array_start; p != __init_array_end; p++) (*p)();
+    for (initfunc_t** p = __init_array_start; p != __init_array_end; p++) (*p)();
 }
-extern "C" void __cxa_atexit(void (*f)(void *), void *obj, void *d) {
+extern "C" void __cxa_atexit(void (*f)(void*), void* obj, void* d) {
     // We don't support shared libraries, so we can ignore this.
     (void)f;
     (void)obj;
@@ -25,7 +25,7 @@ extern "C" [[noreturn]] void __cxa_pure_virtual() {
     while (1) {}
 }
 
-extern "C" void *__cxa_begin_catch(void *) {
+extern "C" void* __cxa_begin_catch(void*) {
     g_log.fatal("__cxa_begin_catch invoked");
     panic("unexpected __cxa_begin_catch");
     __builtin_unreachable();

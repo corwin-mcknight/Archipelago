@@ -1,6 +1,6 @@
 #include "kernel/time.h"
 
-ktime_t kernel::time::_now = 0;
+ktime_t kernel::time::_now           = 0;
 time_ns_t kernel::time::_ns_per_tick = 0;
 
 void kernel::time::tick() { _now++; }

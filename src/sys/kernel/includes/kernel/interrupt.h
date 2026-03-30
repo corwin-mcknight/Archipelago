@@ -15,7 +15,7 @@ namespace hal {
 class IInterruptHandler {
    public:
     virtual bool handle_interrupt(register_frame_t* regs) = 0;
-    virtual ~IInterruptHandler() = default;
+    virtual ~IInterruptHandler()                          = default;
 };
 
 struct InterruptHandlerEntry {
@@ -27,7 +27,7 @@ struct InterruptHandlerEntry {
 
     // Flags store information about this interrupt.
     constexpr static uint64_t ENABLED_MASK = 0b01;
-    const static uint64_t OBJECT_HANDLER = 0b10;
+    const static uint64_t OBJECT_HANDLER   = 0b10;
     uint64_t flags;
 };
 

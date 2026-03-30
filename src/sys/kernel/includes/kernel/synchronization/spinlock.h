@@ -8,7 +8,7 @@ namespace kernel::synchronization {
 class spinlock {
    public:
     constexpr spinlock() : m_state(unlocked_state) {}
-    spinlock(const spinlock&) = delete;
+    spinlock(const spinlock&)            = delete;
     spinlock& operator=(const spinlock&) = delete;
 
     void lock() {
@@ -26,7 +26,7 @@ class spinlock {
 
    private:
     static constexpr uint8_t unlocked_state = 0;
-    static constexpr uint8_t locked_state = 1;
+    static constexpr uint8_t locked_state   = 1;
     alignas(CONFIG_CPU_CACHE_LINE_SIZE) mutable volatile uint8_t m_state;
 };
 

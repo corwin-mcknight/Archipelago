@@ -7,10 +7,10 @@
 using namespace kernel::testing;
 
 KTEST(std_memcpy_basic, "std/string") {
-    char source[] = {'A', 'B', 'C', 'D', 'E'};
+    char source[]       = {'A', 'B', 'C', 'D', 'E'};
     char destination[5] = {};
 
-    void* result = memcpy(destination, source, sizeof(source));
+    void* result        = memcpy(destination, source, sizeof(source));
 
     KTEST_REQUIRE_TRUE(result == destination);
     for (size_t i = 0; i < sizeof(source); ++i) { KTEST_EXPECT_EQUAL(destination[i], source[i]); }
@@ -28,7 +28,7 @@ KTEST(std_memset_fill, "std/string") {
 KTEST(std_memmove_overlap_forward, "std/string") {
     char buffer[] = {'0', '1', '2', '3', '4', '5'};
 
-    void* result = memmove(buffer + 2, buffer, 4);
+    void* result  = memmove(buffer + 2, buffer, 4);
 
     KTEST_REQUIRE_TRUE(result == buffer + 2);
     KTEST_EXPECT_EQUAL(buffer[2], '0');
@@ -40,7 +40,7 @@ KTEST(std_memmove_overlap_forward, "std/string") {
 KTEST(std_memmove_overlap_backward, "std/string") {
     char buffer[] = {'0', '1', '2', '3', '4', '5'};
 
-    void* result = memmove(buffer, buffer + 2, 4);
+    void* result  = memmove(buffer, buffer + 2, 4);
 
     KTEST_REQUIRE_TRUE(result == buffer);
     KTEST_EXPECT_EQUAL(buffer[0], '2');
@@ -50,10 +50,10 @@ KTEST(std_memmove_overlap_backward, "std/string") {
 }
 
 KTEST(std_memcmp_variants, "std/string") {
-    const char lhs[] = {'a', 'b', 'c', 'd'};
-    const char rhs_equal[] = {'a', 'b', 'c', 'd'};
+    const char lhs[]         = {'a', 'b', 'c', 'd'};
+    const char rhs_equal[]   = {'a', 'b', 'c', 'd'};
     const char rhs_greater[] = {'a', 'b', 'c', 'e'};
-    const char rhs_less[] = {'a', 'b', 'b', 'd'};
+    const char rhs_less[]    = {'a', 'b', 'b', 'd'};
 
     KTEST_EXPECT_EQUAL(memcmp(lhs, rhs_equal, sizeof(lhs)), 0);
     KTEST_EXPECT_TRUE(memcmp(lhs, rhs_greater, sizeof(lhs)) < 0);
@@ -110,7 +110,7 @@ KTEST(std_strlcpy_no_truncation, "std/string") {
 }
 
 KTEST(std_strlcpy_zero_sized_destination, "std/string") {
-    char guard = 'Z';
+    char guard    = 'Z';
 
     size_t copied = strlcpy(&guard, "secure", 0);
 
@@ -121,7 +121,7 @@ KTEST(std_strlcpy_zero_sized_destination, "std/string") {
 KTEST(std_memmove_zero_length, "std/string") {
     char buffer[] = {'A', 'B', 'C'};
 
-    void* result = memmove(buffer + 1, buffer, 0);
+    void* result  = memmove(buffer + 1, buffer, 0);
 
     KTEST_REQUIRE_TRUE(result == buffer + 1);
     KTEST_EXPECT_EQUAL(buffer[0], 'A');
@@ -132,7 +132,7 @@ KTEST(std_memmove_zero_length, "std/string") {
 KTEST(std_memmove_self_copy, "std/string") {
     char buffer[] = {'X', 'Y', 'Z'};
 
-    void* result = memmove(buffer, buffer, sizeof(buffer));
+    void* result  = memmove(buffer, buffer, sizeof(buffer));
 
     KTEST_REQUIRE_TRUE(result == buffer);
     KTEST_EXPECT_EQUAL(buffer[0], 'X');
@@ -141,10 +141,10 @@ KTEST(std_memmove_self_copy, "std/string") {
 }
 
 KTEST(std_memset_zero_length, "std/string") {
-    char buffer[] = {'L', 'M', 'N'};
+    char buffer[]     = {'L', 'M', 'N'};
 
     size_t zero_bytes = 0;
-    void* result = memset(buffer, 0xCC, zero_bytes);
+    void* result      = memset(buffer, 0xCC, zero_bytes);
 
     KTEST_REQUIRE_TRUE(result == buffer);
     KTEST_EXPECT_EQUAL(buffer[0], 'L');
