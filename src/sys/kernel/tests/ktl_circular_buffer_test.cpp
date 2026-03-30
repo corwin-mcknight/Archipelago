@@ -2,37 +2,12 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/testing/tracking_value.h>
+
 #include <ktl/circular_buffer>
 #include <ktl/maybe>
 
 using namespace kernel::testing;
-
-namespace {
-
-struct tracking_value {
-    int value;
-    bool moved       = false;
-
-    tracking_value() = default;
-    explicit tracking_value(int v) : value(v) {}
-    tracking_value(const tracking_value&)            = default;
-    tracking_value& operator=(const tracking_value&) = default;
-
-    tracking_value(tracking_value&& other) noexcept : value(other.value), moved(true) {
-        other.value = -1;
-        other.moved = true;
-    }
-
-    tracking_value& operator=(tracking_value&& other) noexcept {
-        value       = other.value;
-        moved       = true;
-        other.value = -1;
-        other.moved = true;
-        return *this;
-    }
-};
-
-}  // namespace
 
 KTEST(ktl_circular_buffer_push_pop, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 4> buf;
@@ -82,12 +57,12 @@ KTEST(ktl_circular_buffer_emplace_moves, "ktl/circular_buffer") {
     buf.emplace(ktl::move(source));
 
     KTEST_EXPECT_EQUAL(source.value, -1);
-    KTEST_EXPECT_TRUE(source.moved);
+    KTEST_EXPECT_TRUE(source.move_observed);
 
     auto v = buf.peek();
     KTEST_REQUIRE_TRUE(v.has_value());
     KTEST_EXPECT_EQUAL(v.value().value, 7);
-    KTEST_EXPECT_TRUE(v.value().moved);
+    KTEST_EXPECT_TRUE(v.value().move_observed);
 }
 
 KTEST(ktl_circular_buffer_copy_last_limits, "ktl/circular_buffer") {

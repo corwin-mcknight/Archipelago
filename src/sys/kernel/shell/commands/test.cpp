@@ -228,86 +228,42 @@ void ktest_require(bool condition, const char* file, int line, const char* condi
     }
 }
 
-// int versions
-void ktest_expect_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                        const char* expected_str) {
-    if (actual != expected) {
+template <typename T>
+void ktest_equality_check(T actual, T expected, bool expect_equal, bool fatal, const char* label, const char* file,
+                          int line, const char* actual_str, const char* expected_str) {
+    bool mismatch = expect_equal ? (actual != expected) : (actual == expected);
+    if (mismatch) {
         ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, true, actual, expected, actual_str, expected_str, file,
-                                line);
-        handle_assertion_failure(reason.c_str(), false);
-    }
-}
-
-void ktest_require_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                         const char* expected_str) {
-    if (actual != expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, true, actual, expected, actual_str, expected_str, file,
-                                line);
-        handle_assertion_failure(reason.c_str(), true);
-    }
-}
-
-void ktest_expect_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                            const char* expected_str) {
-    if (actual == expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, false, actual, expected, actual_str, expected_str, file,
-                                line);
-        handle_assertion_failure(reason.c_str(), false);
-    }
-}
-
-void ktest_require_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                             const char* expected_str) {
-    if (actual == expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, false, actual, expected, actual_str, expected_str, file,
-                                line);
-        handle_assertion_failure(reason.c_str(), true);
-    }
-}
-
-// size_t versions
-void ktest_expect_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                        const char* expected_str) {
-    if (actual != expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, true, static_cast<int>(actual), static_cast<int>(expected),
+        format_equality_failure(reason, label, expect_equal, static_cast<int>(actual), static_cast<int>(expected),
                                 actual_str, expected_str, file, line);
-        handle_assertion_failure(reason.c_str(), false);
+        handle_assertion_failure(reason.c_str(), fatal);
     }
 }
 
-void ktest_require_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                         const char* expected_str) {
-    if (actual != expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, true, static_cast<int>(actual), static_cast<int>(expected),
-                                actual_str, expected_str, file, line);
-        handle_assertion_failure(reason.c_str(), true);
+#define DEFINE_EQUALITY_ASSERTIONS(T)                                                                      \
+    void ktest_expect_equal(T actual, T expected, const char* file, int line, const char* actual_str,      \
+                            const char* expected_str) {                                                    \
+        ktest_equality_check<T>(actual, expected, true, false, kExpectationLabel, file, line, actual_str,  \
+                                expected_str);                                                             \
+    }                                                                                                      \
+    void ktest_require_equal(T actual, T expected, const char* file, int line, const char* actual_str,     \
+                             const char* expected_str) {                                                   \
+        ktest_equality_check<T>(actual, expected, true, true, kRequirementLabel, file, line, actual_str,   \
+                                expected_str);                                                             \
+    }                                                                                                      \
+    void ktest_expect_not_equal(T actual, T expected, const char* file, int line, const char* actual_str,  \
+                                const char* expected_str) {                                                \
+        ktest_equality_check<T>(actual, expected, false, false, kExpectationLabel, file, line, actual_str, \
+                                expected_str);                                                             \
+    }                                                                                                      \
+    void ktest_require_not_equal(T actual, T expected, const char* file, int line, const char* actual_str, \
+                                 const char* expected_str) {                                               \
+        ktest_equality_check<T>(actual, expected, false, true, kRequirementLabel, file, line, actual_str,  \
+                                expected_str);                                                             \
     }
-}
 
-void ktest_expect_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                            const char* expected_str) {
-    if (actual == expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kExpectationLabel, false, static_cast<int>(actual), static_cast<int>(expected),
-                                actual_str, expected_str, file, line);
-        handle_assertion_failure(reason.c_str(), false);
-    }
-}
-
-void ktest_require_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                             const char* expected_str) {
-    if (actual == expected) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, kRequirementLabel, false, static_cast<int>(actual), static_cast<int>(expected),
-                                actual_str, expected_str, file, line);
-        handle_assertion_failure(reason.c_str(), true);
-    }
-}
+DEFINE_EQUALITY_ASSERTIONS(int)
+DEFINE_EQUALITY_ASSERTIONS(size_t)
+#undef DEFINE_EQUALITY_ASSERTIONS
 
 #endif  // CONFIG_KERNEL_SHELL && CONFIG_KERNEL_TESTING
