@@ -7,7 +7,7 @@ ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null 
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
-.PHONY: all build install test test-verbose clean full-clean clangd format docs
+.PHONY: all build install test test-verbose shell clean full-clean clangd format docs
 
 all: install
 
@@ -26,6 +26,9 @@ test:
 
 test-verbose:
 	@$(PLUME) test --verbose $(TEST)
+
+shell: install
+	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -display none -m 128 -smp 1
 
 clean:
 	@$(PLUME) clean

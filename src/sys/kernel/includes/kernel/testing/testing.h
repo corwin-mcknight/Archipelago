@@ -24,8 +24,6 @@ struct alignas(alignof(void*)) ktest {
 };
 
 [[noreturn]]
-void test_runner();
-[[noreturn]]
 void abort(unsigned char exit_code = 1);
 
 }  // namespace kernel::testing

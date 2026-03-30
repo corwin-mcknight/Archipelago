@@ -103,6 +103,7 @@ class KernelHarness:
         self._reader_thread: Optional[threading.Thread] = None
         self._lines: Optional[queue.Queue[Optional[str]]] = None
         self._ready = False
+        self._protocol_enabled = False
         self._exit_code: Optional[int] = None
 
     # ------------------------------------------------------------------
@@ -141,6 +142,7 @@ class KernelHarness:
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
         self._ready = False
+        self._protocol_enabled = False
         self._exit_code = None
         self.wait_for_prompt(self.boot_timeout)
 
@@ -230,11 +232,66 @@ class KernelHarness:
         if self._ready:
             return
         deadline = time.monotonic() + timeout
+        if not self._protocol_enabled:
+            # Wait for the shell to be ready (look for % prompt or any output settling)
+            # Then send harness enable
+            self._enable_protocol(deadline)
+        else:
+            # Already in protocol mode, wait for ready event
+            self._wait_for_ready(deadline)
+
+    def _enable_protocol(self, deadline: float) -> None:
+        # The shell prints boot log lines (each ending with \n), then shows
+        # the "% " prompt WITHOUT a trailing newline.  Since _next_line()
+        # reads whole lines, it will block once the prompt is displayed.
+        # Strategy: use the full boot timeout until we see the first line
+        # of output, then switch to a short settle timeout (0.5s).  Once
+        # boot output stops, the shell is at the prompt waiting for input.
+        settle_timeout = 0.5
+        seen_output = False
+        while True:
+            if seen_output:
+                inner_deadline = min(deadline, time.monotonic() + settle_timeout)
+            else:
+                inner_deadline = deadline
+            try:
+                line = self._next_line(inner_deadline)
+                seen_output = True
+            except HarnessTimeout:
+                if seen_output:
+                    break  # No more complete lines -- shell is at the "% " prompt
+                raise HarnessTimeout("timed out waiting for shell prompt")
+            except HarnessProcessExit:
+                raise
+            # Accept a ready/waiting event if shell is already in protocol mode
+            event = self._parse_line(line)
+            if event.kind == "harness" and event.payload:
+                evt = event.payload.get("event")
+                if evt in ("waiting", "ready"):
+                    self._ready = True
+                    self._protocol_enabled = True
+                    return
+
+        # Shell is at "% " prompt -- send harness enable
+        assert self.proc is not None
+        stdin = self.proc.stdin
+        assert stdin is not None
+        if self.verbose:
+            print("[harness] -> harness enable")
+        stdin.write("harness enable\r")
+        stdin.flush()
+        self._protocol_enabled = True
+        # Wait for the ready event
+        self._wait_for_ready(deadline)
+
+    def _wait_for_ready(self, deadline: float) -> None:
         while True:
             event = self._next_event(deadline)
-            if event.kind == "harness" and event.payload.get("event") == "waiting":
-                self._ready = True
-                return
+            if event.kind == "harness" and event.payload:
+                evt = event.payload.get("event")
+                if evt in ("waiting", "ready"):
+                    self._ready = True
+                    return
 
     def send_command(self, command: str) -> None:
         if not self.proc or self.proc.poll() is not None:
@@ -263,7 +320,7 @@ class KernelHarness:
             raw_lines.append(event.raw)
             if event.kind == "log":
                 continue
-            if event.kind == "harness" and event.payload.get("event") == "waiting":
+            if event.kind == "harness" and event.payload.get("event") in ("waiting", "ready"):
                 self._ready = True
                 return events, raw_lines
             events.append(event)
@@ -273,7 +330,7 @@ class KernelHarness:
     # ------------------------------------------------------------------
     def list_tests(self, timeout: float) -> List[TestDescriptor]:
         self.wait_for_prompt(timeout)
-        self.send_command("LIST")
+        self.send_command("test list")
         try:
             events, _ = self.gather_until_waiting(timeout)
         except HarnessGuestExit as exc:
@@ -340,7 +397,7 @@ class KernelHarness:
                     post_run_restart_done = True
                 continue
 
-            self.send_command(f"RUN {test_name}")
+            self.send_command(f"test run {test_name}")
             try:
                 events, raw_lines = self.gather_until_waiting(timeout)
             except HarnessGuestExit as exc:

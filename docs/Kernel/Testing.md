@@ -70,33 +70,38 @@ KTEST(my_feature_test, my_module) {
 
 ### Registration
 The macros place test descriptors in the `.ktests` linker section.
-The test runner discovers them at boot by walking the section between `__start__ktests` and `__stop__ktests`.
+The shell's `test` command discovers them at boot by walking the section between `__start__ktests` and `__stop__ktests`.
 
 ## How It Works
-When `CONFIG_KERNEL_TESTING` is enabled (the default), the kernel enters the test runner at the end of the [[Boot Process]].
-The runner and host harness (`tools/test-harness.py`) communicate over the [[Device Drivers|UART]].
+When `CONFIG_KERNEL_TESTING` is enabled (the default), the [[Shell|kernel shell]] provides the `test` command group.
+The shell boots into interactive mode; the host harness sends `harness enable` to switch to protocol mode, then drives tests programmatically.
 
 ### Protocol
+The harness communicates with the shell over UART.
+After connecting, it sends `harness enable` to enter protocol mode, then uses shell commands.
+
 Commands (host to kernel):
 
 | Command | Description |
 |---------|-------------|
-| `LIST` | Enumerate all registered tests |
-| `RUN <name>` | Run a specific test |
+| `harness enable` | Switch to protocol mode |
+| `test list` | Enumerate all registered tests |
+| `test run <name>` | Run a specific test |
 
 Events (kernel to host) are emitted as `@@HARNESS {...}` JSON lines:
 
 | Event | Fields | Meaning |
 |-------|--------|---------|
-| `waiting` | `protocol` | Runner is idle, ready for a command |
-| `test` | `name`, `module` | Test descriptor (response to `LIST`) |
-| `test_start` | `name` | Test beginning |
-| `test_end` | `name`, `status`, `reason` | Test completed (`pass`/`fail`/`error`/`skipped`) |
-| `error` | `message`, `file`, `line` | Assertion failure |
+| `ready` | `protocol` | Shell is idle, ready for a command |
+| `test` | `name`, `module` | Test descriptor (response to `test list`) |
+| `test_start` | `name`, `timestamp` | Test beginning |
+| `test_end` | `name`, `status`, `reason`, `timestamp` | Test completed (`pass`/`fail`) |
+| `error` | `message` | Assertion failure or command error |
 | `abort` | `code` | Guest requested QEMU exit |
 
 ### Harness Behavior
-- Boots QEMU with `-serial stdio`, waits up to 30s for the first `waiting` event.
+- Boots QEMU with `-serial stdio`, waits for boot output to settle, then sends `harness enable`.
+- Waits for the `ready` event before sending commands.
 - Retries infrastructure failures up to 3 times with a full VM restart.
 - For integration tests, restarts QEMU before and after the test.
 
