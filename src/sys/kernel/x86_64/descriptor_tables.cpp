@@ -64,26 +64,26 @@ __attribute__((aligned(0x10))) struct kernel::x86::idt_ptr idtptr;
 bool idt_initialized = false;
 
 void kernel::x86::init_gdt(int corenum) {
-    gdts[corenum].entries[0] = {0x0000, 0x00, 0x00, 0x00, 0x00, 0x00};  // Null Entry
-    gdts[corenum].entries[1] = {0xFFFF, 0x00, 0x00, 0x9A, 0xAF, 0x00};  // Kernel Code
-    gdts[corenum].entries[2] = {0xFFFF, 0x00, 0x00, 0x92, 0xAF, 0x00};  // Kernel Data
-    gdts[corenum].entries[3] = {0xFFFF, 0x00, 0x00, 0xFA, 0xAF, 0x00};  // User Code
-    gdts[corenum].entries[4] = {0xFFFF, 0x00, 0x00, 0xF2, 0xAF, 0x00};  // User Data
+    gdts[corenum].entries[0]     = {0x0000, 0x00, 0x00, 0x00, 0x00, 0x00};  // Null Entry
+    gdts[corenum].entries[1]     = {0xFFFF, 0x00, 0x00, 0x9A, 0xAF, 0x00};  // Kernel Code
+    gdts[corenum].entries[2]     = {0xFFFF, 0x00, 0x00, 0x92, 0xAF, 0x00};  // Kernel Data
+    gdts[corenum].entries[3]     = {0xFFFF, 0x00, 0x00, 0xFA, 0xAF, 0x00};  // User Code
+    gdts[corenum].entries[4]     = {0xFFFF, 0x00, 0x00, 0xF2, 0xAF, 0x00};  // User Data
 
     // TSS
-    uintptr_t tss_addr = (uintptr_t)&gdts[corenum].tss;
+    uintptr_t tss_addr           = (uintptr_t)&gdts[corenum].tss;
 
-    gdts[corenum].entries[5] = {sizeof(tss_entry),
-                                (uint16_t)(tss_addr & 0xFFFF),
-                                (uint8_t)((tss_addr >> 16) & 0xFF),
-                                0xE9,
-                                0x00,
-                                (uint8_t)((tss_addr >> 24) & 0xFF)};  // Core TSS
+    gdts[corenum].entries[5]     = {sizeof(tss_entry),
+                                    (uint16_t)(tss_addr & 0xFFFF),
+                                    (uint8_t)((tss_addr >> 16) & 0xFF),
+                                    0xE9,
+                                    0x00,
+                                    (uint8_t)((tss_addr >> 24) & 0xFF)};  // Core TSS
 
     gdts[corenum].tss_entry.base = (tss_addr >> 32) & 0xFFFFFFFF;
 
-    gdts[corenum].pointer.limit = sizeof(gdts[corenum].entries) + sizeof(tss_entry) - 1;
-    gdts[corenum].pointer.base = (uintptr_t)&gdts[corenum].entries;
+    gdts[corenum].pointer.limit  = sizeof(gdts[corenum].entries) + sizeof(tss_entry) - 1;
+    gdts[corenum].pointer.base   = (uintptr_t)&gdts[corenum].entries;
 
     kernel_x86_install_gdt((uintptr_t)&gdts[corenum].pointer);
 }
@@ -92,20 +92,20 @@ void kernel::x86::disable_interrupts() { asm volatile("cli"); }
 void kernel::x86::enable_interrupts() { asm volatile("sti"); }
 
 void kernel::x86::idt_set_gate(unsigned char num, uintptr_t base, unsigned short sel, unsigned char flags) {
-    idt[num].base_lo = base & 0xFFFF;
-    idt[num].base_mid = (base >> 16) & 0xFFFF;
-    idt[num].base_hi = (base >> 32) & 0xFFFFFFFF;
+    idt[num].base_lo   = base & 0xFFFF;
+    idt[num].base_mid  = (base >> 16) & 0xFFFF;
+    idt[num].base_hi   = (base >> 32) & 0xFFFFFFFF;
 
-    idt[num].selector = sel;
-    idt[num].flags = flags;
-    idt[num].ist = 0;
+    idt[num].selector  = sel;
+    idt[num].flags     = flags;
+    idt[num].ist       = 0;
     idt[num]._reserved = 0;
 }
 
 void kernel::x86::init_idt() {
     if (!idt_initialized) {
         idtptr.limit = sizeof(idt) - 1;
-        idtptr.base = (uintptr_t)&idt;
+        idtptr.base  = (uintptr_t)&idt;
 
         // Clear the IDT
         memset(&idt, 0, sizeof(idt));

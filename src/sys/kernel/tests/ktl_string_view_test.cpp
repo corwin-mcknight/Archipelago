@@ -19,7 +19,7 @@ KTEST(ktl_string_view_default_safe_accessors, "ktl/string_view") {
 KTEST(ktl_string_view_find_respects_bounds, "ktl/string_view") {
     ktl::string_view view("safety");
 
-    size_t first = view.find('f');
+    size_t first   = view.find('f');
     size_t missing = view.find('s', view.size());
 
     KTEST_EXPECT_TRUE(first == 2);
@@ -38,7 +38,7 @@ KTEST(ktl_string_view_copy_does_not_overrun, "ktl/string_view") {
     ktl::string_view view("kernel");
 
     char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
-    size_t copied = view.copy(buffer, 3);
+    size_t copied  = view.copy(buffer, 3);
 
     KTEST_EXPECT_TRUE(copied == 3);
     KTEST_EXPECT_EQUAL(buffer[0], 'k');

@@ -2,7 +2,7 @@
 
 int atoi(const char* str) {
     int result = 0;
-    int sign = (*str == '-') ? -1 : 1;
+    int sign   = (*str == '-') ? -1 : 1;
     if (sign == -1) ++str;
     while (*str) { result = result * 10 + (*str++ - '0'); }
     return sign * result;
@@ -16,7 +16,7 @@ void itoa(unsigned long long n, char* buffer, unsigned int base) {
     }
 
     unsigned long long tmp = n;
-    int len = 0;
+    int len                = 0;
     while (tmp) {
         tmp /= base;
         len++;

@@ -11,7 +11,7 @@ namespace kernel::mm {
 
 struct early_heap_block {
     size_t size;             // Total size of the block, including this header
-    early_heap_block *next;  // Next block in the list
+    early_heap_block* next;  // Next block in the list
     bool free;               // Whether the block is currently free
     uintptr_t payload_base;  // Pointer returned to the caller when allocated
 };
@@ -43,7 +43,7 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     heap_start           = aligned_start;
     heap_end             = aligned_end;
 
-    m_head               = reinterpret_cast<early_heap_block *>(heap_start);
+    m_head               = reinterpret_cast<early_heap_block*>(heap_start);
     m_head->size         = heap_end - heap_start;
     m_head->next         = nullptr;
     m_head->free         = true;
@@ -55,7 +55,7 @@ void early_heap::debug_print_state() {
     size_t free_bytes      = 0;
     size_t block_count     = 0;
 
-    for (early_heap_block *block = m_head; block != nullptr; block = block->next) {
+    for (early_heap_block* block = m_head; block != nullptr; block = block->next) {
         ++block_count;
         size_t payload_bytes = block->size > sizeof(early_heap_block) ? block->size - sizeof(early_heap_block) : 0;
         if (block->free) {
@@ -75,7 +75,7 @@ void early_heap::debug_print_state() {
                 free_bytes / KERNEL_MINIMUM_PAGE_SIZE);
 }
 
-void *early_heap::alloc(size_t size, size_t alignment) {
+void* early_heap::alloc(size_t size, size_t alignment) {
     if (size == 0) { return nullptr; }
 
     if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
@@ -86,7 +86,7 @@ void *early_heap::alloc(size_t size, size_t alignment) {
 
     if (alignment < heap_alignment_fallback) { alignment = heap_alignment_fallback; }
 
-    early_heap_block *block = m_head;
+    early_heap_block* block = m_head;
 
     while (block != nullptr) {
         if (!block->free) {
@@ -133,7 +133,7 @@ void *early_heap::alloc(size_t size, size_t alignment) {
         }
 
         if (remaining >= kMinimumSplitSize) {
-            auto *new_block         = reinterpret_cast<early_heap_block *>(new_block_addr);
+            auto* new_block         = reinterpret_cast<early_heap_block*>(new_block_addr);
             new_block->size         = remaining;
             new_block->next         = block->next;
             new_block->free         = true;
@@ -145,7 +145,7 @@ void *early_heap::alloc(size_t size, size_t alignment) {
         block->free         = false;
         block->payload_base = payload;
 
-        return reinterpret_cast<void *>(payload);
+        return reinterpret_cast<void*>(payload);
     }
 
     g_log.error("Early heap out of memory (allocation of {0} bytes with alignment {1})", size, alignment);
@@ -153,13 +153,13 @@ void *early_heap::alloc(size_t size, size_t alignment) {
     return nullptr;
 }
 
-void early_heap::free(void *ptr) {
+void early_heap::free(void* ptr) {
     if (ptr == nullptr) { return; }
 
     uintptr_t target        = reinterpret_cast<uintptr_t>(ptr);
 
-    early_heap_block *prev  = nullptr;
-    early_heap_block *block = m_head;
+    early_heap_block* prev  = nullptr;
+    early_heap_block* block = m_head;
 
     while (block != nullptr) {
         if (!block->free && block->payload_base == target) {

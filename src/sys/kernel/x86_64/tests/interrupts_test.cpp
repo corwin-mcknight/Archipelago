@@ -17,8 +17,8 @@ bool interrupt_test_function(register_frame_t* regs) {
 }
 
 struct counting_handler : kernel::hal::IInterruptHandler {
-    bool return_value = true;
-    int call_count = 0;
+    bool return_value           = true;
+    int call_count              = 0;
     register_frame_t* last_regs = nullptr;
 
     bool handle_interrupt(register_frame_t* regs) override {
@@ -31,7 +31,7 @@ struct counting_handler : kernel::hal::IInterruptHandler {
 
 static void InterruptManagerTestInit() {
     g_interrupt_manager.initialize();
-    g_function_handler_calls = 0;
+    g_function_handler_calls     = 0;
     g_function_handler_last_regs = nullptr;
 }
 

@@ -11,11 +11,11 @@ namespace {
 
 struct tracking_value {
     int value;
-    bool moved = false;
+    bool moved       = false;
 
     tracking_value() = default;
     explicit tracking_value(int v) : value(v) {}
-    tracking_value(const tracking_value&) = default;
+    tracking_value(const tracking_value&)            = default;
     tracking_value& operator=(const tracking_value&) = default;
 
     tracking_value(tracking_value&& other) noexcept : value(other.value), moved(true) {
@@ -24,8 +24,8 @@ struct tracking_value {
     }
 
     tracking_value& operator=(tracking_value&& other) noexcept {
-        value = other.value;
-        moved = true;
+        value       = other.value;
+        moved       = true;
         other.value = -1;
         other.moved = true;
         return *this;
@@ -94,7 +94,7 @@ KTEST(ktl_circular_buffer_copy_last_limits, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 5> buf;
     for (int i = 0; i < 5; ++i) { buf.push(i); }
 
-    int dest[3] = {-1, -1, -1};
+    int dest[3]   = {-1, -1, -1};
 
     size_t copied = buf.copy_last(dest, 3);
 
@@ -108,7 +108,7 @@ KTEST(ktl_circular_buffer_copy_last_shortens, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 4> buf;
     buf.push(99);
 
-    int dest[4] = {-1, -1, -1, -1};
+    int dest[4]   = {-1, -1, -1, -1};
     size_t copied = buf.copy_last(dest, 4);
 
     KTEST_REQUIRE_TRUE(copied == 1);
@@ -121,7 +121,7 @@ KTEST(ktl_circular_buffer_copy_last_shortens, "ktl/circular_buffer") {
 KTEST(ktl_circular_buffer_pop_empty, "ktl/circular_buffer") {
     ktl::circular_buffer<int, 2> buf;
 
-    auto empty_pop = buf.pop();
+    auto empty_pop  = buf.pop();
     auto empty_peek = buf.peek();
     KTEST_EXPECT_FALSE(empty_pop.has_value());
     KTEST_EXPECT_FALSE(empty_peek.has_value());

@@ -18,20 +18,20 @@ void reset_shared_heap(size_t bytes) {
 }  // namespace
 
 KTEST_WITH_INIT(early_heap_alloc_free_reuses_block, "mm/early_heap", early_heap_init_512) {
-    void *first = g_test_heap.alloc(64, 16);
+    void* first = g_test_heap.alloc(64, 16);
     KTEST_REQUIRE_TRUE(first != nullptr);
     KTEST_EXPECT_EQUAL(reinterpret_cast<uintptr_t>(first) & (16 - 1), static_cast<uintptr_t>(0));
 
     g_test_heap.free(first);
 
-    void *second = g_test_heap.alloc(64, 16);
+    void* second = g_test_heap.alloc(64, 16);
     KTEST_REQUIRE_TRUE(second != nullptr);
     KTEST_EXPECT_TRUE(second == first);
 }
 
 KTEST_WITH_INIT(early_heap_respects_large_alignment, "mm/early_heap", early_heap_init_512) {
     constexpr size_t alignment = 128;
-    void *ptr                  = g_test_heap.alloc(48, alignment);
+    void* ptr                  = g_test_heap.alloc(48, alignment);
 
     KTEST_REQUIRE_TRUE(ptr != nullptr);
     KTEST_EXPECT_EQUAL(reinterpret_cast<uintptr_t>(ptr) & (alignment - 1), static_cast<uintptr_t>(0));
@@ -40,37 +40,37 @@ KTEST_WITH_INIT(early_heap_respects_large_alignment, "mm/early_heap", early_heap
 KTEST_WITH_INIT(early_heap_alignment_falls_back_to_max_align, "mm/early_heap", early_heap_init_512) {
     const size_t fallback_alignment = alignof(max_align_t);
 
-    void *ptr                       = g_test_heap.alloc(24, 1);
+    void* ptr                       = g_test_heap.alloc(24, 1);
     KTEST_REQUIRE_TRUE(ptr != nullptr);
     KTEST_EXPECT_EQUAL(reinterpret_cast<uintptr_t>(ptr) & (fallback_alignment - 1), static_cast<uintptr_t>(0));
 }
 
 KTEST_WITH_INIT(early_heap_zero_size_returns_null, "mm/early_heap", early_heap_init_512) {
-    void *nothing = g_test_heap.alloc(0, 16);
+    void* nothing = g_test_heap.alloc(0, 16);
     KTEST_EXPECT_TRUE(nothing == nullptr);
 
-    void *usable = g_test_heap.alloc(64, 16);
+    void* usable = g_test_heap.alloc(64, 16);
     KTEST_REQUIRE_TRUE(usable != nullptr);
 }
 
 KTEST_WITH_INIT(early_heap_split_reuses_head_space, "mm/early_heap", early_heap_init_512) {
-    void *first  = g_test_heap.alloc(64, 16);
-    void *second = g_test_heap.alloc(32, 16);
+    void* first  = g_test_heap.alloc(64, 16);
+    void* second = g_test_heap.alloc(32, 16);
     KTEST_REQUIRE_TRUE(first != nullptr);
     KTEST_REQUIRE_TRUE(second != nullptr);
 
     g_test_heap.free(first);
 
-    void *third = g_test_heap.alloc(32, 16);
+    void* third = g_test_heap.alloc(32, 16);
     KTEST_REQUIRE_TRUE(third != nullptr);
     KTEST_EXPECT_TRUE(third == first);
     KTEST_EXPECT_TRUE(third != second);
 }
 
 KTEST_WITH_INIT(early_heap_coalesces_adjacent_blocks, "mm/early_heap", early_heap_init_full) {
-    void *first  = g_test_heap.alloc(64, 16);
-    void *second = g_test_heap.alloc(64, 16);
-    void *third  = g_test_heap.alloc(64, 16);
+    void* first  = g_test_heap.alloc(64, 16);
+    void* second = g_test_heap.alloc(64, 16);
+    void* third  = g_test_heap.alloc(64, 16);
 
     KTEST_REQUIRE_TRUE(first != nullptr);
     KTEST_REQUIRE_TRUE(second != nullptr);
@@ -79,21 +79,21 @@ KTEST_WITH_INIT(early_heap_coalesces_adjacent_blocks, "mm/early_heap", early_hea
     g_test_heap.free(second);
     g_test_heap.free(first);
 
-    void *merged = g_test_heap.alloc(128, 16);
+    void* merged = g_test_heap.alloc(128, 16);
     KTEST_REQUIRE_TRUE(merged != nullptr);
     KTEST_EXPECT_TRUE(merged == first);
 
     g_test_heap.free(third);
     g_test_heap.free(merged);
 
-    void *large = g_test_heap.alloc(160, 16);
+    void* large = g_test_heap.alloc(160, 16);
     KTEST_REQUIRE_TRUE(large != nullptr);
     KTEST_EXPECT_TRUE(large == first);
 }
 
 KTEST_WITH_INIT(early_heap_supports_multiple_alignment_requests, "mm/early_heap", early_heap_init_full) {
     constexpr size_t alignments[]                               = {1, 2, 4, 8, 16, 32, 64, 128};
-    void *allocated[sizeof(alignments) / sizeof(alignments[0])] = {nullptr};
+    void* allocated[sizeof(alignments) / sizeof(alignments[0])] = {nullptr};
 
     for (size_t i = 0; i < sizeof(alignments) / sizeof(alignments[0]); ++i) {
         allocated[i] = g_test_heap.alloc(48, alignments[i]);
@@ -103,14 +103,14 @@ KTEST_WITH_INIT(early_heap_supports_multiple_alignment_requests, "mm/early_heap"
 
     for (size_t i = 0; i < sizeof(alignments) / sizeof(alignments[0]); ++i) { g_test_heap.free(allocated[i]); }
 
-    void *merged = g_test_heap.alloc(256, alignof(max_align_t));
+    void* merged = g_test_heap.alloc(256, alignof(max_align_t));
     KTEST_REQUIRE_TRUE(merged != nullptr);
     KTEST_EXPECT_TRUE(merged == allocated[0]);
 }
 
 KTEST_WITH_INIT(early_heap_many_small_allocations_stress, "mm/early_heap", early_heap_init_full) {
     constexpr size_t block_count = 64;
-    void *blocks[block_count]    = {nullptr};
+    void* blocks[block_count]    = {nullptr};
 
     for (size_t i = 0; i < block_count; ++i) {
         blocks[i] = g_test_heap.alloc(8, 8);
@@ -124,7 +124,7 @@ KTEST_WITH_INIT(early_heap_many_small_allocations_stress, "mm/early_heap", early
     for (size_t i = 0; i < block_count; i += 2) { g_test_heap.free(blocks[i]); }
     for (size_t i = 1; i < block_count; i += 2) { g_test_heap.free(blocks[i]); }
 
-    void *large = g_test_heap.alloc(shared_heap_size / 2, alignof(max_align_t));
+    void* large = g_test_heap.alloc(shared_heap_size / 2, alignof(max_align_t));
     KTEST_REQUIRE_TRUE(large != nullptr);
     KTEST_EXPECT_TRUE(large == blocks[0]);
 }
@@ -135,9 +135,9 @@ KTEST_WITH_INIT(early_heap_reinitialization_cycles, "mm/early_heap", early_heap_
     for (size_t cycle = 0; cycle < cycle_count; ++cycle) {
         reset_shared_heap(512);
 
-        void *a = g_test_heap.alloc(64, 16);
-        void *b = g_test_heap.alloc(96, 32);
-        void *c = g_test_heap.alloc(48, 8);
+        void* a = g_test_heap.alloc(64, 16);
+        void* b = g_test_heap.alloc(96, 32);
+        void* c = g_test_heap.alloc(48, 8);
 
         KTEST_REQUIRE_TRUE(a != nullptr);
         KTEST_REQUIRE_TRUE(b != nullptr);
@@ -146,7 +146,7 @@ KTEST_WITH_INIT(early_heap_reinitialization_cycles, "mm/early_heap", early_heap_
         g_test_heap.free(b);
         g_test_heap.free(a);
 
-        void *big = g_test_heap.alloc(120, 16);
+        void* big = g_test_heap.alloc(120, 16);
         KTEST_REQUIRE_TRUE(big != nullptr);
         KTEST_EXPECT_TRUE(big == a);
 

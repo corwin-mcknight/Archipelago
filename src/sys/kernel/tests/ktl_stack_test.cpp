@@ -3,8 +3,8 @@
 #if CONFIG_KERNEL_TESTING
 
 #include <ktl/stack>
-#include <ktl/vector>
 #include <ktl/utility>
+#include <ktl/vector>
 
 using namespace kernel::testing;
 

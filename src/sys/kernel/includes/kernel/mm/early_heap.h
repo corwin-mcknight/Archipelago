@@ -11,13 +11,13 @@ class early_heap {
     void on_boot(uintptr_t start, uintptr_t end);
     void debug_print_state();
 
-    void *alloc(size_t size, size_t alignment = 1);
-    void free(void *ptr);
+    void* alloc(size_t size, size_t alignment = 1);
+    void free(void* ptr);
 
-    template <typename T> T *alloc_object() { return static_cast<T *>(alloc(sizeof(T), alignof(T))); }
+    template <typename T> T* alloc_object() { return static_cast<T*>(alloc(sizeof(T), alignof(T))); }
 
    private:
-    early_heap_block *m_head;
+    early_heap_block* m_head;
     uintptr_t heap_start;
     uintptr_t heap_end;
 };
