@@ -1,7 +1,8 @@
 # Handle Table
 
-> [!info] Design
-> This feature is not yet implemented. This page describes the planned design.
+> [!info] Partial Implementation
+> The handle table is implemented with create (via emplace), duplicate, close, type-safe get, and info.
+> Transfer between tables, kernel-owned tables, and dispatch routing are not yet implemented.
 
 The handle table is a per-process data structure that maps handle IDs to `(object, rights)` pairs.
 It is the gateway to the [[Object Model]] -- every operation on a kernel object begins with a handle table lookup.
@@ -9,34 +10,37 @@ It is the gateway to the [[Object Model]] -- every operation on a kernel object 
 ## Structure
 Each entry contains:
 
-- **Object reference** -- ref-counted pointer to the [[Object Model|kernel object]]
+- **Object reference** -- `ktl::ref<Object>` managing object lifetime through external reference counting
 - **Rights** -- capability bitfield, only reducible (see [[Object Model#What is a handle?]])
-- **Type identifier** -- identifies the object's registered type,
-  cached at handle creation time so the lookup path can determine the object's type without following the object pointer
-- **Generation counter** -- incremented each time a slot is recycled,
+- **Generation counter** -- 32-bit counter incremented each time a slot is recycled,
   preventing stale handle IDs from resolving to a different object (use-after-free prevention)
 
-Handle IDs are indices into the table.
+Handle IDs combine a 32-bit index and a 32-bit generation counter.
 When a handle is closed, its slot is returned to a free list for reuse.
 The generation counter on the recycled slot ensures that any outstanding references to the old handle ID will fail validation rather than silently resolving to whatever object now occupies that slot.
 
-Each process's handle table has a configurable capacity limit.
-Attempts to create handles beyond this limit fail, preventing resource exhaustion from runaway handle creation.
+The handle table grows dynamically -- it starts empty and allocates entries in batches as needed.
+Handle creation only fails on memory exhaustion, not on a fixed capacity limit.
+Entry internals are never exposed to callers; all access goes through typed accessors that return value copies or borrowed pointers to heap-allocated objects.
 
 ## Lookup
-Lookup takes a handle ID and validates it in a fixed sequence: bounds check, then generation check.
-Invalid or stale handles return `ERR_BAD_HANDLE`.
-Valid lookups yield the entry's object reference, rights, and type identifier -- everything the dispatch path needs without touching the object itself.
+Lookup takes a handle ID and validates it in a fixed sequence: bounds check, generation check, and liveness check (object reference non-null).
+Invalid or stale handles return `RESULT_HANDLE_INVALID`.
+
+The primary accessor is `get<T>(id, required_rights)`, which performs type validation (comparing the object's stored type ID against the expected type) and rights checking in a single locked operation.
+It returns a borrowed pointer to the concrete object type, or a typed error (`RESULT_WRONG_TYPE`, `RESULT_RIGHTS_VIOLATION`).
+A separate `info(id)` accessor returns a value-copy snapshot of handle metadata (rights, type ID, object ID) that is safe to hold across table mutations.
 
 ## Handle Operations
 Four operations define the handle lifecycle.
 They are composable primitives -- combined operations like "duplicate and transfer" are expressed as a duplicate followed by a transfer, keeping the operation set small and auditable.
 
 ### Create
-Allocates a free slot, associates it with an object, and assigns an initial set of rights.
-The rights are capped by the type's valid rights mask -- a handle cannot be created with rights that are meaningless for its object type.
-The type identifier is captured from the object's type descriptor and cached in the entry.
-The object's reference count is incremented.
+The primary creation path is `emplace<T>(rights, args...)`, which constructs the object and its handle atomically.
+Objects should not exist outside of a handle table -- emplace enforces this by combining allocation, construction, and handle creation into a single call.
+
+If the free list is empty, the table grows by allocating a batch of new entries.
+The object is wrapped in a `ktl::ref<Object>` with reference counting managed by the control block.
 
 Create is the only way handles come into existence.
 Every other operation that produces a handle (duplication, transfer) is defined in terms of creating a new entry.
@@ -72,14 +76,12 @@ Closing an already-closed handle returns `ERR_BAD_HANDLE` through the generation
 ## Type-Safe Access
 When the kernel processes an operation, it often needs to verify that a handle refers to a specific kind of object -- a channel operation should not succeed against a VMO handle.
 
-The type identifier cached in each handle entry makes this check possible without following the object pointer.
-The kernel compares the entry's type identifier against the expected type.
-Mismatches are rejected with an error before the operation reaches the object or enters the [[Object Model#Three-Path Dispatch|dispatch pipeline]].
+The `get<T>(id, required_rights)` accessor performs this check by calling the object's `type_id()` method and comparing it against the expected type's compile-time `TYPE_ID`.
+Mismatches are rejected with `RESULT_WRONG_TYPE` before the operation reaches the object.
+Rights are validated in the same operation -- `RESULT_RIGHTS_VIOLATION` is returned if the handle lacks the required rights.
 
-The type identifier is already present in the entry alongside the rights and generation counter, so type validation adds no additional memory access to the lookup path.
-
-For the [[Object Model#Three-Path Dispatch|three-path dispatch]], the same cached type identifier routes the operation to the correct type's [[Object Transaction Programs|transaction programs]].
-Type validation and type routing are the same check -- not two separate steps.
+On success, `get<T>()` returns a raw pointer to the concrete object type via `static_cast`.
+The pointer is borrowed -- the handle table owns the object's lifetime through its `ktl::ref<Object>`, so the pointer remains valid as long as the handle is open.
 
 ## Kernel-Owned Handle Tables
 The kernel itself sometimes needs to hold references to objects -- interrupt objects, boot-time channel endpoints, or internal bookkeeping resources.

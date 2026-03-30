@@ -87,8 +87,8 @@ override CXXFLAGS += \
 	-D ARCH_X86_64 \
 	-DLIMINE_API_REVISION=3 \
 	-D__x86_64__ \
-	-I $(PWD)/includes/std \
-	-I $(PWD)/includes
+	-I $(CURDIR)/includes/std \
+	-I $(CURDIR)/includes
 
 LDFLAGS := -nostdlib \
     -static \
