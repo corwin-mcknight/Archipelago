@@ -39,55 +39,29 @@ template <typename T, typename E> struct Result {
     ResultType type;
 
     void destroy() {
-        if (type == ResultType::Ok) {
-            value.ok.~T();
-        } else {
-            value.err.~E();
-        }
+        if (type == ResultType::Ok) { value.ok.~T(); }
+        else { value.err.~E(); }
+    }
+
+    template <typename Src> void construct_from(Src&& other) {
+        type = other.type;
+        if (type == ResultType::Ok) { new (&value.ok) T(ktl::forward<Src>(other).value.ok); }
+        else { new (&value.err) E(ktl::forward<Src>(other).value.err); }
     }
 
    public:
     ~Result() { destroy(); }
 
-    Result(const Result& other) : type(other.type) {
-        if (type == ResultType::Ok) {
-            new (&value.ok) T(other.value.ok);
-        } else {
-            new (&value.err) E(other.value.err);
-        }
-    }
-
-    Result(Result&& other) noexcept : type(other.type) {
-        if (type == ResultType::Ok) {
-            new (&value.ok) T(ktl::move(other.value.ok));
-        } else {
-            new (&value.err) E(ktl::move(other.value.err));
-        }
-    }
+    Result(const Result& other) { construct_from(other); }
+    Result(Result&& other) noexcept { construct_from(ktl::move(other)); }
 
     Result& operator=(const Result& other) {
-        if (this != &other) {
-            destroy();
-            type = other.type;
-            if (type == ResultType::Ok) {
-                new (&value.ok) T(other.value.ok);
-            } else {
-                new (&value.err) E(other.value.err);
-            }
-        }
+        if (this != &other) { destroy(); construct_from(other); }
         return *this;
     }
 
     Result& operator=(Result&& other) noexcept {
-        if (this != &other) {
-            destroy();
-            type = other.type;
-            if (type == ResultType::Ok) {
-                new (&value.ok) T(ktl::move(other.value.ok));
-            } else {
-                new (&value.err) E(ktl::move(other.value.err));
-            }
-        }
+        if (this != &other) { destroy(); construct_from(ktl::move(other)); }
         return *this;
     }
 

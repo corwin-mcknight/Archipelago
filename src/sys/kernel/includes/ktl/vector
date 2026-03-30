@@ -142,11 +142,7 @@ template <typename T> class vector {
         return true;
     }
 
-    bool emplace_back(T&& value) {
-        if (!ensure_capacity(m_size + 1)) { return false; }
-        m_data[m_size++] = ktl::move(value);
-        return true;
-    }
+    bool emplace_back(T&& value) { return push_back(ktl::move(value)); }
 
     ktl::maybe<T> pop_back() {
         if (empty()) { return ktl::nothing; }

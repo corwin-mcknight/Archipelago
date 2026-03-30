@@ -21,110 +21,25 @@ template <typename T> class deque {
     };
 
    public:
-    class const_iterator;
-
-    class iterator {
+    template <bool IsConst> class iterator_impl {
        public:
+        using deque_ptr       = typename ktl::conditional<IsConst, const deque*, deque*>::type;
         using difference_type = ptrdiff_t;
         using value_type      = T;
-        using reference       = T&;
-        using pointer         = T*;
+        using reference       = typename ktl::conditional<IsConst, const T&, T&>::type;
+        using pointer         = typename ktl::conditional<IsConst, const T*, T*>::type;
 
-        iterator()            = default;
-        iterator(deque* owner, size_t index) : m_owner(owner), m_index(index) {}
+        iterator_impl()       = default;
+        iterator_impl(deque_ptr owner, size_t index) : m_owner(owner), m_index(index) {}
 
-        reference operator*() const { return (*m_owner)[m_index]; }
-        pointer operator->() const { return &(*m_owner)[m_index]; }
+        // Allow iterator -> const_iterator conversion
+        template <bool OtherConst>
+            requires(IsConst && !OtherConst)
+        iterator_impl(const iterator_impl<OtherConst>& other) : m_owner(other.owner()), m_index(other.index()) {}
 
-        iterator& operator++() {
-            ++m_index;
-            return *this;
-        }
-
-        iterator operator++(int) {
-            iterator tmp(*this);
-            ++(*this);
-            return tmp;
-        }
-
-        iterator& operator--() {
-            --m_index;
-            return *this;
-        }
-
-        iterator operator--(int) {
-            iterator tmp(*this);
-            --(*this);
-            return tmp;
-        }
-
-        iterator& operator+=(difference_type n) {
-            if (n >= 0) {
-                m_index += static_cast<size_t>(n);
-            } else {
-                m_index -= static_cast<size_t>(-n);
-            }
-            return *this;
-        }
-
-        iterator& operator-=(difference_type n) {
-            if (n >= 0) {
-                m_index -= static_cast<size_t>(n);
-            } else {
-                m_index += static_cast<size_t>(-n);
-            }
-            return *this;
-        }
-
-        iterator operator+(difference_type n) const {
-            iterator tmp(*this);
-            tmp += n;
-            return tmp;
-        }
-
-        iterator operator-(difference_type n) const {
-            iterator tmp(*this);
-            tmp -= n;
-            return tmp;
-        }
-
-        friend iterator operator+(difference_type n, iterator it) { return it + n; }
-
-        difference_type operator-(const iterator& other) const {
-            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.m_index);
-        }
-
-        reference operator[](difference_type n) const {
-            return (*m_owner)[static_cast<size_t>(static_cast<difference_type>(m_index) + n)];
-        }
-
-        bool operator==(const iterator& other) const { return m_owner == other.m_owner && m_index == other.m_index; }
-        bool operator!=(const iterator& other) const { return !(*this == other); }
-        bool operator<(const iterator& other) const { return m_index < other.m_index; }
-        bool operator>(const iterator& other) const { return other < *this; }
-        bool operator<=(const iterator& other) const { return !(other < *this); }
-        bool operator>=(const iterator& other) const { return !(*this < other); }
-
-        size_t index() const { return m_index; }
-        const deque* owner() const { return m_owner; }
-
-       private:
-        deque* m_owner = nullptr;
-        size_t m_index = 0;
-    };
-
-    class const_iterator {
-       public:
-        using difference_type = ptrdiff_t;
-        using value_type      = const T;
-        using reference       = const T&;
-        using pointer         = const T*;
-
-        const_iterator()      = default;
-        const_iterator(const deque* owner, size_t index) : m_owner(owner), m_index(index) {}
-        const_iterator(const iterator& other) : m_owner(other.owner()), m_index(other.index()) {}
-
-        const_iterator& operator=(const iterator& other) {
+        template <bool OtherConst>
+            requires(IsConst && !OtherConst)
+        iterator_impl& operator=(const iterator_impl<OtherConst>& other) {
             m_owner = other.owner();
             m_index = other.index();
             return *this;
@@ -133,65 +48,25 @@ template <typename T> class deque {
         reference operator*() const { return (*m_owner)[m_index]; }
         pointer operator->() const { return &(*m_owner)[m_index]; }
 
-        const_iterator& operator++() {
-            ++m_index;
+        iterator_impl& operator++() { ++m_index; return *this; }
+        iterator_impl operator++(int) { auto tmp(*this); ++(*this); return tmp; }
+        iterator_impl& operator--() { --m_index; return *this; }
+        iterator_impl operator--(int) { auto tmp(*this); --(*this); return tmp; }
+
+        iterator_impl& operator+=(difference_type n) {
+            if (n >= 0) { m_index += static_cast<size_t>(n); }
+            else { m_index -= static_cast<size_t>(-n); }
             return *this;
         }
 
-        const_iterator operator++(int) {
-            const_iterator tmp(*this);
-            ++(*this);
-            return tmp;
-        }
+        iterator_impl& operator-=(difference_type n) { return *this += -n; }
 
-        const_iterator& operator--() {
-            --m_index;
-            return *this;
-        }
+        iterator_impl operator+(difference_type n) const { auto tmp(*this); tmp += n; return tmp; }
+        iterator_impl operator-(difference_type n) const { auto tmp(*this); tmp -= n; return tmp; }
+        friend iterator_impl operator+(difference_type n, iterator_impl it) { return it + n; }
 
-        const_iterator operator--(int) {
-            const_iterator tmp(*this);
-            --(*this);
-            return tmp;
-        }
-
-        const_iterator& operator+=(difference_type n) {
-            if (n >= 0) {
-                m_index += static_cast<size_t>(n);
-            } else {
-                m_index -= static_cast<size_t>(-n);
-            }
-            return *this;
-        }
-
-        const_iterator& operator-=(difference_type n) {
-            if (n >= 0) {
-                m_index -= static_cast<size_t>(n);
-            } else {
-                m_index += static_cast<size_t>(-n);
-            }
-            return *this;
-        }
-
-        const_iterator operator+(difference_type n) const {
-            const_iterator tmp(*this);
-            tmp += n;
-            return tmp;
-        }
-
-        const_iterator operator-(difference_type n) const {
-            const_iterator tmp(*this);
-            tmp -= n;
-            return tmp;
-        }
-
-        friend const_iterator operator+(difference_type n, const_iterator it) { return it + n; }
-
-        difference_type operator-(const const_iterator& other) const {
-            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.m_index);
-        }
-
-        difference_type operator-(const iterator& other) const {
+        template <bool C>
+        difference_type operator-(const iterator_impl<C>& other) const {
             return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.index());
         }
 
@@ -199,47 +74,23 @@ template <typename T> class deque {
             return (*m_owner)[static_cast<size_t>(static_cast<difference_type>(m_index) + n)];
         }
 
-        bool operator==(const const_iterator& other) const {
-            return m_owner == other.m_owner && m_index == other.m_index;
-        }
-        bool operator!=(const const_iterator& other) const { return !(*this == other); }
-        bool operator<(const const_iterator& other) const { return m_index < other.m_index; }
-        bool operator>(const const_iterator& other) const { return other < *this; }
-        bool operator<=(const const_iterator& other) const { return !(other < *this); }
-        bool operator>=(const const_iterator& other) const { return !(*this < other); }
-
-        bool operator==(const iterator& other) const { return m_owner == other.owner() && m_index == other.index(); }
-        bool operator!=(const iterator& other) const { return !(*this == other); }
-        bool operator<(const iterator& other) const { return m_index < other.index(); }
-        bool operator>(const iterator& other) const { return other < *this; }
-        bool operator<=(const iterator& other) const { return !(other < *this); }
-        bool operator>=(const iterator& other) const { return !(*this < other); }
+        template <bool C> bool operator==(const iterator_impl<C>& o) const { return m_owner == o.owner() && m_index == o.index(); }
+        template <bool C> bool operator!=(const iterator_impl<C>& o) const { return !(*this == o); }
+        template <bool C> bool operator<(const iterator_impl<C>& o) const { return m_index < o.index(); }
+        template <bool C> bool operator>(const iterator_impl<C>& o) const { return o < *this; }
+        template <bool C> bool operator<=(const iterator_impl<C>& o) const { return !(o < *this); }
+        template <bool C> bool operator>=(const iterator_impl<C>& o) const { return !(*this < o); }
 
         size_t index() const { return m_index; }
-        const deque* owner() const { return m_owner; }
+        deque_ptr owner() const { return m_owner; }
 
        private:
-        const deque* m_owner = nullptr;
-        size_t m_index       = 0;
+        deque_ptr m_owner = nullptr;
+        size_t m_index    = 0;
     };
 
-    friend bool operator==(const iterator& lhs, const const_iterator& rhs) {
-        return lhs.owner() == rhs.owner() && lhs.index() == rhs.index();
-    }
-
-    friend bool operator!=(const iterator& lhs, const const_iterator& rhs) { return !(lhs == rhs); }
-
-    friend bool operator<(const iterator& lhs, const const_iterator& rhs) { return lhs.index() < rhs.index(); }
-
-    friend bool operator>(const iterator& lhs, const const_iterator& rhs) { return rhs < lhs; }
-
-    friend bool operator<=(const iterator& lhs, const const_iterator& rhs) { return !(rhs < lhs); }
-
-    friend bool operator>=(const iterator& lhs, const const_iterator& rhs) { return !(lhs < rhs); }
-
-    friend typename iterator::difference_type operator-(const iterator& lhs, const const_iterator& rhs) {
-        return -(rhs - lhs);
-    }
+    using iterator       = iterator_impl<false>;
+    using const_iterator = iterator_impl<true>;
 
     deque() = default;
 
@@ -320,12 +171,23 @@ template <typename T> class deque {
         return true;
     }
 
-    T& operator[](size_t index) { return element_at_mutable(index); }
-    const T& operator[](size_t index) const { return element_at_const(index); }
+    T& operator[](size_t index) {
+        return const_cast<T&>(const_cast<const deque*>(this)->operator[](index));
+    }
+
+    const T& operator[](size_t index) const {
+        size_t remaining = index;
+        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
+            const block& blk = m_blocks[block_index];
+            if (remaining < blk.size()) { return blk.values[remaining]; }
+            remaining -= blk.size();
+        }
+        return m_blocks[0].values[0];
+    }
 
     ktl::maybe<T> at(size_t index) const {
         if (index >= m_size) { return ktl::nothing; }
-        return element_at_const(index);
+        return (*this)[index];
     }
 
     iterator begin() { return iterator(this, 0); }
@@ -418,26 +280,6 @@ template <typename T> class deque {
             if (!m_blocks[i - 1].empty()) { return i - 1; }
         }
         return 0;
-    }
-
-    T& element_at_mutable(size_t index) {
-        size_t remaining = index;
-        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
-            block& blk = m_blocks[block_index];
-            if (remaining < blk.size()) { return blk.values[remaining]; }
-            remaining -= blk.size();
-        }
-        return m_blocks[0].values[0];
-    }
-
-    const T& element_at_const(size_t index) const {
-        size_t remaining = index;
-        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
-            const block& blk = m_blocks[block_index];
-            if (remaining < blk.size()) { return blk.values[remaining]; }
-            remaining -= blk.size();
-        }
-        return m_blocks[0].values[0];
     }
 
     ktl::vector<block> m_blocks;

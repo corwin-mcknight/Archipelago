@@ -10,10 +10,7 @@ using namespace kernel::testing;
 KTEST(ktl_string_view_default_safe_accessors, "ktl/string_view") {
     ktl::string_view view;
 
-    KTEST_EXPECT_TRUE(view.empty());
-    KTEST_EXPECT_TRUE(view.size() == 0);
-    KTEST_EXPECT_TRUE(view.data() == nullptr);
-    KTEST_EXPECT_TRUE(view.find('a') == ktl::string_view::npos);
+    KTEST_EXPECT_ALL(view.empty(), view.size() == 0, view.data() == nullptr, view.find('a') == ktl::string_view::npos);
 }
 
 KTEST(ktl_string_view_find_respects_bounds, "ktl/string_view") {

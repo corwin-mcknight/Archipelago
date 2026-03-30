@@ -76,4 +76,7 @@ template <class T> constexpr bool is_lvalue_ref_v = __is_lvalue_reference(T);
 template <class T> constexpr bool is_rvalue_ref_v = __is_rvalue_reference(T);
 template <class T> constexpr bool is_const_v      = __is_const(T);
 
+template <bool B, class T, class F> struct conditional { using type = T; };
+template <class T, class F> struct conditional<false, T, F> { using type = F; };
+
 }  // namespace ktl

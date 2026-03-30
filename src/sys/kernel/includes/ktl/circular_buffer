@@ -12,24 +12,13 @@ namespace ktl {
 template <typename T, size_t N> class circular_buffer {
    public:
     void push(T value) {
-        buffer[tail] = value;
-        tail         = (tail + 1) % N;
-        if (!full()) {
-            count++;
-        } else {
-            head = (head + 1) % N;
-        }
-    }
-
-    void emplace(T&& value) {
         buffer[tail] = ktl::move(value);
         tail         = (tail + 1) % N;
-        if (count < N) {
-            count++;
-        } else {
-            head = (head + 1) % N;
-        }
+        if (!full()) { count++; }
+        else { head = (head + 1) % N; }
     }
+
+    void emplace(T&& value) { push(ktl::move(value)); }
 
     maybe<T> pop() {
         if (empty()) { return ktl::nothing; }

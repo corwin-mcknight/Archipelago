@@ -95,16 +95,10 @@ void execute_test(kernel::shell::ShellOutput& output, kernel::testing::ktest& te
 void list_tests(kernel::shell::ShellOutput& output) {
     for (auto* test = tests_begin(); test != tests_end(); ++test) {
         const char* module = test->submodule ? test->submodule : "";
-        if (test->flags & kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV) {
-            emit_harness_event(
-                output,
-                "@@HARNESS "
-                "{{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\",\"requires_clean_env\":true}}\n",
-                test->name, module);
-        } else {
-            emit_harness_event(output, "@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"}}\n",
-                               test->name, module);
-        }
+        const char* suffix =
+            (test->flags & kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV) ? ",\"requires_clean_env\":true}" : "}";
+        emit_harness_event(output, "@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}\n",
+                           test->name, module, suffix);
     }
 }
 
@@ -155,32 +149,6 @@ void test_handler(int argc, const char* const argv[], kernel::shell::ShellOutput
     }
 }
 
-// Assertion helpers
-
-constexpr const char* kExpectationLabel = "Expectation";
-constexpr const char* kRequirementLabel = "Requirement";
-
-void format_condition_failure(ktl::fixed_string<256>& buffer, const char* label, const char* condition_str,
-                              const char* file, int line) {
-    ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), "{0} failed: {1} at {2}:{3}", label,
-                                      condition_str, file, line);
-}
-
-void format_equality_failure(ktl::fixed_string<256>& buffer, const char* label, bool expect_equal, int actual,
-                             int expected, const char* actual_str, const char* expected_str, const char* file,
-                             int line) {
-    if (expect_equal) {
-        ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer),
-                                          "{0} failed: {1} == {2} (lhs {3}, rhs {4}) at {5}:{6}", label, actual_str,
-                                          expected_str, actual, expected, file, line);
-        return;
-    }
-
-    ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer),
-                                      "{0} failed: {1} != {2} (both {3}) at {4}:{5}", label, actual_str, expected_str,
-                                      actual, file, line);
-}
-
 void handle_assertion_failure(const char* message, bool fatal, unsigned char exit_code = 1) {
     record_failure(message);
     if (fatal) { kernel::testing::abort(exit_code); }
@@ -212,54 +180,53 @@ void kernel::testing::abort(unsigned char exit_code) {
 
 // Assertion function implementations
 
+static void ktest_condition_check(bool condition, bool fatal, const char* label, const char* file, int line,
+                                  const char* condition_str) {
+    if (condition) return;
+    ktl::fixed_string<256> reason;
+    ktl::format::format_to_buffer_raw(reason.m_buffer, sizeof(reason.m_buffer), "{0} failed: {1} at {2}:{3}", label,
+                                      condition_str, file, line);
+    handle_assertion_failure(reason.c_str(), fatal);
+}
+
 void ktest_expect(bool condition, const char* file, int line, const char* condition_str) {
-    if (!condition) {
-        ktl::fixed_string<256> reason;
-        format_condition_failure(reason, kExpectationLabel, condition_str, file, line);
-        handle_assertion_failure(reason.c_str(), false);
-    }
+    ktest_condition_check(condition, false, "Expectation", file, line, condition_str);
 }
 
 void ktest_require(bool condition, const char* file, int line, const char* condition_str) {
-    if (!condition) {
-        ktl::fixed_string<256> reason;
-        format_condition_failure(reason, kRequirementLabel, condition_str, file, line);
-        handle_assertion_failure(reason.c_str(), true);
-    }
+    ktest_condition_check(condition, true, "Requirement", file, line, condition_str);
 }
 
 template <typename T>
 void ktest_equality_check(T actual, T expected, bool expect_equal, bool fatal, const char* label, const char* file,
                           int line, const char* actual_str, const char* expected_str) {
     bool mismatch = expect_equal ? (actual != expected) : (actual == expected);
-    if (mismatch) {
-        ktl::fixed_string<256> reason;
-        format_equality_failure(reason, label, expect_equal, static_cast<int>(actual), static_cast<int>(expected),
-                                actual_str, expected_str, file, line);
-        handle_assertion_failure(reason.c_str(), fatal);
+    if (!mismatch) return;
+    ktl::fixed_string<256> reason;
+    if (expect_equal) {
+        ktl::format::format_to_buffer_raw(
+            reason.m_buffer, sizeof(reason.m_buffer), "{0} failed: {1} == {2} (lhs {3}, rhs {4}) at {5}:{6}", label,
+            actual_str, expected_str, static_cast<int>(actual), static_cast<int>(expected), file, line);
+    } else {
+        ktl::format::format_to_buffer_raw(reason.m_buffer, sizeof(reason.m_buffer),
+                                          "{0} failed: {1} != {2} (both {3}) at {4}:{5}", label, actual_str,
+                                          expected_str, static_cast<int>(actual), file, line);
     }
+    handle_assertion_failure(reason.c_str(), fatal);
 }
 
-#define DEFINE_EQUALITY_ASSERTIONS(T)                                                                      \
-    void ktest_expect_equal(T actual, T expected, const char* file, int line, const char* actual_str,      \
-                            const char* expected_str) {                                                    \
-        ktest_equality_check<T>(actual, expected, true, false, kExpectationLabel, file, line, actual_str,  \
-                                expected_str);                                                             \
-    }                                                                                                      \
-    void ktest_require_equal(T actual, T expected, const char* file, int line, const char* actual_str,     \
-                             const char* expected_str) {                                                   \
-        ktest_equality_check<T>(actual, expected, true, true, kRequirementLabel, file, line, actual_str,   \
-                                expected_str);                                                             \
-    }                                                                                                      \
-    void ktest_expect_not_equal(T actual, T expected, const char* file, int line, const char* actual_str,  \
-                                const char* expected_str) {                                                \
-        ktest_equality_check<T>(actual, expected, false, false, kExpectationLabel, file, line, actual_str, \
-                                expected_str);                                                             \
-    }                                                                                                      \
-    void ktest_require_not_equal(T actual, T expected, const char* file, int line, const char* actual_str, \
-                                 const char* expected_str) {                                               \
-        ktest_equality_check<T>(actual, expected, false, true, kRequirementLabel, file, line, actual_str,  \
-                                expected_str);                                                             \
+#define DEFINE_EQUALITY_ASSERTIONS(T)                                                              \
+    void ktest_expect_equal(T a, T e, const char* f, int l, const char* as, const char* es) {      \
+        ktest_equality_check<T>(a, e, true, false, "Expectation", f, l, as, es);                   \
+    }                                                                                              \
+    void ktest_require_equal(T a, T e, const char* f, int l, const char* as, const char* es) {     \
+        ktest_equality_check<T>(a, e, true, true, "Requirement", f, l, as, es);                    \
+    }                                                                                              \
+    void ktest_expect_not_equal(T a, T e, const char* f, int l, const char* as, const char* es) {  \
+        ktest_equality_check<T>(a, e, false, false, "Expectation", f, l, as, es);                  \
+    }                                                                                              \
+    void ktest_require_not_equal(T a, T e, const char* f, int l, const char* as, const char* es) { \
+        ktest_equality_check<T>(a, e, false, true, "Requirement", f, l, as, es);                   \
     }
 
 DEFINE_EQUALITY_ASSERTIONS(int)

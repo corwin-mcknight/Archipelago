@@ -18,33 +18,24 @@ template <size_t Max> struct simple_int_deque {
     size_t head   = 0;
     size_t count  = 0;
 
-    void push_back(int value) {
-        data[(head + count) % Max] = value;
-        ++count;
-    }
-
+    void push_back(int value) { data[(head + count++) % Max] = value; }
     void push_front(int value) {
         head       = (head + Max - 1) % Max;
         data[head] = value;
         ++count;
     }
-
     int pop_front() {
-        int value = data[head];
-        head      = (head + 1) % Max;
+        int v = data[head];
+        head  = (head + 1) % Max;
         --count;
-        return value;
+        return v;
     }
-
     int pop_back() {
-        size_t index = (head + count - 1) % Max;
-        int value    = data[index];
+        int v = data[(head + count - 1) % Max];
         --count;
-        return value;
+        return v;
     }
-
     int at(size_t index) const { return data[(head + index) % Max]; }
-
     bool empty() const { return count == 0; }
     size_t size() const { return count; }
 };
@@ -53,7 +44,6 @@ template <size_t Max> struct simple_int_deque {
 
 KTEST(ktl_deque_push_front_back_order, "ktl/deque") {
     ktl::deque<int> dq;
-
     KTEST_REQUIRE_TRUE(dq.empty());
 
     KTEST_REQUIRE_TRUE(dq.push_back(2));
@@ -67,26 +57,18 @@ KTEST(ktl_deque_push_front_back_order, "ktl/deque") {
     KTEST_EXPECT_EQUAL(dq[2], 2);
     KTEST_EXPECT_EQUAL(dq[3], 3);
 
-    auto front = dq.front();
-    auto back  = dq.back();
-    KTEST_REQUIRE_TRUE(front.has_value());
-    KTEST_REQUIRE_TRUE(back.has_value());
-    KTEST_EXPECT_EQUAL(front.value(), 0);
-    KTEST_EXPECT_EQUAL(back.value(), 3);
+    KTEST_EXPECT_VALUE(dq.front(), 0);
+    KTEST_EXPECT_VALUE(dq.back(), 3);
 }
 
 KTEST(ktl_deque_pop_front_back, "ktl/deque") {
     ktl::deque<int> dq;
     for (int i = 0; i < 5; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i)); }
 
-    auto popped_front = dq.pop_front();
-    KTEST_REQUIRE_TRUE(popped_front.has_value());
-    KTEST_EXPECT_EQUAL(popped_front.value(), 0);
+    KTEST_EXPECT_VALUE(dq.pop_front(), 0);
     KTEST_EXPECT_TRUE(dq.size() == 4);
 
-    auto popped_back = dq.pop_back();
-    KTEST_REQUIRE_TRUE(popped_back.has_value());
-    KTEST_EXPECT_EQUAL(popped_back.value(), 4);
+    KTEST_EXPECT_VALUE(dq.pop_back(), 4);
     KTEST_EXPECT_TRUE(dq.size() == 3);
 
     KTEST_EXPECT_EQUAL(dq[0], 1);
@@ -95,9 +77,7 @@ KTEST(ktl_deque_pop_front_back, "ktl/deque") {
 
     dq.clear();
     KTEST_EXPECT_TRUE(dq.empty());
-
-    auto empty_pop = dq.pop_front();
-    KTEST_EXPECT_FALSE(empty_pop.has_value());
+    KTEST_EXPECT_FALSE(dq.pop_front().has_value());
 }
 
 KTEST(ktl_deque_move_semantics, "ktl/deque") {
@@ -107,32 +87,22 @@ KTEST(ktl_deque_move_semantics, "ktl/deque") {
     tracking_value back_value{20};
 
     KTEST_REQUIRE_TRUE(dq.emplace_front(ktl::move(front_value)));
-    KTEST_EXPECT_TRUE(front_value.move_observed);
-    KTEST_EXPECT_EQUAL(front_value.value, -1);
+    KTEST_EXPECT_ALL(front_value.move_observed, front_value.value == -1);
 
     KTEST_REQUIRE_TRUE(dq.emplace_back(ktl::move(back_value)));
-    KTEST_EXPECT_TRUE(back_value.move_observed);
-    KTEST_EXPECT_EQUAL(back_value.value, -1);
+    KTEST_EXPECT_ALL(back_value.move_observed, back_value.value == -1);
 
-    KTEST_EXPECT_TRUE(dq.size() == 2);
-    KTEST_EXPECT_EQUAL(dq[0].value, 10);
-    KTEST_EXPECT_TRUE(dq[0].move_observed);
-    KTEST_EXPECT_EQUAL(dq[1].value, 20);
-    KTEST_EXPECT_TRUE(dq[1].move_observed);
+    KTEST_EXPECT_ALL(dq.size() == 2, dq[0].value == 10, dq[0].move_observed, dq[1].value == 20, dq[1].move_observed);
 
-    auto moved_out = dq.pop_front();
-    KTEST_REQUIRE_TRUE(moved_out.has_value());
-    KTEST_EXPECT_EQUAL(moved_out.value().value, 10);
-    KTEST_EXPECT_TRUE(moved_out.value().move_observed);
+    KTEST_REQUIRE_VALUE(moved_out, dq.pop_front());
+    KTEST_EXPECT_ALL(moved_out.value == 10, moved_out.move_observed);
 
-    auto remaining = dq.front();
-    KTEST_REQUIRE_TRUE(remaining.has_value());
-    KTEST_EXPECT_EQUAL(remaining.value().value, 20);
+    KTEST_REQUIRE_VALUE(remaining, dq.front());
+    KTEST_EXPECT_EQUAL(remaining.value, 20);
 }
 
 KTEST(ktl_deque_iterator_and_reserve, "ktl/deque") {
     ktl::deque<int> dq;
-
     KTEST_REQUIRE_TRUE(dq.reserve(64));
     KTEST_EXPECT_TRUE(dq.capacity() >= 64);
 
@@ -147,8 +117,7 @@ KTEST(ktl_deque_iterator_and_reserve, "ktl/deque") {
 
     auto mutable_begin                        = dq.begin();
     ktl::deque<int>::const_iterator converted = mutable_begin;
-    KTEST_EXPECT_TRUE(converted == dq.begin());
-    KTEST_EXPECT_TRUE(dq.begin() == converted);
+    KTEST_EXPECT_ALL(converted == dq.begin(), dq.begin() == converted);
     KTEST_EXPECT_EQUAL(converted[10], 10);
     KTEST_EXPECT_EQUAL(dq.begin()[15], 15);
 
@@ -159,14 +128,10 @@ KTEST(ktl_deque_iterator_and_reserve, "ktl/deque") {
         ++index;
     }
 
-    auto cbegin = const_ref.cbegin();
-    auto cend   = const_ref.cend();
-    KTEST_EXPECT_TRUE(cbegin == const_ref.begin());
-    KTEST_EXPECT_TRUE(cend == const_ref.end());
-
+    KTEST_EXPECT_ALL(const_ref.cbegin() == const_ref.begin(), const_ref.cend() == const_ref.end());
     KTEST_EXPECT_EQUAL(static_cast<size_t>(dq.end() - dq.begin()), dq.size());
-    KTEST_EXPECT_EQUAL(static_cast<size_t>(cend - dq.begin()), const_ref.size());
-    KTEST_EXPECT_EQUAL(static_cast<size_t>(dq.begin() - cbegin), 0u);
+    KTEST_EXPECT_EQUAL(static_cast<size_t>(const_ref.cend() - dq.begin()), const_ref.size());
+    KTEST_EXPECT_EQUAL(static_cast<size_t>(dq.begin() - const_ref.cbegin()), 0u);
     KTEST_EXPECT_EQUAL(*(dq.begin() + 5), 5);
     KTEST_EXPECT_EQUAL(*(dq.begin() + 20), 20);
 }
@@ -188,10 +153,7 @@ KTEST(ktl_deque_stress_front_back_mixed, "ktl/deque") {
         } else {
             KTEST_REQUIRE_TRUE(dq.push_back(value));
             model.push_back(value);
-            auto popped_front = dq.pop_front();
-            KTEST_REQUIRE_TRUE(popped_front.has_value());
-            int expected_front = model.pop_front();
-            KTEST_EXPECT_EQUAL(popped_front.value(), expected_front);
+            KTEST_EXPECT_VALUE(dq.pop_front(), model.pop_front());
         }
     }
 
@@ -208,19 +170,12 @@ KTEST(ktl_deque_stress_front_back_mixed, "ktl/deque") {
     bool pop_front_next = true;
     while (!model.empty()) {
         if (pop_front_next) {
-            auto popped_front = dq.pop_front();
-            KTEST_REQUIRE_TRUE(popped_front.has_value());
-            int expected_front = model.pop_front();
-            KTEST_EXPECT_EQUAL(popped_front.value(), expected_front);
+            KTEST_EXPECT_VALUE(dq.pop_front(), model.pop_front());
         } else {
-            auto popped_back = dq.pop_back();
-            KTEST_REQUIRE_TRUE(popped_back.has_value());
-            int expected_back = model.pop_back();
-            KTEST_EXPECT_EQUAL(popped_back.value(), expected_back);
+            KTEST_EXPECT_VALUE(dq.pop_back(), model.pop_back());
         }
         pop_front_next = !pop_front_next;
     }
-
     KTEST_EXPECT_TRUE(dq.empty());
 }
 
@@ -251,24 +206,15 @@ KTEST(ktl_deque_stress_block_reuse, "ktl/deque") {
         KTEST_EXPECT_EQUAL(dq.size(), model.size());
 
         for (size_t i = 0; i < block_size / 2; ++i) {
-            auto popped_front = dq.pop_front();
-            KTEST_REQUIRE_TRUE(popped_front.has_value());
-            int expected_front = model.pop_front();
-            KTEST_EXPECT_EQUAL(popped_front.value(), expected_front);
-
-            auto popped_back = dq.pop_back();
-            KTEST_REQUIRE_TRUE(popped_back.has_value());
-            int expected_back = model.pop_back();
-            KTEST_EXPECT_EQUAL(popped_back.value(), expected_back);
+            KTEST_EXPECT_VALUE(dq.pop_front(), model.pop_front());
+            KTEST_EXPECT_VALUE(dq.pop_back(), model.pop_back());
         }
-
         KTEST_EXPECT_TRUE(dq.empty());
     }
 }
 
 KTEST(ktl_deque_range_for, "ktl/deque") {
     ktl::deque<int> dq;
-
     for (int i = 0; i < 16; ++i) {
         if ((i % 2) == 0) {
             KTEST_REQUIRE_TRUE(dq.push_back(i));

@@ -29,9 +29,11 @@ template <typename T, typename Container = ktl::deque<T>> class stack {
     stack(stack&&) noexcept            = default;
     stack& operator=(stack&&) noexcept = default;
 
-    template <typename Value> bool push(Value&& value) { return push_back_impl(ktl::forward<Value>(value)); }
+    template <typename Value> bool push(Value&& value) {
+        return m_container.push_back(ktl::forward<Value>(value));
+    }
 
-    bool emplace(T&& value) { return emplace_back_impl(ktl::move(value)); }
+    bool emplace(T&& value) { return m_container.emplace_back(ktl::move(value)); }
 
     auto pop() -> pop_return_type { return m_container.pop_back(); }
 
@@ -47,12 +49,6 @@ template <typename T, typename Container = ktl::deque<T>> class stack {
     const container_type& container() const { return m_container; }
 
    private:
-    template <typename Value> bool push_back_impl(Value&& value) {
-        return m_container.push_back(ktl::forward<Value>(value));
-    }
-
-    bool emplace_back_impl(T&& value) { return m_container.emplace_back(ktl::move(value)); }
-
     Container m_container;
 };
 
