@@ -1,7 +1,8 @@
 # Object Model
 
-> [!info] Design
-> This feature is not yet implemented. This page describes the planned design.
+> [!info] Partial Implementation
+> The core object primitives are implemented: Object base class, type registry, handle table, and two concrete types (Event, Counter).
+> Storage models, three-path dispatch, OTPs, IPC, and server lifecycle are not yet implemented.
 
 The kernel's object model is the foundation of the system.
 Every resource -- channels, ports, sockets, interrupts, MMIO regions, DMA buffers -- is represented as a typed kernel object, accessed exclusively through capability handles.
@@ -11,13 +12,17 @@ Every resource -- channels, ports, sockets, interrupts, MMIO regions, DMA buffer
 An object is anything that can be pointed to by a handle.
 The base representation is deliberately minimal:
 
-- **Reference count** -- atomic, drives lifetime
-- **Type descriptor** -- points to the registered type and any attached [[Object Transaction Programs]]
+- **Type ID** -- a stored integer identifying the object's registered type.
+  The full type descriptor (name, rights, storage model) lives in the type registry and is looked up by ID when needed.
 - **Signal state** -- waitable signal bits for the [[IPC Primitives|signal/wait and polling]] systems
 - **Object ID** -- a unique kernel-wide identifier assigned at creation from a monotonic counter.
   The object ID is not a handle and not a capability -- it exists for kernel-internal purposes:
   unambiguous identification in logs and diagnostics, and same-object identity checks across [[Handle Table|handle tables]].
   Object IDs are never reused.
+- **Debug name** -- an optional nullable label for logging and diagnostics
+
+Reference counting is external -- `ktl::ref<T>` manages object lifetime through a non-intrusive control block.
+The object itself carries no refcount field.
 
 The kernel does not interpret what an object *means*.
 It knows things *about* the object (structural constraints, storage model, valid operations) but all semantic meaning is owned by the server that registered the type.
@@ -41,7 +46,8 @@ A handle with write rights to a read-only type will have writes rejected by the 
 ### Object lifetime
 An object lives as long as handles reference it.
 When the last handle is [[Handle Table#Close|closed]], the object is destroyed.
-The kernel manages this through atomic reference counting.
+The kernel manages this through `ktl::ref<T>`, which uses atomic reference counting in a type-erased control block.
+The type registry tracks live instance counts per type for diagnostics and auditing.
 
 When a [[Server Lifecycle|server crashes]], **all handles and objects of that type are destroyed**.
 No partial recovery, no zombie objects.
@@ -55,13 +61,13 @@ Types are **never unregistered** -- they exist for the lifetime of the system.
 
 Registration consists of:
 
-- **Type name** -- human-readable identifier ("socket", "framebuffer", "vmo")
-- **Type ID** -- kernel-assigned identifier, returned at registration.
-  Used by the [[Handle Table#Type-Safe Access|type-safe access]] mechanism to validate handle types
-  without runtime type introspection.
-- **Default rights** -- rights assigned when a handle is created
+- **Type name** -- human-readable identifier ("event", "counter", "channel")
+- **Type ID** -- for kernel-defined types, a constexpr value declared in the type's class.
+  User-defined types will receive dynamically assigned IDs.
+  Used by the [[Handle Table#Type-Safe Access|type-safe access]] mechanism to validate handle types without runtime type introspection.
+- **Default rights** -- rights assigned when a handle is created without an explicit rights argument
 - **Valid rights** -- mask of rights that are meaningful for this type
-- **Storage model** -- how the kernel manages data for objects of this type (see [[#Storage Models]])
+- **Storage model** -- how the kernel manages data for objects of this type (see [[#Storage Models]], not yet implemented)
 
 [[Object Transaction Programs]] are attached later, after type registration, by authorized handles at runtime.
 They are not part of the initial registration payload.

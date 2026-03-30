@@ -22,9 +22,14 @@
 - Provide kernel synchronization primitives (spinlocks, mutexes) with contention diagnostics.
 
 ## Handles & Syscalls
-- Complete the handle table with entitlement enforcement, auditing, and lifecycle management.
+- ~~Implement handle table with create, duplicate, close, type-safe get, and generation counters.~~ Done.
+- ~~Implement type registry with registration, lookup, and live object accounting.~~ Done.
+- ~~Implement Event and Counter kernel object types.~~ Done.
+- Cap handle rights at creation time against the type's valid rights mask.
+- Implement handle transfer between tables for cross-process capability passing.
+- Add kernel-owned handle tables for internal object references.
+- Add handle revocation flows for server crash cleanup.
 - Define the syscall ABI, establish the userspace entry stub, and implement dispatch plumbing.
-- Provide handle duplication, transfer, and revocation flows with capability checks.
 
 ## Process & Thread Lifecycle
 - Introduce process and thread creation, teardown, and signal or exception propagation.
@@ -63,6 +68,12 @@
 - Provide scripts for log capture, tracing, and structured debugging workflows.
 - Document usage of GDB/LLDB with QEMU, and keep `make clangd` artefacts current.
 - Improve build caching, dependency tracking, and multi-target build matrix support.
+- Kernel Shell, built in shell that merges the testing suite with an interactive command line for diagnostics and experimentation of the kernel.
+    - Built in commands to poke VMM, scheduler, handle tables, and other core subsystems.
+    - Object Inspection
+    - Table Dumps
+    - Runtime Metrics
+    - Debugging Aids
 
 ## Documentation & Governance
 - Expand architecture and design docs to cover scheduler, memory management, and handle models.
