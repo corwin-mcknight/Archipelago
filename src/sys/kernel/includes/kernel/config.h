@@ -15,6 +15,7 @@
 
 #define CONFIG_KERNEL_LOG_COLORS 1
 #define CONFIG_KERNEL_TESTING 1
+#define CONFIG_MAX_OBJECT_TYPES 64
 
 // Testing overrides
 
