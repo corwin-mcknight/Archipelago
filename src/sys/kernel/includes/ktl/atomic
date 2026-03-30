@@ -1,0 +1,62 @@
+#pragma once
+
+#include <stdint.h>
+
+namespace ktl {
+
+enum class memory_order {
+    relaxed = __ATOMIC_RELAXED,
+    acquire = __ATOMIC_ACQUIRE,
+    release = __ATOMIC_RELEASE,
+    acq_rel = __ATOMIC_ACQ_REL,
+    seq_cst = __ATOMIC_SEQ_CST,
+};
+
+template <typename T>
+class atomic {
+   public:
+    constexpr atomic(T initial = T{}) : m_value(initial) {}
+
+    atomic(const atomic&)            = delete;
+    atomic& operator=(const atomic&) = delete;
+    atomic(atomic&&)                 = delete;
+    atomic& operator=(atomic&&)      = delete;
+
+    T load(memory_order order = memory_order::seq_cst) const {
+        return __atomic_load_n(&m_value, static_cast<int>(order));
+    }
+
+    void store(T value, memory_order order = memory_order::seq_cst) {
+        __atomic_store_n(&m_value, value, static_cast<int>(order));
+    }
+
+    T fetch_add(T value, memory_order order = memory_order::seq_cst) {
+        return __atomic_fetch_add(&m_value, value, static_cast<int>(order));
+    }
+
+    T fetch_sub(T value, memory_order order = memory_order::seq_cst) {
+        return __atomic_fetch_sub(&m_value, value, static_cast<int>(order));
+    }
+
+    T fetch_or(T value, memory_order order = memory_order::seq_cst) {
+        return __atomic_fetch_or(&m_value, value, static_cast<int>(order));
+    }
+
+    T fetch_and(T value, memory_order order = memory_order::seq_cst) {
+        return __atomic_fetch_and(&m_value, value, static_cast<int>(order));
+    }
+
+    T exchange(T value, memory_order order = memory_order::seq_cst) {
+        return __atomic_exchange_n(&m_value, value, static_cast<int>(order));
+    }
+
+    bool compare_exchange(T& expected, T desired, memory_order order = memory_order::seq_cst) {
+        return __atomic_compare_exchange_n(&m_value, &expected, desired, false, static_cast<int>(order),
+                                           static_cast<int>(order));
+    }
+
+   private:
+    T m_value;
+};
+
+}  // namespace ktl

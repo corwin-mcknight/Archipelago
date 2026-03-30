@@ -20,6 +20,9 @@ typedef intptr_t result_t;
 #define RESULT_OOM -4
 #define RESULT_WRONG_TYPE -5
 #define RESULT_HANDLE_INVALID -6
+#define RESULT_ALREADY_REGISTERED -7
+#define RESULT_RIGHTS_VIOLATION -8
+#define RESULT_REGISTRY_FULL -9
 
 enum class ResultType { Ok, Err };
 
