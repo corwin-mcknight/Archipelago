@@ -11,10 +11,16 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
+
+
+# Outcome priority for resolving conflicts between exit-code and event outcomes.
+_OUTCOME_PRIORITY = {"error": 5, "fail": 4, "timeout": 3, "infra": 2, "skipped": 1, "pass": 0}
+
+# Prefixes recognised on the serial line, mapped to event kind.
+_EVENT_PREFIXES = (("@@HARNESS ", "harness"), ("@@TEST ", "test"))
 
 
 @dataclass
@@ -42,14 +48,6 @@ class TestResult:
     requires_clean_env: bool = False
     attempts: List[AttemptLog] = field(default_factory=list)
 
-    @property
-    def attempts_count(self) -> int:
-        return len(self.attempts)
-
-    @property
-    def final_attempt(self) -> AttemptLog:
-        return self.attempts[-1]
-
 
 @dataclass
 class TestDescriptor:
@@ -63,21 +61,10 @@ class HarnessError(Exception):
     pass
 
 
-class HarnessTimeout(HarnessError):
-    pass
-
-
 class HarnessProcessExit(HarnessError):
     def __init__(self, message: str, exit_code: Optional[int] = None) -> None:
         super().__init__(message)
         self.exit_code = exit_code
-
-
-class HarnessGuestExit(HarnessProcessExit):
-    def __init__(self, exit_code: Optional[int], events: List[Event], lines: List[str]) -> None:
-        super().__init__(f"kernel exited with status {exit_code}", exit_code)
-        self.events = events
-        self.lines = lines
 
 
 class KernelHarness:
@@ -107,22 +94,15 @@ class KernelHarness:
         self._exit_code: Optional[int] = None
 
     # ------------------------------------------------------------------
-    # Process lifecycle helpers
+    # Process lifecycle
     # ------------------------------------------------------------------
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
             return
         args = [
-            self.qemu,
-            "--cdrom",
-            str(self.iso),
-            "-serial",
-            "stdio",
-            "-display",
-            "none",
-            "-no-reboot",
-            "-m",
-            str(self.memory),
+            self.qemu, "--cdrom", str(self.iso),
+            "-serial", "stdio", "-display", "none", "-no-reboot",
+            "-m", str(self.memory),
         ]
         if self.add_exit_device:
             args.extend(["-device", "isa-debug-exit,iobase=0x604,iosize=0x02"])
@@ -131,13 +111,8 @@ class KernelHarness:
             print(f"[harness] launching: {' '.join(args)}")
         self._lines = queue.Queue()
         self.proc = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
+            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True,
         )
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
@@ -167,11 +142,8 @@ class KernelHarness:
     # Serial handling
     # ------------------------------------------------------------------
     def _reader_loop(self) -> None:
-        assert self.proc is not None
-        stdout = self.proc.stdout
-        assert stdout is not None
-        assert self._lines is not None
-        for raw_line in stdout:
+        assert self.proc is not None and self.proc.stdout is not None and self._lines is not None
+        for raw_line in self.proc.stdout:
             self._lines.put(raw_line.rstrip("\n"))
         if self.proc:
             self._exit_code = self.proc.poll()
@@ -179,51 +151,32 @@ class KernelHarness:
 
     def _next_line(self, deadline: Optional[float]) -> str:
         assert self._lines is not None
-        while True:
-            remaining: Optional[float]
-            if deadline is None:
-                remaining = None
-            else:
-                remaining = max(0.0, deadline - time.monotonic())
-                if remaining <= 0.0:
-                    raise HarnessTimeout("timed out waiting for serial output")
-            try:
-                item = self._lines.get(timeout=remaining)
-            except queue.Empty as exc:
-                raise HarnessTimeout("timed out waiting for serial output") from exc
-            if item is None:
-                raise HarnessProcessExit("kernel process exited unexpectedly", self._exit_code)
-            return item.rstrip("\r")
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        if remaining is not None and remaining <= 0.0:
+            raise HarnessError("timed out waiting for serial output")
+        try:
+            item = self._lines.get(timeout=remaining)
+        except queue.Empty:
+            raise HarnessError("timed out waiting for serial output")
+        if item is None:
+            raise HarnessProcessExit("kernel process exited unexpectedly", self._exit_code)
+        return item.rstrip("\r")
 
     def _parse_line(self, line: str) -> Event:
-        if not line:
-            return Event(kind="log", payload=None, raw=line)
-        if line.startswith("@@HARNESS "):
-            payload = self._safe_json(line[len("@@HARNESS ") :], line)
-            if payload is None:
-                return Event(kind="log", payload=None, raw=line)
-            return Event(kind="harness", payload=payload, raw=line)
-        if line.startswith("@@TEST "):
-            payload = self._safe_json(line[len("@@TEST ") :], line)
-            if payload is None:
-                return Event(kind="log", payload=None, raw=line)
-            return Event(kind="test", payload=payload, raw=line)
+        for prefix, kind in _EVENT_PREFIXES:
+            if line.startswith(prefix):
+                try:
+                    return Event(kind=kind, payload=json.loads(line[len(prefix):]), raw=line)
+                except json.JSONDecodeError:
+                    sys.stderr.write(f"[harness] failed to parse JSON from line: {line}\n")
+                    break
         return Event(kind="log", payload=None, raw=line)
 
-    @staticmethod
-    def _safe_json(text: str, raw: str) -> Optional[Dict[str, Any]]:
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            sys.stderr.write(f"[harness] failed to parse JSON from line: {raw}\n")
-            return None
-
     def _next_event(self, deadline: Optional[float]) -> Event:
-        line = self._next_line(deadline)
-        event = self._parse_line(line)
+        event = self._parse_line(self._next_line(deadline))
         if self.verbose and event.kind != "log":
             sys.stdout.write(f"[harness] event: {event.raw}\n")
-        return event if event.kind != "log" else Event(kind="log", payload=None, raw=line)
+        return event
 
     # ------------------------------------------------------------------
     # Protocol helpers
@@ -233,77 +186,55 @@ class KernelHarness:
             return
         deadline = time.monotonic() + timeout
         if not self._protocol_enabled:
-            # Wait for the shell to be ready (look for % prompt or any output settling)
-            # Then send harness enable
             self._enable_protocol(deadline)
         else:
-            # Already in protocol mode, wait for ready event
             self._wait_for_ready(deadline)
 
     def _enable_protocol(self, deadline: float) -> None:
-        # The shell prints boot log lines (each ending with \n), then shows
-        # the "% " prompt WITHOUT a trailing newline.  Since _next_line()
-        # reads whole lines, it will block once the prompt is displayed.
-        # Strategy: use the full boot timeout until we see the first line
-        # of output, then switch to a short settle timeout (0.5s).  Once
-        # boot output stops, the shell is at the prompt waiting for input.
         settle_timeout = 0.5
         seen_output = False
         while True:
-            if seen_output:
-                inner_deadline = min(deadline, time.monotonic() + settle_timeout)
-            else:
-                inner_deadline = deadline
+            inner_deadline = min(deadline, time.monotonic() + settle_timeout) if seen_output else deadline
             try:
                 line = self._next_line(inner_deadline)
                 seen_output = True
-            except HarnessTimeout:
+            except HarnessError:
                 if seen_output:
-                    break  # No more complete lines -- shell is at the "% " prompt
-                raise HarnessTimeout("timed out waiting for shell prompt")
+                    break
+                raise HarnessError("timed out waiting for shell prompt")
             except HarnessProcessExit:
                 raise
-            # Accept a ready/waiting event if shell is already in protocol mode
             event = self._parse_line(line)
-            if event.kind == "harness" and event.payload:
-                evt = event.payload.get("event")
-                if evt in ("waiting", "ready"):
-                    self._ready = True
-                    self._protocol_enabled = True
-                    return
+            if event.kind == "harness" and event.payload and event.payload.get("event") in ("waiting", "ready"):
+                self._ready = True
+                self._protocol_enabled = True
+                return
 
-        # Shell is at "% " prompt -- send harness enable
-        assert self.proc is not None
-        stdin = self.proc.stdin
-        assert stdin is not None
+        assert self.proc is not None and self.proc.stdin is not None
         if self.verbose:
             print("[harness] -> harness enable")
-        stdin.write("harness enable\r")
-        stdin.flush()
+        self.proc.stdin.write("harness enable\r")
+        self.proc.stdin.flush()
         self._protocol_enabled = True
-        # Wait for the ready event
         self._wait_for_ready(deadline)
 
     def _wait_for_ready(self, deadline: float) -> None:
         while True:
             event = self._next_event(deadline)
-            if event.kind == "harness" and event.payload:
-                evt = event.payload.get("event")
-                if evt in ("waiting", "ready"):
-                    self._ready = True
-                    return
+            if event.kind == "harness" and event.payload and event.payload.get("event") in ("waiting", "ready"):
+                self._ready = True
+                return
 
     def send_command(self, command: str) -> None:
         if not self.proc or self.proc.poll() is not None:
             raise HarnessProcessExit("kernel is not running")
         if not self._ready:
             raise HarnessError("attempted to send command while kernel busy")
-        stdin = self.proc.stdin
-        assert stdin is not None
+        assert self.proc.stdin is not None
         if self.verbose:
             print(f"[harness] -> {command}")
-        stdin.write(command + "\r")
-        stdin.flush()
+        self.proc.stdin.write(command + "\r")
+        self.proc.stdin.flush()
         self._ready = False
 
     def gather_until_waiting(self, timeout: float) -> tuple[List[Event], List[str]]:
@@ -314,13 +245,12 @@ class KernelHarness:
             try:
                 event = self._next_event(deadline)
             except HarnessProcessExit as exc:
-                raise HarnessGuestExit(exc.exit_code if hasattr(exc, "exit_code") else None,
-                                        events,
-                                        raw_lines) from exc
+                # Return what we have; caller interprets the exit.
+                return events, raw_lines
             raw_lines.append(event.raw)
             if event.kind == "log":
                 continue
-            if event.kind == "harness" and event.payload.get("event") in ("waiting", "ready"):
+            if event.kind == "harness" and event.payload and event.payload.get("event") in ("waiting", "ready"):
                 self._ready = True
                 return events, raw_lines
             events.append(event)
@@ -331,38 +261,29 @@ class KernelHarness:
     def list_tests(self, timeout: float) -> List[TestDescriptor]:
         self.wait_for_prompt(timeout)
         self.send_command("test list")
-        try:
-            events, _ = self.gather_until_waiting(timeout)
-        except HarnessGuestExit as exc:
-            raise HarnessError(
-                f"kernel exited while listing tests (status {exc.exit_code})"
-            ) from exc
+        events, _ = self.gather_until_waiting(timeout)
         descriptors: List[TestDescriptor] = []
-        def _build_descriptor(payload: Dict[str, Any]) -> TestDescriptor:
-            requires_clean = bool(payload.get("requires_clean_env"))
+
+        def _build(payload: Dict[str, Any]) -> TestDescriptor:
             return TestDescriptor(
                 name=payload.get("name", ""),
                 module=payload.get("module"),
-                requires_clean_env=requires_clean,
+                requires_clean_env=bool(payload.get("requires_clean_env")),
                 metadata=payload,
             )
+
         for event in events:
-            if event.kind != "harness":
+            if event.kind != "harness" or not event.payload:
                 continue
-            payload = event.payload
-            etype = payload.get("event")
+            etype = event.payload.get("event")
             if etype == "test":
-                descriptors.append(_build_descriptor(payload))
+                descriptors.append(_build(event.payload))
             elif etype == "list":
-                tests = payload.get("tests", [])
-                if isinstance(tests, list):
-                    for item in tests:
-                        if isinstance(item, dict):
-                            descriptors.append(_build_descriptor(item))
-                        else:
-                            descriptors.append(TestDescriptor(name=str(item)))
+                tests = event.payload.get("tests", [])
+                for item in (tests if isinstance(tests, list) else []):
+                    descriptors.append(_build(item) if isinstance(item, dict) else TestDescriptor(name=str(item)))
             elif etype == "error":
-                raise HarnessError(payload.get("message", "error during LIST"))
+                raise HarnessError(event.payload.get("message", "error during LIST"))
         return descriptors
 
     def run_test(
@@ -375,163 +296,75 @@ class KernelHarness:
     ) -> TestResult:
         attempts: List[AttemptLog] = []
         max_attempts = 1 + max(0, retries)
-        post_run_restart_done = False
-        result: Optional[TestResult] = None
+
         if requires_clean_env:
             self.restart()
+
         for attempt_idx in range(1, max_attempts + 1):
-            attempt_clean_env = requires_clean_env and attempt_idx == 1
-            try:
-                self.wait_for_prompt(timeout)
-            except HarnessError as exc:
-                attempts.append(
-                    AttemptLog(
-                        attempt=attempt_idx,
-                        outcome="infra",
-                        reason=str(exc),
-                        requires_clean_env=attempt_clean_env,
-                    )
-                )
-                self.restart()
-                if requires_clean_env and attempt_idx == max_attempts:
-                    post_run_restart_done = True
-                continue
+            attempt = self._run_single_attempt(test_name, timeout, attempt_idx, requires_clean_env)
+            attempts.append(attempt)
 
-            self.send_command(f"test run {test_name}")
-            try:
-                events, raw_lines = self.gather_until_waiting(timeout)
-            except HarnessGuestExit as exc:
-                exit_outcome, exit_reason = self._summarise_exit(exc.exit_code)
-                event_outcome, event_reason, filtered_events = self._interpret_test_events(exc.events)
-
-                def _priority(label: str) -> int:
-                    return {
-                        "error": 5,
-                        "fail": 4,
-                        "timeout": 3,
-                        "infra": 2,
-                        "skipped": 1,
-                        "pass": 0,
-                    }.get(label, 0)
-
-                outcome = exit_outcome
-                reason = exit_reason
-                events_for_attempt = filtered_events or exc.events
-
-                if event_outcome != "infra" and _priority(event_outcome) >= _priority(outcome):
-                    outcome = event_outcome
-                    reason = event_reason or reason
-
-                error_messages: List[str] = []
-                for event in exc.events:
-                    payload = event.payload or {}
-                    if payload.get("event") == "error":
-                        message = payload.get("message") or payload.get("reason")
-                        if message:
-                            error_messages.append(message)
-
-                if error_messages and outcome in ("pass", "infra"):
-                    outcome = "fail"
-                    reason = error_messages[0]
-                elif not exc.events and outcome == "pass":
-                    outcome = "infra"
-                    reason = reason or "kernel exited without emitting events"
-
-                attempts.append(
-                    AttemptLog(
-                        attempt=attempt_idx,
-                        outcome=outcome,
-                        reason=reason,
-                        requires_clean_env=attempt_clean_env,
-                        events=events_for_attempt,
-                        lines=exc.lines,
-                    )
-                )
-                # Restart the harness to be ready for subsequent tests.
-                try:
-                    self.restart()
-                    if requires_clean_env:
-                        post_run_restart_done = True
-                except HarnessError:
-                    pass
-                result = TestResult(
-                    name=test_name,
-                    outcome=outcome,
-                    module=module,
-                    requires_clean_env=requires_clean_env,
-                    attempts=attempts,
-                )
+            if attempt.outcome in ("pass", "skipped", "fail", "error"):
                 break
-            except HarnessTimeout as exc:
-                attempts.append(
-                    AttemptLog(
-                        attempt=attempt_idx,
-                        outcome="timeout",
-                        reason=str(exc),
-                        requires_clean_env=attempt_clean_env,
-                    )
-                )
-                self.restart()
-                if requires_clean_env and attempt_idx == max_attempts:
-                    post_run_restart_done = True
-                continue
-            except HarnessProcessExit as exc:
-                attempts.append(
-                    AttemptLog(
-                        attempt=attempt_idx,
-                        outcome="infra",
-                        reason=str(exc),
-                        requires_clean_env=attempt_clean_env,
-                    )
-                )
-                self.restart()
-                if requires_clean_env and attempt_idx == max_attempts:
-                    post_run_restart_done = True
-                continue
-
-            outcome, reason, filtered = self._interpret_test_events(events)
-            attempts.append(
-                AttemptLog(
-                    attempt=attempt_idx,
-                    outcome=outcome,
-                    reason=reason,
-                    requires_clean_env=attempt_clean_env,
-                    events=filtered,
-                    lines=raw_lines,
-                )
-            )
-            if outcome == "pass" or outcome == "skipped" or outcome == "fail" or outcome == "error":
-                result = TestResult(
-                    name=test_name,
-                    outcome=outcome,
-                    module=module,
-                    requires_clean_env=requires_clean_env,
-                    attempts=attempts,
-                )
-                break
-            # Infrastructure issues fall through to retry.
+            # Infrastructure/timeout: restart and retry
             self.restart()
-            if requires_clean_env and attempt_idx == max_attempts:
-                post_run_restart_done = True
+        else:
+            attempt = None  # all attempts exhausted via loop
 
-        if result is None:
-            # All attempts exhausted without a definitive result.
-            final_outcome = attempts[-1].outcome if attempts else "infra"
-            result = TestResult(
-                name=test_name,
-                outcome=final_outcome,
-                module=module,
-                requires_clean_env=requires_clean_env,
-                attempts=attempts,
-            )
-
-        if requires_clean_env and not post_run_restart_done:
+        if requires_clean_env:
             try:
                 self.restart()
             except HarnessError:
                 pass
 
-        return result
+        final_outcome = attempts[-1].outcome if attempts else "infra"
+        return TestResult(
+            name=test_name,
+            outcome=final_outcome,
+            module=module,
+            requires_clean_env=requires_clean_env,
+            attempts=attempts,
+        )
+
+    def _run_single_attempt(
+        self, test_name: str, timeout: float, attempt_idx: int, requires_clean_env: bool
+    ) -> AttemptLog:
+        clean_flag = requires_clean_env and attempt_idx == 1
+        try:
+            self.wait_for_prompt(timeout)
+        except HarnessError as exc:
+            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc), requires_clean_env=clean_flag)
+
+        self.send_command(f"test run {test_name}")
+        try:
+            events, raw_lines = self.gather_until_waiting(timeout)
+        except HarnessError as exc:
+            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc), requires_clean_env=clean_flag)
+
+        outcome, reason, filtered = self._interpret_test_events(events)
+
+        # If kernel exited (gather returned early without "waiting"), check exit code
+        if not self._ready:
+            exit_outcome, exit_reason = self._summarise_exit(self._exit_code)
+            # Use whichever outcome is more severe
+            if _OUTCOME_PRIORITY.get(exit_outcome, 0) > _OUTCOME_PRIORITY.get(outcome, 0):
+                outcome, reason = exit_outcome, exit_reason
+            # Error messages from events override generic exit reasons
+            error_msgs = [
+                (e.payload.get("message") or e.payload.get("reason"))
+                for e in events if e.payload and e.payload.get("event") == "error"
+            ]
+            error_msgs = [m for m in error_msgs if m]
+            if error_msgs and outcome in ("pass", "infra"):
+                outcome, reason = "fail", error_msgs[0]
+            elif not events and outcome == "pass":
+                outcome = "infra"
+                reason = reason or "kernel exited without emitting events"
+
+        return AttemptLog(
+            attempt=attempt_idx, outcome=outcome, reason=reason,
+            requires_clean_env=clean_flag, events=filtered, lines=raw_lines,
+        )
 
     @staticmethod
     def _summarise_exit(exit_code: Optional[int]) -> tuple[str, str]:
@@ -540,68 +373,49 @@ class KernelHarness:
         if exit_code < 0:
             return "error", f"kernel terminated by signal {-exit_code}"
         if exit_code & 1:
-            guest_code = exit_code >> 1
-            return "error", f"guest requested abort via isa-debug-exit (code {guest_code})"
+            return "error", f"guest requested abort via isa-debug-exit (code {exit_code >> 1})"
         if exit_code == 0:
             return "pass", "guest exited cleanly"
         return "infra", f"unexpected kernel exit status {exit_code}"
 
-    def _interpret_test_events(self, events: Iterable[Event]) -> tuple[str, Optional[str], List[Event]]:
-        outcome = "infra"
-        reason: Optional[str] = None
+    @staticmethod
+    def _interpret_test_events(events: list[Event]) -> tuple[str, Optional[str], List[Event]]:
+        outcome, reason = "infra", None
         filtered: List[Event] = []
-        started = False
-        ended = False
-        error_seen = False
+        started = ended = error_seen = False
         error_reason: Optional[str] = None
+
         for event in events:
             filtered.append(event)
             payload = event.payload or {}
-            if event.kind == "harness":
-                etype = payload.get("event")
-                if etype == "test_start":
-                    started = True
-                elif etype == "test_end":
-                    ended = True
-                    outcome = payload.get("status", "pass")
-                    reason = payload.get("reason")
-                elif etype == "error":
-                    error_seen = True
-                    error_reason = payload.get("message")
-                    status = payload.get("status")
-                    if status:
-                        outcome = status
-                    reason = error_reason
-                    # an error does not necessarily end the stream; keep reading
-            elif event.kind == "test":
-                etype = payload.get("event")
-                if etype == "test_start":
-                    started = True
-                elif etype == "test_end":
-                    ended = True
-                    outcome = payload.get("status", "pass")
-                    reason = payload.get("reason")
-                elif etype == "error":
-                    error_seen = True
-                    error_reason = payload.get("reason") or payload.get("message")
-                    status = payload.get("status")
-                    if status:
-                        outcome = status
-                    reason = error_reason or reason
+            if event.kind not in ("harness", "test"):
+                continue
+            etype = payload.get("event")
+            if etype == "test_start":
+                started = True
+            elif etype == "test_end":
+                ended = True
+                outcome = payload.get("status", "pass")
+                reason = payload.get("reason")
+            elif etype == "error":
+                error_seen = True
+                error_reason = payload.get("message") or payload.get("reason")
+                if status := payload.get("status"):
+                    outcome = status
+                reason = error_reason or reason
+
         if not started and outcome == "infra":
             reason = "test did not start"
         if not ended and outcome in ("pass", "infra"):
             outcome = "timeout"
-            if reason is None:
-                reason = "did not observe test_end"
-        if error_seen and outcome in ("pass", "skipped"):
-            outcome = "fail"
-            if reason is None:
-                reason = error_reason or "error event emitted"
-        elif error_seen and outcome == "infra":
-            outcome = "error"
-            if reason is None:
-                reason = error_reason or "error event emitted"
+            reason = reason or "did not observe test_end"
+        if error_seen:
+            if outcome in ("pass", "skipped"):
+                outcome = "fail"
+                reason = reason or error_reason or "error event emitted"
+            elif outcome == "infra":
+                outcome = "error"
+                reason = reason or error_reason or "error event emitted"
         if outcome not in ("pass", "fail", "error", "skipped", "timeout"):
             outcome = "infra"
         return outcome, reason, filtered
@@ -615,186 +429,101 @@ def write_artifacts(base_dir: Optional[Path], result: TestResult) -> None:
         return
     artifact_root = base_dir
     if result.module:
-        components = [component for component in result.module.split("/") if component not in ("", ".", "..")]
-        for component in components:
-            artifact_root = artifact_root / component
+        for part in result.module.split("/"):
+            if part not in ("", ".", ".."):
+                artifact_root = artifact_root / part
     case_dir = artifact_root / result.name
     case_dir.mkdir(parents=True, exist_ok=True)
 
-    final_attempt = result.final_attempt
-    console_path = case_dir / "console.log"
-    with console_path.open("w", encoding="utf-8") as handle:
-        for line in final_attempt.lines:
-            handle.write(line)
-            handle.write("\n")
-
-    events_path = case_dir / "events.jsonl"
-    with events_path.open("w", encoding="utf-8") as handle:
-        for event in final_attempt.events:
-            if event.payload is not None:
-                json.dump(event.payload, handle)
-                handle.write("\n")
-
+    final = result.attempts[-1]
+    (case_dir / "console.log").write_text("\n".join(final.lines) + "\n" if final.lines else "", encoding="utf-8")
+    (case_dir / "events.jsonl").write_text(
+        "".join(json.dumps(e.payload) + "\n" for e in final.events if e.payload is not None),
+        encoding="utf-8",
+    )
     meta = {
-        "test": result.name,
-        "outcome": result.outcome,
-        "module": result.module,
+        "test": result.name, "outcome": result.outcome, "module": result.module,
         "requires_clean_env": result.requires_clean_env,
         "attempts": [
-            {
-                "attempt": attempt.attempt,
-                "outcome": attempt.outcome,
-                "reason": attempt.reason,
-                "requires_clean_env": attempt.requires_clean_env,
-            }
-            for attempt in result.attempts
+            {"attempt": a.attempt, "outcome": a.outcome, "reason": a.reason, "requires_clean_env": a.requires_clean_env}
+            for a in result.attempts
         ],
     }
-    meta_path = case_dir / "harness.json"
-    with meta_path.open("w", encoding="utf-8") as handle:
-        json.dump(meta, handle, indent=2)
-        handle.write("\n")
+    (case_dir / "harness.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
 # ----------------------------------------------------------------------
-# Scheduling helpers
+# Scheduling
 # ----------------------------------------------------------------------
 def reorder_tests_for_execution(tests: List[str], descriptor_map: Dict[str, TestDescriptor]) -> List[str]:
-    module_order: List[str] = []
-    module_buckets: Dict[str, Dict[str, deque[str]]] = {}
-    known_count = 0
-
-    for test in tests:
-        descriptor = descriptor_map.get(test)
-        if descriptor is None:
-            continue
-        known_count += 1
-        module_key = descriptor.module or ""
-        if module_key not in module_buckets:
-            module_buckets[module_key] = {"normal": deque(), "clean": deque()}
-            module_order.append(module_key)
-        bucket = module_buckets[module_key]
-        target = "clean" if descriptor.requires_clean_env else "normal"
-        bucket[target].append(test)
-
-    scheduled_known: List[str] = []
-
-    while True:
-        progress = False
-        for module in module_order:
-            normal_bucket = module_buckets[module]["normal"]
-            if normal_bucket:
-                scheduled_known.append(normal_bucket.popleft())
-                progress = True
-        if not progress:
-            break
-
-    clean_modules = [module for module in module_order if module_buckets[module]["clean"]]
-    while True:
-        progress = False
-        for module in clean_modules:
-            clean_bucket = module_buckets[module]["clean"]
-            if clean_bucket:
-                scheduled_known.append(clean_bucket.popleft())
-                progress = True
-        if not progress:
-            break
-
-    if len(scheduled_known) != known_count:
-        for module in module_order:
-            for bucket_name in ("normal", "clean"):
-                bucket = module_buckets[module][bucket_name]
-                while bucket:
-                    scheduled_known.append(bucket.popleft())
-
-    scheduled_iter = iter(scheduled_known)
-    reordered: List[str] = []
-    for test in tests:
-        if descriptor_map.get(test) is None:
-            reordered.append(test)
-        else:
-            reordered.append(next(scheduled_iter))
-    return reordered
+    known = [(t, descriptor_map[t]) for t in tests if t in descriptor_map]
+    unknown = [t for t in tests if t not in descriptor_map]
+    # Normal tests first (grouped by module for locality), then clean-env tests
+    known.sort(key=lambda pair: (pair[1].requires_clean_env, pair[1].module or ""))
+    return [t for t, _ in known] + unknown
 
 
 # ----------------------------------------------------------------------
-# CLI glue
+# CLI
 # ----------------------------------------------------------------------
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Archipelago kernel tests under QEMU")
-    parser.add_argument("tests", nargs="*", help="Specific tests to run (defaults to all)")
-    parser.add_argument("--iso", default="build/image.iso", type=Path, help="Path to the Archipelago ISO")
-    parser.add_argument("--qemu", default="qemu-system-x86_64", help="QEMU binary to use")
-    parser.add_argument("--memory", type=int, default=64, help="Guest memory size in MiB")
-    parser.add_argument("--boot-timeout", type=float, default=30.0, help="Timeout for kernel to enter waiting state")
-    parser.add_argument("--command-timeout", type=float, default=5.0, help="Timeout for list and run commands")
-    parser.add_argument("--test-timeout", type=float, default=5.0, help="Timeout waiting for a test to finish")
-    parser.add_argument("--retries", type=int, default=3, help="Retries for infrastructure failures")
-    parser.add_argument("--list", action="store_true", help="List tests and exit")
-    parser.add_argument("--artifacts", type=Path, default=Path("build/test-artifacts"), help="Directory for test artifacts")
-    parser.add_argument("--qemu-arg", action="append", default=[], help="Additional argument to pass to QEMU (repeatable)")
-    parser.add_argument("--no-artifacts", action="store_true", help="Disable artifact generation")
-    parser.add_argument("--no-exit-device", action="store_true", help="Do not attach isa-debug-exit to QEMU")
-    parser.add_argument("--verbose", action="store_true", help="Verbose harness logging")
-    return parser.parse_args(argv)
-
-
-def ensure_iso(path: Path) -> None:
-    if not path.exists():
-        raise HarnessError(f"ISO image not found: {path}")
+    p = argparse.ArgumentParser(description="Run Archipelago kernel tests under QEMU")
+    p.add_argument("tests", nargs="*", help="Specific tests to run (defaults to all)")
+    p.add_argument("--iso", default="build/image.iso", type=Path, help="Path to the Archipelago ISO")
+    p.add_argument("--qemu", default="qemu-system-x86_64", help="QEMU binary to use")
+    p.add_argument("--memory", type=int, default=64, help="Guest memory size in MiB")
+    p.add_argument("--boot-timeout", type=float, default=30.0, help="Timeout for kernel boot")
+    p.add_argument("--command-timeout", type=float, default=5.0, help="Timeout for list commands")
+    p.add_argument("--test-timeout", type=float, default=5.0, help="Timeout for a test to finish")
+    p.add_argument("--retries", type=int, default=3, help="Retries for infrastructure failures")
+    p.add_argument("--list", action="store_true", help="List tests and exit")
+    p.add_argument("--artifacts", type=Path, default=Path("build/test-artifacts"), help="Artifact directory")
+    p.add_argument("--qemu-arg", action="append", default=[], help="Extra QEMU argument (repeatable)")
+    p.add_argument("--no-artifacts", action="store_true", help="Disable artifact generation")
+    p.add_argument("--no-exit-device", action="store_true", help="Don't attach isa-debug-exit")
+    p.add_argument("--verbose", action="store_true", help="Verbose harness logging")
+    return p.parse_args(argv)
 
 
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
 
-    ensure_iso(args.iso)
-    artifact_dir: Optional[Path]
-    if args.no_artifacts:
-        artifact_dir = None
-    else:
-        artifact_dir = args.artifacts
+    if not args.iso.exists():
+        print(f"[harness] error: ISO image not found: {args.iso}", file=sys.stderr)
+        return 1
+
+    artifact_dir: Optional[Path] = None if args.no_artifacts else args.artifacts
+    if artifact_dir:
         if artifact_dir.exists():
             for item in artifact_dir.iterdir():
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
+                shutil.rmtree(item) if item.is_dir() else item.unlink()
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
     harness = KernelHarness(
-        qemu=args.qemu,
-        iso=args.iso,
-        memory=args.memory,
-        boot_timeout=args.boot_timeout,
-        extra_args=args.qemu_arg,
-        verbose=args.verbose,
-        add_exit_device=not args.no_exit_device,
+        qemu=args.qemu, iso=args.iso, memory=args.memory,
+        boot_timeout=args.boot_timeout, extra_args=args.qemu_arg,
+        verbose=args.verbose, add_exit_device=not args.no_exit_device,
     )
 
     exit_code = 0
     try:
         harness.start()
-
         descriptors = harness.list_tests(args.command_timeout)
-        descriptor_map = {descriptor.name: descriptor for descriptor in descriptors}
+        descriptor_map = {d.name: d for d in descriptors}
 
         if args.list and not args.tests:
-            for descriptor in descriptors:
-                module = f" [{descriptor.module}]" if descriptor.module else ""
-                print(f"{descriptor.name}{module}")
+            for d in descriptors:
+                module = f" [{d.module}]" if d.module else ""
+                print(f"{d.name}{module}")
             return 0
 
-        tests_to_run: List[str]
         if args.tests:
             tests_to_run = list(dict.fromkeys(args.tests))
-            for test_name in tests_to_run:
-                if test_name not in descriptor_map:
-                    print(
-                        f"[harness] warning: test '{test_name}' not discovered via LIST",
-                        file=sys.stderr,
-                    )
+            for name in tests_to_run:
+                if name not in descriptor_map:
+                    print(f"[harness] warning: test '{name}' not discovered via LIST", file=sys.stderr)
         else:
-            tests_to_run = [descriptor.name for descriptor in descriptors]
+            tests_to_run = [d.name for d in descriptors]
             if not tests_to_run:
                 print("[harness] no tests discovered", file=sys.stderr)
                 return 1
@@ -803,18 +532,14 @@ def main(argv: Sequence[str]) -> int:
 
         results: List[TestResult] = []
         failure_summaries: List[str] = []
-        passed_count = 0
-        failed_count = 0
+        passed_count = failed_count = 0
 
         for test_name in tests_to_run:
-            descriptor = descriptor_map.get(test_name)
-            requires_clean_env = descriptor.requires_clean_env if descriptor else False
+            desc = descriptor_map.get(test_name)
             result = harness.run_test(
-                test_name,
-                timeout=args.test_timeout,
-                retries=args.retries,
-                requires_clean_env=requires_clean_env,
-                module=descriptor.module if descriptor else None,
+                test_name, timeout=args.test_timeout, retries=args.retries,
+                requires_clean_env=desc.requires_clean_env if desc else False,
+                module=desc.module if desc else None,
             )
             results.append(result)
             write_artifacts(artifact_dir, result)
@@ -823,35 +548,27 @@ def main(argv: Sequence[str]) -> int:
                 passed_count += 1
             else:
                 failed_count += 1
-                attempt = result.final_attempt
-                prefix = {
-                    "fail": "FAIL",
-                    "error": "ERROR",
-                    "timeout": "TIMEOUT",
-                    "infra": "INFRA",
-                }.get(result.outcome, result.outcome.upper())
-                summary = f"{prefix}: {test_name} (attempts: {result.attempts_count})"
-                error_messages: List[str] = []
-                for event in attempt.events:
-                    payload = event.payload or {}
-                    if payload.get("event") == "error":
-                        message = payload.get("message") or payload.get("reason")
-                        if message:
-                            error_messages.append(message)
-                if attempt.reason and not error_messages:
-                    error_messages.append(attempt.reason)
-                if error_messages:
-                    summary += "\n" + "\n".join(f"    - {msg}" for msg in error_messages)
+                attempt = result.attempts[-1]
+                prefix = {"fail": "FAIL", "error": "ERROR", "timeout": "TIMEOUT", "infra": "INFRA"}.get(
+                    result.outcome, result.outcome.upper()
+                )
+                summary = f"{prefix}: {test_name} (attempts: {len(result.attempts)})"
+                error_msgs = [
+                    (e.payload.get("message") or e.payload.get("reason"))
+                    for e in attempt.events if (e.payload or {}).get("event") == "error"
+                ]
+                error_msgs = [m for m in error_msgs if m]
+                if not error_msgs and attempt.reason:
+                    error_msgs.append(attempt.reason)
+                if error_msgs:
+                    summary += "\n" + "\n".join(f"    - {msg}" for msg in error_msgs)
                 failure_summaries.append(summary)
 
-        if failure_summaries:
-            for summary in failure_summaries:
-                print(summary)
-        else:
+        for s in failure_summaries:
+            print(s)
+        if not failure_summaries:
             print("No test failures.")
-
         print(f"Summary: {passed_count} passed, {failed_count} failed")
-
         if failed_count > 0:
             exit_code = 1
 

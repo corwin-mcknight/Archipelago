@@ -55,17 +55,10 @@ def installed_manifest_dir(sysroot: str) -> str:
     return os.path.join(sysroot, "var", "plume", "manifests")
 
 
-def manifest_filename(qualified_name: str) -> str:
-    """Convert a qualified name to a manifest filename.
-
-    'sys/kernel-0.0.1~x86_64' -> 'sys--kernel-0.0.1~x86_64.json'
-    """
-    return qualified_name.replace("/", "--") + ".json"
-
-
 def installed_manifest_path(sysroot: str, qualified_name: str) -> str:
     """Return the full path of an installed manifest."""
-    return os.path.join(installed_manifest_dir(sysroot), manifest_filename(qualified_name))
+    filename = qualified_name.replace("/", "--") + ".json"
+    return os.path.join(installed_manifest_dir(sysroot), filename)
 
 
 def save_installed_manifest(manifest: dict, sysroot: str):
