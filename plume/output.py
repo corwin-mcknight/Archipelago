@@ -15,28 +15,12 @@ def ansi(text: str, *codes: int) -> str:
     return f"\033[{code_str}m{text}\033[0m"
 
 
-def bold(text: str) -> str:
-    return ansi(text, 1)
+def _make_style(code: int):
+    return lambda text: ansi(text, code)
 
-
-def green(text: str) -> str:
-    return ansi(text, 32)
-
-
-def red(text: str) -> str:
-    return ansi(text, 31)
-
-
-def cyan(text: str) -> str:
-    return ansi(text, 36)
-
-
-def yellow(text: str) -> str:
-    return ansi(text, 33)
-
-
-def dim(text: str) -> str:
-    return ansi(text, 2)
+bold, green, red, cyan, yellow, dim = (
+    _make_style(c) for c in (1, 32, 31, 36, 33, 2)
+)
 
 
 def fmt_timing_table(timings: list[tuple[str, float]], total: float) -> str:

@@ -105,6 +105,19 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
     return True, time.monotonic() - pkg_start
 
 
+def _commit_to_sysroot(package: Package, d_path: str, sysroot: str):
+    """Install built files into sysroot and update world/manifest atomically."""
+    if os.path.isdir(d_path) and os.listdir(d_path):
+        manifest = generate_manifest(package, d_path)
+        conflicts = check_conflicts(manifest, sysroot, exclude_pkg=package.qualified_name)
+        for path, owner in conflicts:
+            print(f"  {yellow('conflict')}: {path} (owned by {owner})")
+        _copy_tree(d_path, sysroot)
+        save_installed_manifest(manifest, sysroot)
+    if not package.is_build_tool:
+        World(sysroot).add(package.qualified_name)
+
+
 def install_package(
     config: Config, package: Package,
     verbose: bool = False, force: bool = False,
@@ -112,30 +125,17 @@ def install_package(
 ) -> tuple[bool, float]:
     """Install a package into the sysroot. Builds first if needed.
 
-    If a cached binary package exists (and no_binary is False), it is
-    extracted directly into the sysroot, skipping the build.  Otherwise
-    the package is built from source (which also creates a binary cache
-    entry).  Returns (success, elapsed_seconds).
+    Returns (success, elapsed_seconds).
     """
     total_start = time.monotonic()
     env = get_build_env(config, package)
     sysroot = env["SYSROOT"]
 
     # Try binary package cache first
-    use_binpkg = (
-        not no_binary
-        and not force
-        and not package.is_build_tool
-        and is_built(config, package)
-        and binpkg_exists(config, package)
-    )
-
-    if use_binpkg:
-        archive = binpkg_path(config, package)
-        manifest = extract_binpkg(archive, sysroot)
+    if not (no_binary or force or package.is_build_tool) and is_built(config, package) and binpkg_exists(config, package):
+        manifest = extract_binpkg(binpkg_path(config, package), sysroot)
         save_installed_manifest(manifest, sysroot)
-        world = World(sysroot)
-        world.add(package.qualified_name)
+        World(sysroot).add(package.qualified_name)
         return True, time.monotonic() - total_start
 
     # Build from source if needed
@@ -144,48 +144,18 @@ def install_package(
         if not ok:
             return False, time.monotonic() - total_start
 
-    # Copy $D contents into sysroot (skip for build tools with no $D output)
-    if os.path.isdir(env["D"]) and os.listdir(env["D"]):
-        # Check for file conflicts
-        manifest = generate_manifest(package, env["D"])
-        conflicts = check_conflicts(manifest, sysroot, exclude_pkg=package.qualified_name)
-        if conflicts:
-            for path, owner in conflicts:
-                print(f"  {yellow('conflict')}: {path} (owned by {owner})")
-
-        _copy_tree(env["D"], sysroot)
-        save_installed_manifest(manifest, sysroot)
-
-    # Update world file (build tools don't live in the sysroot)
-    if not package.is_build_tool:
-        world = World(sysroot)
-        world.add(package.qualified_name)
-
+    _commit_to_sysroot(package, env["D"], sysroot)
     return True, time.monotonic() - total_start
 
 
 def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool) -> tuple[bool, float]:
     """Run a single Make stage, printing a status row. Returns (success, elapsed)."""
+    capture = {} if verbose else {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
     t0 = time.monotonic()
-
-    if verbose:
-        result = subprocess.run(
-            [env["MAKE"], "-f", makefile, "--no-print-directory", stage],
-            env=env,
-            cwd=env["S"],
-        )
-        captured = None
-    else:
-        result = subprocess.run(
-            [env["MAKE"], "-f", makefile, "--no-print-directory", stage],
-            env=env,
-            cwd=env["S"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        captured = result.stdout
-
+    result = subprocess.run(
+        [env["MAKE"], "-f", makefile, "--no-print-directory", stage],
+        env=env, cwd=env["S"], **capture,
+    )
     elapsed = time.monotonic() - t0
     ok = result.returncode == 0
     row = f"  {label:<22}"
@@ -194,8 +164,8 @@ def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool) 
         print(f"{row}  {green('✓')}  {dim(fmt_duration(elapsed))}")
     else:
         print(f"{row}  {red('✗')}  FAILED")
-        if captured:
-            print(captured, end="")
+        if not verbose and result.stdout:
+            print(result.stdout, end="")
 
     return ok, elapsed
 
@@ -231,8 +201,7 @@ def uninstall_package(config: Config, package: Package) -> bool:
 
     # Remove manifest and world entry
     os.remove(manifest_path)
-    world = World(sysroot)
-    world.remove(package.qualified_name)
+    World(sysroot).remove(package.qualified_name)
 
     return True
 

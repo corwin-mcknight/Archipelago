@@ -29,10 +29,6 @@ def parallel_build(
 ) -> tuple[bool, list[tuple[str, float]]]:
     """Build packages in parallel respecting dependency order.
 
-    Uses TopologicalSorter's iterative API to dispatch independent packages
-    concurrently via a thread pool.  Verbose output is always captured in
-    parallel mode and printed per-package on completion to avoid interleaving.
-
     Returns (overall_success, list of (package_name, elapsed) for built pkgs).
     """
     if force_set is None:
@@ -46,38 +42,24 @@ def parallel_build(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while sorter.is_active():
-            ready = sorter.get_ready()
-
-            # Separate skippable from buildable
             futures = {}
-            for pkg in ready:
+            for pkg in sorter.get_ready():
                 force = pkg.full_name in force_set
-                if not force and skip_built and is_built(config, pkg):
+                if (not force and skip_built and is_built(config, pkg)) or failed:
                     sorter.done(pkg)
                     continue
-                if failed:
-                    # Don't submit new work after a failure
-                    sorter.done(pkg)
-                    continue
-                fut = executor.submit(
-                    build_package, config, pkg,
-                    verbose=False,  # Always capture in parallel mode
-                    force=force,
-                )
-                futures[fut] = pkg
+                futures[executor.submit(build_package, config, pkg, verbose=False, force=force)] = pkg
 
             for fut in as_completed(futures):
                 pkg = futures[fut]
                 ok, elapsed = fut.result()
+                timings.append((str(pkg), elapsed))
+                sorter.done(pkg)
                 if ok:
                     idx += 1
                     _print_sync(f"{bold(cyan(f'[{idx}/{total}]'))} {green('Built')} {pkg}  {dim(fmt_duration(elapsed))}")
-                    timings.append((str(pkg), elapsed))
-                    sorter.done(pkg)
                 else:
                     _print_sync(f"{red('Build failed for')} {pkg}")
                     failed = True
-                    timings.append((str(pkg), elapsed))
-                    sorter.done(pkg)
 
     return (not failed, timings)
