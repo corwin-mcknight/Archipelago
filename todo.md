@@ -17,6 +17,9 @@
 - Global page descriptor array -- deferred until VMM/VMO design is settled.
 - Implement NUMA awareness and reserved region handling.
 - Complete paging and virtual memory manager interfaces, including page table helpers.
+    - ~~x86_64 page-table primitives (init/destroy, map_page, walk, unmap_page).~~ Done.
+    - CR3 activation and kernel-mapping cloning for new address spaces.
+    - Region tree, VMO, and pager objects.
 - Deliver slab allocators and the unified heap backed by the Archipelago Unified Memory Interface.
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
