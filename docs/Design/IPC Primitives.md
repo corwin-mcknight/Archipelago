@@ -35,8 +35,10 @@ Each endpoint is a separate kernel object with its own signal state.
 Messages written to one endpoint are readable from the other.
 Each direction maintains FIFO ordering independently.
 Channels have a bounded message queue per direction.
-When the queue is full, writes return an error rather than blocking -- the kernel never introduces hidden blocking on behalf of a caller.
-Clients and servers manage backpressure themselves.
+When the queue is full, writes fail immediately with an error -- the kernel never blocks on behalf of a caller.
+The `WRITABLE` signal clears when the peer's queue is full and re-asserts when space becomes available.
+A sender that wants to wait for space waits on the `WRITABLE` signal rather than retrying in a loop.
+This keeps the kernel non-blocking on IPC and lets each task choose its own flow control strategy -- wait, retry, drop, or buffer.
 
 ### Signals
 The kernel automatically manages signal bits on channel endpoints:
@@ -114,12 +116,23 @@ The kernel never spins on a condition internally.
 All waiting is event-driven -- signal transitions wake blocked waiters directly.
 
 ## Handle Transfer
-Handles are transferred between processes through [[#Channels|channel]] messages.
+Handles are transferred between tasks through [[#Channels|channel]] messages.
 A message can carry up to a system-defined maximum number of handles alongside its data payload.
 
-When a handle is written into a message, it is [[Handle Table#Transfer|transferred]] --
-**removed** from the sender's [[Handle Table|handle table]] and installed in the receiver's handle table
-with a new handle ID but the same rights.
+### Transfer via kernel escrow
+Handle transfer uses the kernel's own handle table as escrow.
+The kernel is [[Task Model#The Kernel as Task Zero|task zero]] and has its own [[Handle Table]].
+When a handle is sent through a channel:
+
+1. The handle is removed from the sender's handle table
+2. The handle is placed in the kernel's handle table
+3. When the receiver dequeues the message, the handle moves from the kernel's table to the receiver's table
+
+The object stays alive throughout because the kernel's reference keeps it pinned.
+There is no special "in-flight" state -- a handle in transit is just a handle in a table, the same as always.
+If the channel is destroyed while handles are in escrow, the kernel closes them normally.
+
+The transferred handle arrives with a new handle ID but the same rights.
 The object's reference count is unaffected during transfer because the reference moves rather than being copied and released.
 
 To transfer a handle with reduced rights, the sender first [[Handle Table#Duplicate|duplicates]] the handle with a restricted rights mask and transfers the duplicate.

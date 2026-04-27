@@ -71,11 +71,17 @@ __pycache__
 
 # Other files
 generated/
-AGENTS.md 
-CLAUDE.md
-.claude
-.codex
+
 /example/
 
 # Documentation.
 .obsidian
+
+
+# AI
+AGENTS.md 
+CLAUDE.md
+.claude
+.codex
+.agents
+/skills-lock.json

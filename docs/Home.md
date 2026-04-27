@@ -19,6 +19,9 @@ The following pages describe the long-term design for Archipelago. These feature
 - [[Design Principles]]: Core philosophy
 - [[Object Model]]: Typed kernel objects and capability handles
 - [[Handle Table]]: Per-process handle management
+- [[Task Model]]: Tasks, threads, and the kernel as task zero
+- [[Scheduling]]: Kernel-owned round-robin scheduler
+- [[Syscall Interface]]: Single entry point and three-path dispatch
 - [[IPC Primitives]]: Inter-process communication
 - [[Object Transaction Programs]]: Programmable dispatch optimization
 - [[Server Lifecycle]]: Server registration and crash recovery

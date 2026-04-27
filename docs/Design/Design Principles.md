@@ -31,6 +31,21 @@ The kernel exposes system properties (page size, architecture, capabilities).
 Servers query these properties and choose how to register their types accordingly.
 The kernel just handles requests -- it doesn't make smart decisions about allocation strategy or storage layout.
 
+## Bricks and houses
+The kernel provides fundamental types -- the bricks.
+Servers compose bricks into higher-level abstractions -- the houses.
+
+Bricks are things like tasks, threads, VMOs, channels, ports, mutexes, interrupt objects, and futexes.
+These are the synchronization, communication, and memory primitives that everything else is built from.
+Houses are things like windows, network connections, filesystems, and audio streams.
+The kernel has no concept of a house -- those semantics belong entirely to servers.
+
+This is explicitly not a UNIX philosophy.
+Types are distinct, not unified under a single abstraction like "everything is a file."
+A channel is not a file.
+A VMO is not a file.
+They are different bricks with different properties, different rights, and different behaviors.
+
 ## Fail hard, recover clean
 Server crash kills every handle and object of that type.
 No partial recovery, no zombie objects, no state reconstruction.
