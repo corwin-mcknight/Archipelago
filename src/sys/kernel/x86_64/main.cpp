@@ -95,8 +95,8 @@ extern "C" [[noreturn]] void _start(void) {
             g_log.info("pmm: adding region base=0x{0:p} pages={1} type={2}", entry->base, pages, entry->type);
             kernel::mm::g_page_frame_allocator.add_region({.start = entry->base, .count = pages});
         } else if (entry->type == 6) {  // LIMINE_MEMMAP_KERNEL_AND_MODULES
-            g_log.info("pmm: wired region base=0x{0:p} pages={1} (kernel)", entry->base, pages);
-            kernel::mm::g_page_frame_allocator.add_wired(pages);
+            g_log.info("pmm: reserved region base=0x{0:p} pages={1} (kernel)", entry->base, pages);
+            kernel::mm::g_page_frame_allocator.add_reserved(pages);
         }
     }
     g_log.info("Memory subsystem initialized");

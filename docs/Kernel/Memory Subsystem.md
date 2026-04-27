@@ -16,10 +16,16 @@ On free, it coalesces adjacent free blocks.
 The PMM manages physical page frames.
 Pages are 4K (`KERNEL_MINIMUM_PAGE_SIZE`).
 
-Pages exist in one of three states: free (available but potentially dirty), active (in use), or zeroed (free and zeroed, ready for immediate use).
-The PMM allocates from the zeroed pool first.
-A background pass moves free pages to zeroed to maintain supply.
+The PMM is a free-pool manager with two pools: zeroed and dirty.
+Allocation pops from the zeroed pool; if the pool is empty, the PMM zeroes one page inline as a fallback.
+Free pushes the returned page to the dirty pool without scrubbing it.
 The PMM never hands out a dirty page.
+
+A background zeroing worker is the intended steady-state mechanism for moving pages from dirty to zeroed.
+Until the scheduler exists, the inline fallback in allocation is the only path that performs zeroing, and the dirty pool is also drained on demand.
+
+The PMM only counts reserved pages -- it does not own a list of reserved physical ranges.
+Tracking specific kernel-occupied ranges belongs to the VMM, which receives them at init separately from the PMM's free-page accounting.
 
 ## Planned Architecture
 ### Virtual Memory Manager

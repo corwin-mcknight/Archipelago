@@ -10,13 +10,8 @@
 - Provide structured panic artefacts suitable for post-mortem debugging and automated triage.
 
 ## Memory Management
-- **FIX NOW:** PMM refactor -- strip allocator down to a simple free-pool manager:
-    - Remove `m_active` stack and `state` parameter from `alloc()`
-    - Kill `vm_page_state` enum -- stack membership is the state
-    - Simplify `alloc()` to: pop from zeroed (or zero one inline as fallback), return address
-    - Simplify `free()` to: push to dirty, return (remove eager `update_dirty_pages()`)
-    - Rename `m_wired_pages`/`add_wired()` to `m_reserved_pages`/`add_reserved()` -- just a count, no ranges
-    - Background zeroing deferred to a dedicated kernel thread (gated on scheduler)
+- ~~PMM refactor -- strip allocator down to a simple free-pool manager.~~ Done.
+- Background page-zeroing worker thread (gated on scheduler).
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Wired page tracking belongs to the VMM; boot code passes kernel physical ranges to VMM init separately from PMM.
 - Global page descriptor array -- deferred until VMM/VMO design is settled.

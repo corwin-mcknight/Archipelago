@@ -5,13 +5,6 @@
 
 namespace kernel::mm {
 
-/// Represents the state of a physical page frame (stored in 4 bits).
-enum class vm_page_state : uint8_t {
-    FREE   = 0b00,
-    ACTIVE = 0b01,
-    ZEROED = 0b10,
-};
-
 // TODO: Add more page sizes as needed. Kernel assumes 4K pages for now.
 enum class vm_page_size : uint8_t {
     SIZE_4K = 0,
