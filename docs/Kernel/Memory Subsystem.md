@@ -29,6 +29,12 @@ The VMM is designed but not yet implemented.
 
 The VMM is organized around five core objects: address spaces, regions, virtual memory objects (VMOs), pages, and pagers.
 
+An address space is part of a [[Task Model|task]], not a separate kernel object.
+There is no address space handle -- a task can only map VMOs into its own address space.
+If task A wants task B to access shared memory, it sends a VMO handle through a [[IPC Primitives#Channels|channel]] and task B maps it itself.
+The kernel provides no coherence guarantees on shared VMOs beyond what the hardware gives (cache coherence on x86_64).
+Synchronization of shared memory is entirely the responsibility of userspace.
+
 An address space represents a task's page table and contains a tree of regions that define its virtual memory layout.
 Regions are nestable containers that own a virtual address interval.
 They hold child regions and VMO bindings.
@@ -53,6 +59,19 @@ Kernel mappings are never visible to user mode.
 The Higher-Half Direct Map (HHDM) provides a full-RAM direct map in the kernel's higher half.
 
 **Observability**: Per-address-space fault counters, per-VMO residency stats, debug dumps printable to serial.
+
+### Synchronization Primitives
+The kernel provides two classes of synchronization for shared memory coordination:
+
+**Handle-based sync objects** -- kernel-defined mutex, semaphore, and related types accessed through handles.
+These follow the same [[Object Model|object model]] and [[Object Model#Three-Path Dispatch|dispatch pipeline]] as any other kernel object.
+Suitable for coarse-grained cross-task synchronization where syscall overhead is acceptable.
+
+**Futex-on-VMO-offset** -- kernel-assisted wait/wake on a specific offset within a VMO.
+A task atomically checks a value at a VMO offset and sleeps if the value is not what it expects.
+Another task writes the value and wakes waiters.
+Scoping futexes to a VMO offset rather than a raw virtual address keeps them within the capability model -- you need a handle to the VMO to wait on it.
+Suitable for performance-critical shared memory coordination where syscall overhead matters.
 
 ### Slab Allocator and UMI
 The planned Unified Memory Interface (UMI) provides slab-based allocation for kernel objects, with per-type arenas and zero-on-free semantics.

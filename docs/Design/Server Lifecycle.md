@@ -29,13 +29,17 @@ When a server process dies:
 
 1. Kernel detects server death
 2. **All objects** of the server's type(s) are marked dead
-3. **All handles** to those objects are invalidated across every process, including [[Handle Table#Kernel-Owned Handle Tables|kernel-owned handle tables]]
-4. Any pending IPC to the server is discarded
-5. Kernel-managed storage (inline buffers, pages) is cleaned up
-6. Slab entries are zeroed and freed; page mappings are torn down
+3. Any pending IPC to the server is discarded
+4. Kernel-managed storage (inline buffers, pages) is cleaned up
+5. Slab entries are zeroed and freed; page mappings are torn down
 
-Clients holding handles receive `ERR_BAD_HANDLE` (or equivalent) on their next operation.
-There is no partial recovery and no zombie state.
+Handle invalidation is **lazy**.
+The kernel does not scan every handle table in the system to find and revoke handles to dead objects.
+Instead, dead objects are marked as such, and any subsequent operation on a handle to a dead object returns an error.
+Tasks that never touch their stale handles pay no cost.
+The reaper eventually cleans up orphaned objects when reference counts drop.
+
+This avoids the expense of maintaining a reverse index from objects to handles across all tables.
 See [[Design Principles#Fail hard, recover clean]].
 
 ### Hung server detection
@@ -50,10 +54,14 @@ This is critical because blocked clients may include other servers (disk, init),
 When a server restarts:
 
 1. Server goes through the normal [[#Registration]] flow
-2. Type ID may be reused or reassigned (implementation decision)
+2. The kernel assigns a **fresh internal type ID**, even though the public name is the same.
+   Types have two identifiers: a public name used for discovery, and an internal ID used for handle matching.
+   Old handles reference the old internal ID, which is dead.
+   New handles reference the new internal ID.
+   This prevents stale handles from accidentally connecting to the restarted server's objects.
 3. Authorized code can re-attach the same [[Object Transaction Programs|transaction programs]] because they are stateless
 4. For [[Object Model#Page-backed|page-backed]] types: if the kernel retained the data pages, the server can inspect them and potentially recover data state
-5. New handles can be created; old handles are permanently invalid
+5. New handles can be created; old handles are permanently invalid by construction
 
 The server is responsible for its own state recovery.
 The kernel provides the mechanism (retained pages, clean type re-registration) but does not reconstruct server-side state.

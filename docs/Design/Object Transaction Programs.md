@@ -51,6 +51,16 @@ Buffer write -- yes.
 Signal set -- yes.
 "Parse this as a DNS query and cache the response" -- absolutely not.
 
+## Authoring Model
+An OTP "program" is a buffer of packed instruction structures.
+The kernel publishes a header that defines the instruction struct layout.
+Servers include this header and construct an array of instruction structs in ordinary C or C++ code, then pass the buffer to the kernel at attachment time.
+
+The header is the DSL.
+There is no compiler, no assembler, no bytecode format separate from the struct layout.
+Authoring a program is as simple as filling out an array of structs and calling the attachment syscall.
+The kernel validates the instruction array structurally at attachment time -- malformed programs never execute.
+
 ## Instruction Set
 ### Registers
 A fixed register file of general-purpose 64-bit registers.
@@ -104,6 +114,9 @@ A program that names secondary objects holds references to them for as long as t
 
 Cross-object composition is what separates OTPs from simpler filter systems.
 A pipe server that wants "write to input A completes as a read from output B without IPC" can express that relationship directly.
+
+The precise scope of what cross-object instructions can do is undetermined.
+The design will be informed by real use cases once single-object OTPs are working.
 
 ### Termination
 Every valid program must end with one of the three outcomes from the [[#The three-path contract|three-path contract]].
@@ -231,6 +244,30 @@ programs and message structures change in the same commit.
 | **OTPs** | **Yes** | **Yes** | **Yes** | **Yes** |
 
 Zircon is the microkernel at the core of Google's Fuchsia operating system.
+
+## Interrupt-Path Execution
+OTPs are not limited to the syscall path.
+They also execute on the interrupt path, enabling I/O fast-path handling without context switching to a driver server.
+
+When a hardware interrupt fires, the kernel can run the OTP attached to the corresponding [[Interrupt Model|interrupt object]].
+The program handles the immediate response -- moving data from a device buffer into VMO pages, signaling a channel as readable, acknowledging the interrupt -- and returns COMPLETE.
+The server only gets involved for complex cases the OTP cannot handle (DISPATCH path).
+
+This means OTPs avoid context switches on the interrupt path, not just IPC round-trips on the syscall path.
+A disk server, for example, could handle its DMA buffer management entirely through OTPs mid-read, skipping both the interrupt notification chain and the context switch to userspace.
+
+### Storage wiring
+OTPs in interrupt context cannot page fault.
+To guarantee fault-free execution, all storage pages touched by an OTP are **wired** (pinned in physical memory) at attachment time.
+For inline/slab-backed storage this is automatic -- kernel memory is always resident.
+For page-backed storage, the kernel pins the pages when the OTP is attached and unpins when detached.
+
+If the pages cannot be wired at attachment time (out of memory, for example), the attachment fails.
+The server knows immediately rather than discovering a problem at interrupt time.
+This shifts potential reentrant interrupt issues to mount time instead of action time.
+
+Combined with the structural validation at attachment, this means the kernel can fully validate the OTP execution environment statically.
+If attachment succeeds, execution will succeed -- barring object death.
 
 ## Future Directions
 - Bounded loop construct (fixed iteration count known at creation, still terminates)

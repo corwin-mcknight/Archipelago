@@ -8,10 +8,19 @@
 ## Kernel Core
 - Finalize the panic/log pipelines with severity filtering, buffered sinks, and crash dump emission.
 - Provide structured panic artefacts suitable for post-mortem debugging and automated triage.
-- Add kernel configuration flags to gate experimental features and optimize build permutations.
 
 ## Memory Management
-- Implement physical memory discovery, NUMA awareness, and reserved region handling.
+- **FIX NOW:** PMM refactor -- strip allocator down to a simple free-pool manager:
+    - Remove `m_active` stack and `state` parameter from `alloc()`
+    - Kill `vm_page_state` enum -- stack membership is the state
+    - Simplify `alloc()` to: pop from zeroed (or zero one inline as fallback), return address
+    - Simplify `free()` to: push to dirty, return (remove eager `update_dirty_pages()`)
+    - Rename `m_wired_pages`/`add_wired()` to `m_reserved_pages`/`add_reserved()` -- just a count, no ranges
+    - Background zeroing deferred to a dedicated kernel thread (gated on scheduler)
+- VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
+- Wired page tracking belongs to the VMM; boot code passes kernel physical ranges to VMM init separately from PMM.
+- Global page descriptor array -- deferred until VMM/VMO design is settled.
+- Implement NUMA awareness and reserved region handling.
 - Complete paging and virtual memory manager interfaces, including page table helpers.
 - Deliver slab allocators and the unified heap backed by the Archipelago Unified Memory Interface.
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
@@ -74,7 +83,7 @@
     - Table Dumps -- add full handle table dump with object details
     - Runtime Metrics -- add interrupt counts, allocation stats, tick rates
     - Debugging Aids -- add memory dump, stack trace, register dump commands
-
+- Kernel crash handler that captures structured crash dumps, logs, and optionally drops into the kernel shell for post-mortem analysis. 
 ## Documentation & Governance
 - Expand architecture and design docs to cover scheduler, memory management, and handle models.
 - Publish coding standards, contribution guidelines, and security model documentation.

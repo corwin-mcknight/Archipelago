@@ -34,6 +34,9 @@ __attribute__((used, section(".limine_requests"))) volatile struct limine_mp_req
 __attribute__((used, section(".limine_requests"))) volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST, .revision = 0, .response = nullptr};
 
+__attribute__((used, section(".limine_requests"))) volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST, .revision = 0, .response = nullptr};
+
 uintptr_t g_hhdm_offset = 0;
 
 void core_init(uint32_t core_id) {
@@ -84,6 +87,20 @@ extern "C" [[noreturn]] void _start(void) {
     if (hhdm_request.response == nullptr) { panic("Limine HHDM request failed"); }
     g_hhdm_offset = hhdm_request.response->offset;
 
+    if (memmap_request.response == nullptr) { panic("Limine memmap request failed"); }
+    for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
+        auto* entry = memmap_request.response->entries[i];
+        size_t pages = entry->length / 0x1000;
+        if (entry->type == LIMINE_MEMMAP_USABLE || entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE) {
+            g_log.info("pmm: adding region base=0x{0:p} pages={1} type={2}", entry->base, pages, entry->type);
+            kernel::mm::g_page_frame_allocator.add_region({.start = entry->base, .count = pages});
+        } else if (entry->type == 6) {  // LIMINE_MEMMAP_KERNEL_AND_MODULES
+            g_log.info("pmm: wired region base=0x{0:p} pages={1} (kernel)", entry->base, pages);
+            kernel::mm::g_page_frame_allocator.add_wired(pages);
+        }
+    }
+    g_log.info("Memory subsystem initialized");
+
     if (mp_request.response == nullptr) { panic("Limine MP request failed"); }
 
     g_log.info("Booting on cpu{0}. CPU has {1} cores", mp_request.response->bsp_lapic_id,
@@ -95,9 +112,6 @@ extern "C" [[noreturn]] void _start(void) {
 
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
-
-    kernel::mm::g_page_frame_allocator.add_region(
-        {.start = 0x100000, .count = 256});  // Add first 1MiB of RAM for testing
 
     auto evt_id = kernel::obj::g_handle_table.emplace<kernel::obj::Event>(kernel::obj::RIGHTS_ALL).unwrap();
     kernel::obj::g_handle_table.get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);

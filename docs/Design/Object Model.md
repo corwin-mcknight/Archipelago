@@ -1,11 +1,38 @@
 # Object Model
 
 > [!info] Partial Implementation
-> The core object primitives are implemented: Object base class, type registry, handle table, and two concrete types (Event, Counter).
+> The core object primitives are implemented: Object base class, type registry, handle table, and two debug types (Event, Counter).
 > Storage models, three-path dispatch, OTPs, IPC, and server lifecycle are not yet implemented.
 
 The kernel's object model is the foundation of the system.
-Every resource -- channels, ports, sockets, interrupts, MMIO regions, DMA buffers -- is represented as a typed kernel object, accessed exclusively through capability handles.
+Every resource -- channels, ports, interrupts, MMIO regions, DMA buffers -- is represented as a typed kernel object, accessed exclusively through capability handles.
+
+## Kernel Types and Server Types
+The kernel defines a small set of fundamental types -- the "bricks" that everything else is built from.
+See [[Design Principles#Bricks and houses]].
+
+Kernel-defined types include:
+- **Task** -- authority boundary containing a handle table, address space, and threads.
+  See [[Task Model]].
+- **Thread** -- schedulable execution context within a task.
+  See [[Scheduling]].
+- **VMO** -- virtual memory object backed by a pager.
+  See [[Memory Subsystem#Virtual Memory Manager]].
+- **Channel** -- bidirectional point-to-point IPC.
+  See [[IPC Primitives#Channels]].
+- **Port** -- multi-producer single-consumer event queue.
+  See [[IPC Primitives#Ports]].
+- **Interrupt** -- hardware interrupt delivered as a signal.
+  See [[Interrupt Model]].
+- **Sync primitives** -- handle-based mutexes, semaphores, and related objects.
+- **Futex** -- kernel-assisted wait on a VMO offset for low-overhead shared memory synchronization.
+
+Event and Counter exist today as debug types for proving out the object system.
+They are not part of the planned brick set.
+
+All other types are defined by servers.
+The kernel does not know what a window, a socket, or a filesystem entry is.
+Those are houses, not bricks.
 
 ## Core Concepts
 ### What is an object?
@@ -81,7 +108,13 @@ The kernel also exposes system information that servers can query at runtime bef
 There is a window between server startup and type creation where the server can discover everything it needs about the system.
 
 ### Re-registration on server restart
-When a server restarts after a crash and re-registers its type, authorized code can re-attach the same transaction programs because programs are stateless.
+When a server restarts after a crash and re-registers its type, the kernel assigns a fresh internal type ID -- even if the public name is the same.
+This means old handles cannot accidentally connect to the restarted server's objects.
+Old handles still reference the old internal ID, which is dead.
+New handles reference the new internal ID.
+Clean slate by construction, no resurrection, no stale handle confusion.
+
+Authorized code can re-attach the same transaction programs because programs are stateless.
 For objects with storage backed by the kernel, the data pages may survive the server crash, potentially allowing the server to recover data state -- though all client handles are gone regardless.
 
 ## Storage Models
