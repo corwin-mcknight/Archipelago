@@ -7,6 +7,7 @@
 
 #include "kernel/drivers/uart.h"
 #include "kernel/log.h"
+#include "kernel/symbols.h"
 #include "kernel/x86/ioport.h"
 
 extern kernel::driver::uart uart;
@@ -123,14 +124,38 @@ void emit_registers_prose(register_frame_t* regs, const uint64_t cr[4]) {
     crash_emit("* cr3=0x{0:016p}  cr4=0x{1:016p}\n", cr[2], cr[3]);
 }
 
+const char* display_name(const char* mangled, char* scratch, size_t scratch_size) {
+    if (mangled == nullptr) { return nullptr; }
+    if (kernel::symbols::demangle(mangled, scratch, scratch_size)) { return scratch; }
+    return mangled;
+}
+
 void emit_backtrace(const arch::fp_walk_result& bt, bool harness) {
+    char name_buf[256];
     if (harness) {
         for (size_t i = 0; i < bt.depth; i++) {
-            crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\"}}\n", i, bt.frames[i]);
+            size_t off              = 0;
+            const char* raw         = kernel::symbols::lookup(bt.frames[i], &off);
+            const char* pretty      = display_name(raw, name_buf, sizeof(name_buf));
+            if (pretty != nullptr) {
+                crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\",\"sym\":\"{2}\",\"off\":{3}}}\n", i,
+                           bt.frames[i], pretty, off);
+            } else {
+                crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\"}}\n", i, bt.frames[i]);
+            }
         }
     } else {
         crash_emit("Backtrace ({0} frames, frame-pointer walk):\n", bt.depth);
-        for (size_t i = 0; i < bt.depth; i++) { crash_emit("  [{0}] 0x{1:016p}\n", i, bt.frames[i]); }
+        for (size_t i = 0; i < bt.depth; i++) {
+            size_t off              = 0;
+            const char* raw         = kernel::symbols::lookup(bt.frames[i], &off);
+            const char* pretty      = display_name(raw, name_buf, sizeof(name_buf));
+            if (pretty != nullptr) {
+                crash_emit("  [{0}] 0x{1:016p}  {2} +0x{3:x}\n", i, bt.frames[i], pretty, off);
+            } else {
+                crash_emit("  [{0}] 0x{1:016p}\n", i, bt.frames[i]);
+            }
+        }
         if (bt.depth == 0) { crash_write("  (no frames -- rbp invalid or no frame pointer chain)\n"); }
     }
 }
