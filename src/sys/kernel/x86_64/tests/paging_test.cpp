@@ -7,9 +7,9 @@
 
 namespace {
 
-constexpr uintptr_t low_vaddr  = 0x100000;        // 1 MiB
-constexpr uintptr_t mid_vaddr  = 0x40000000;      // 1 GiB -- different PDPT entry
-constexpr uintptr_t high_vaddr = 0x10000000000;   // 1 TiB -- different PML4 entry
+constexpr uintptr_t low_vaddr  = 0x100000;       // 1 MiB
+constexpr uintptr_t mid_vaddr  = 0x40000000;     // 1 GiB -- different PDPT entry
+constexpr uintptr_t high_vaddr = 0x10000000000;  // 1 TiB -- different PML4 entry
 
 }  // namespace
 
@@ -111,12 +111,12 @@ KTEST(paging_independent_mappings_across_levels, "x86_64/paging") {
     KTEST_REQUIRE_VALUE(p2, kernel::mm::g_page_frame_allocator.alloc());
     KTEST_REQUIRE_VALUE(p3, kernel::mm::g_page_frame_allocator.alloc());
 
-    KTEST_REQUIRE_TRUE(space.map_page(low_vaddr,  p1, kernel::mm::pte::WRITABLE));
-    KTEST_REQUIRE_TRUE(space.map_page(mid_vaddr,  p2, kernel::mm::pte::WRITABLE));
+    KTEST_REQUIRE_TRUE(space.map_page(low_vaddr, p1, kernel::mm::pte::WRITABLE));
+    KTEST_REQUIRE_TRUE(space.map_page(mid_vaddr, p2, kernel::mm::pte::WRITABLE));
     KTEST_REQUIRE_TRUE(space.map_page(high_vaddr, p3, kernel::mm::pte::WRITABLE));
 
-    KTEST_EXPECT_VALUE(space.walk(low_vaddr),  p1);
-    KTEST_EXPECT_VALUE(space.walk(mid_vaddr),  p2);
+    KTEST_EXPECT_VALUE(space.walk(low_vaddr), p1);
+    KTEST_EXPECT_VALUE(space.walk(mid_vaddr), p2);
     KTEST_EXPECT_VALUE(space.walk(high_vaddr), p3);
 
     kernel::mm::g_page_frame_allocator.free(p1);

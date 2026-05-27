@@ -33,12 +33,12 @@ class page_frame_allocator {
     size_t m_free_pages     = 0;
     size_t m_reserved_pages = 0;
 
-    ktl::stack<vm_paddr_t>      m_zeroed;
-    ktl::stack<vm_paddr_t>      m_dirty;
+    ktl::stack<vm_paddr_t> m_zeroed;
+    ktl::stack<vm_paddr_t> m_dirty;
     ktl::vector<vm_page_region> m_regions;
 
     ktl::maybe<vm_paddr_t> pop_free_page();
-    void                   zero_page(vm_paddr_t addr);
+    void zero_page(vm_paddr_t addr);
 };
 
 extern page_frame_allocator g_page_frame_allocator;
