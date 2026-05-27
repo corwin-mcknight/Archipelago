@@ -82,6 +82,7 @@
     - Runtime Metrics -- add interrupt counts, allocation stats, tick rates
     - Debugging Aids -- add memory dump, stack trace, register dump commands
 - ~~Kernel crash handler that captures structured crash dumps, logs, and optionally drops into the kernel shell for post-mortem analysis.~~ Done except shell-drop on crash. Future work: watchdog injection (enum slot reserved), #DF/triple-fault handling (needs IST), stack overflow detection (needs guard pages), SMP crash fan-out (needs IPI).
+- ~~In-kernel symbolication for crash backtrace -- snapshot kernel ELF's symbol table at boot via Limine executable_file_request.~~ Done.
 ## Documentation & Governance
 - Expand architecture and design docs to cover scheduler, memory management, and handle models.
 - Publish coding standards, contribution guidelines, and security model documentation.

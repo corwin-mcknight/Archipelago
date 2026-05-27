@@ -19,6 +19,7 @@
 #include "kernel/mm/pmm.h"
 #include "kernel/obj/event.h"
 #include "kernel/panic.h"
+#include "kernel/symbols.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
 #include "vendor/limine.h"
@@ -36,6 +37,10 @@ __attribute__((used, section(".limine_requests"))) volatile struct limine_hhdm_r
 
 __attribute__((used, section(".limine_requests"))) volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST, .revision = 0, .response = nullptr};
+
+__attribute__((used,
+               section(".limine_requests"))) volatile struct limine_executable_file_request executable_file_request = {
+    .id = LIMINE_EXECUTABLE_FILE_REQUEST, .revision = 0, .response = nullptr};
 
 uintptr_t g_hhdm_offset = 0;
 
@@ -84,12 +89,25 @@ extern "C" [[noreturn]] void _start(void) {
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
 
+    // Snapshot the kernel ELF's symbol table before PMM reclaims bootloader memory.
+    if (executable_file_request.response != nullptr && executable_file_request.response->executable_file != nullptr) {
+        auto* f = executable_file_request.response->executable_file;
+        kernel::symbols::init(f->address, f->size);
+        if (kernel::symbols::available()) {
+            g_log.info("symbols: kernel symbol table loaded");
+        } else {
+            g_log.warn("symbols: kernel symbol table unavailable");
+        }
+    } else {
+        g_log.warn("symbols: executable_file request not honored");
+    }
+
     if (hhdm_request.response == nullptr) { panic("Limine HHDM request failed"); }
     g_hhdm_offset = hhdm_request.response->offset;
 
     if (memmap_request.response == nullptr) { panic("Limine memmap request failed"); }
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
-        auto* entry = memmap_request.response->entries[i];
+        auto* entry  = memmap_request.response->entries[i];
         size_t pages = entry->length / 0x1000;
         if (entry->type == LIMINE_MEMMAP_USABLE || entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE) {
             g_log.info("pmm: adding region base=0x{0:p} pages={1} type={2}", entry->base, pages, entry->type);
