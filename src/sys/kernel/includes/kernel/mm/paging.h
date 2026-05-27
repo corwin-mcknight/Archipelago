@@ -19,7 +19,7 @@ constexpr uint64_t HUGE          = 1ull << 7;
 constexpr uint64_t GLOBAL        = 1ull << 8;
 constexpr uint64_t NO_EXECUTE    = 1ull << 63;
 
-constexpr uint64_t ADDR_MASK = 0x000FFFFFFFFFF000ull;
+constexpr uint64_t ADDR_MASK     = 0x000FFFFFFFFFF000ull;
 }  // namespace pte
 
 class address_space {
@@ -46,7 +46,7 @@ class address_space {
     bool is_valid() const { return m_pml4_phys != 0; }
     vm_paddr_t pml4_phys() const { return m_pml4_phys; }
 
-    bool                   map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags);
+    bool map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags);
     ktl::maybe<vm_paddr_t> walk(uintptr_t vaddr) const;
     ktl::maybe<vm_paddr_t> unmap_page(uintptr_t vaddr);
 

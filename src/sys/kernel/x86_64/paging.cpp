@@ -8,9 +8,7 @@ namespace kernel::mm {
 
 namespace {
 
-inline uint64_t* table_at(vm_paddr_t paddr) {
-    return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset);
-}
+inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
 constexpr size_t pml4_index(uintptr_t vaddr) { return (vaddr >> 39) & 0x1FF; }
 constexpr size_t pdpt_index(uintptr_t vaddr) { return (vaddr >> 30) & 0x1FF; }
@@ -28,7 +26,7 @@ void free_subtree(uint64_t entry, int level) {
     if (level <= 1) { return; }
 
     vm_paddr_t child = entry & pte::ADDR_MASK;
-    uint64_t*  table = table_at(child);
+    uint64_t* table  = table_at(child);
     for (size_t i = 0; i < 512; ++i) { free_subtree(table[i], level - 1); }
     g_page_frame_allocator.free(child);
 }
@@ -94,7 +92,7 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) 
 
     uint64_t intermediate = pte::WRITABLE | (flags & pte::USER);
 
-    uint64_t* leaf = ensure_pt_slot(m_pml4_phys, vaddr, intermediate);
+    uint64_t* leaf        = ensure_pt_slot(m_pml4_phys, vaddr, intermediate);
     if (leaf == nullptr) { return false; }
     if (*leaf & pte::PRESENT) { return false; }
 
