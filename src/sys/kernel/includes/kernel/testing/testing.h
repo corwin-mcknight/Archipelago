@@ -13,6 +13,7 @@ using test_fn = void (*)();
 enum : unsigned {
     KTEST_FLAG_NONE               = 0u,
     KTEST_FLAG_REQUIRES_CLEAN_ENV = 1u << 0,
+    KTEST_FLAG_EXPECTS_CRASH      = 1u << 1,
 };
 
 struct alignas(alignof(void*)) ktest {
@@ -61,6 +62,13 @@ void abort(unsigned char exit_code = 1);
 
 #define KTEST_WITH_INIT_INTEGRATION(name_sym, module_literal, init_sym) \
     KTEST_WITH_INIT_FLAGS(name_sym, module_literal, init_sym, kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV)
+
+// A test that is expected to crash the kernel. The harness treats a crash as
+// pass and a clean exit as fail. Implies REQUIRES_CLEAN_ENV (the test takes
+// down the VM).
+#define KTEST_CRASH_TEST(name_sym, module_literal) \
+    KTEST_WITH_FLAGS(name_sym, module_literal,     \
+                     kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV | kernel::testing::KTEST_FLAG_EXPECTS_CRASH)
 
 #define KTEST_NOINIT(name_sym, module_literal) KTEST(name_sym, module_literal)
 

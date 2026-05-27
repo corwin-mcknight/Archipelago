@@ -7,7 +7,7 @@
 
 ## Kernel Core
 - Finalize the panic/log pipelines with severity filtering, buffered sinks, and crash dump emission.
-- Provide structured panic artefacts suitable for post-mortem debugging and automated triage.
+- ~~Provide structured panic artefacts suitable for post-mortem debugging and automated triage.~~ Done (crash subsystem with frame-pointer backtrace, register dump, log drain, harness-side symbolication).
 
 ## Memory Management
 - ~~PMM refactor -- strip allocator down to a simple free-pool manager.~~ Done.
@@ -81,7 +81,7 @@
     - Table Dumps -- add full handle table dump with object details
     - Runtime Metrics -- add interrupt counts, allocation stats, tick rates
     - Debugging Aids -- add memory dump, stack trace, register dump commands
-- Kernel crash handler that captures structured crash dumps, logs, and optionally drops into the kernel shell for post-mortem analysis. 
+- ~~Kernel crash handler that captures structured crash dumps, logs, and optionally drops into the kernel shell for post-mortem analysis.~~ Done except shell-drop on crash. Future work: watchdog injection (enum slot reserved), #DF/triple-fault handling (needs IST), stack overflow detection (needs guard pages), SMP crash fan-out (needs IPI).
 ## Documentation & Governance
 - Expand architecture and design docs to cover scheduler, memory management, and handle models.
 - Publish coding standards, contribution guidelines, and security model documentation.

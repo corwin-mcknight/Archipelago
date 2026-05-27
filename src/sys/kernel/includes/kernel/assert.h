@@ -2,8 +2,8 @@
 #define KERNEL_ASSERT_H
 
 #ifndef NDEBUG
+#include "kernel/crash.h"
 #include "kernel/log.h"
-#include "kernel/panic.h"
 constexpr bool assertions_enabled = true;
 #endif
 
@@ -24,7 +24,7 @@ void kernel_assert(T condition, const char* message, const char* message_text, c
                     break;
                 case assertion_action::panic:
                     g_log.fatal("Assertion failed: {0} ({1}), {2}:{3}", message_text, message, fname, line);
-                    panic("Assertion failed");
+                    kernel::crash::dispatch(kernel::crash::trigger_kind::assertion, nullptr, message_text, fname, line);
                     break;
             }
         }
