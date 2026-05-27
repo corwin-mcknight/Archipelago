@@ -1,3 +1,4 @@
+#include <kernel/crash.h>
 #include <kernel/shell/shell.h>
 
 #if CONFIG_KERNEL_SHELL
@@ -15,8 +16,10 @@ void harness_handler(int argc, const char* const argv[], kernel::shell::ShellOut
     ktl::string_view sub(argv[1]);
     if (sub == "enable") {
         output.set_protocol_mode(true);
+        kernel::crash::set_harness_enabled(true);
     } else if (sub == "disable") {
         output.set_protocol_mode(false);
+        kernel::crash::set_harness_enabled(false);
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);
     }

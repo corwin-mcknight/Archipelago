@@ -22,12 +22,33 @@ _OUTCOME_PRIORITY = {"error": 5, "fail": 4, "timeout": 3, "infra": 2, "skipped":
 # Prefixes recognised on the serial line, mapped to event kind.
 _EVENT_PREFIXES = (("@@HARNESS ", "harness"), ("@@TEST ", "test"))
 
+# @@CRASH_<SECTION> {json} -- multi-line crash dump. Sections: BEGIN, REG, FRAME, STACK, LOG, END.
+_CRASH_PREFIX = "@@CRASH_"
+
 
 @dataclass
 class Event:
     kind: str  # 'harness', 'test', or 'log'
     payload: Optional[Dict[str, Any]]
     raw: str
+
+
+@dataclass
+class Crash:
+    trigger: str = ""
+    vec: Optional[int] = None
+    err: Optional[int] = None
+    test: Optional[str] = None
+    message: Optional[str] = None
+    file: Optional[str] = None
+    line: Optional[int] = None
+    ts: Optional[int] = None
+    cpu: Optional[int] = None
+    registers: Dict[str, str] = field(default_factory=dict)
+    frames: List[Dict[str, Any]] = field(default_factory=list)
+    stack: Optional[Dict[str, Any]] = None
+    log: List[Dict[str, Any]] = field(default_factory=list)
+    raw_lines: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -38,6 +59,7 @@ class AttemptLog:
     requires_clean_env: bool = False
     events: List[Event] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
+    crash: Optional[Crash] = None
 
 
 @dataclass
@@ -46,6 +68,7 @@ class TestResult:
     outcome: str
     module: Optional[str] = None
     requires_clean_env: bool = False
+    expects_crash: bool = False
     attempts: List[AttemptLog] = field(default_factory=list)
 
 
@@ -54,6 +77,7 @@ class TestDescriptor:
     name: str
     module: Optional[str] = None
     requires_clean_env: bool = False
+    expects_crash: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -170,6 +194,16 @@ class KernelHarness:
                 except json.JSONDecodeError:
                     sys.stderr.write(f"[harness] failed to parse JSON from line: {line}\n")
                     break
+        if line.startswith(_CRASH_PREFIX):
+            space = line.find(" ", len(_CRASH_PREFIX))
+            section = line[len(_CRASH_PREFIX):space if space > 0 else len(line)].lower()
+            payload: Dict[str, Any] = {"section": section}
+            if space > 0:
+                try:
+                    payload.update(json.loads(line[space + 1:]))
+                except json.JSONDecodeError:
+                    sys.stderr.write(f"[harness] failed to parse crash JSON: {line}\n")
+            return Event(kind="crash", payload=payload, raw=line)
         return Event(kind="log", payload=None, raw=line)
 
     def _next_event(self, deadline: Optional[float]) -> Event:
@@ -269,6 +303,7 @@ class KernelHarness:
                 name=payload.get("name", ""),
                 module=payload.get("module"),
                 requires_clean_env=bool(payload.get("requires_clean_env")),
+                expects_crash=bool(payload.get("expects_crash")),
                 metadata=payload,
             )
 
@@ -292,6 +327,7 @@ class KernelHarness:
         timeout: float,
         retries: int,
         requires_clean_env: bool = False,
+        expects_crash: bool = False,
         module: Optional[str] = None,
     ) -> TestResult:
         attempts: List[AttemptLog] = []
@@ -302,6 +338,8 @@ class KernelHarness:
 
         for attempt_idx in range(1, max_attempts + 1):
             attempt = self._run_single_attempt(test_name, timeout, attempt_idx, requires_clean_env)
+            if expects_crash:
+                attempt = _invert_for_expected_crash(attempt)
             attempts.append(attempt)
 
             if attempt.outcome in ("pass", "skipped", "fail", "error"):
@@ -323,6 +361,7 @@ class KernelHarness:
             outcome=final_outcome,
             module=module,
             requires_clean_env=requires_clean_env,
+            expects_crash=expects_crash,
             attempts=attempts,
         )
 
@@ -342,6 +381,7 @@ class KernelHarness:
             return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc), requires_clean_env=clean_flag)
 
         outcome, reason, filtered = self._interpret_test_events(events)
+        crash = self._aggregate_crash(events)
 
         # If kernel exited (gather returned early without "waiting"), check exit code
         if not self._ready:
@@ -364,6 +404,7 @@ class KernelHarness:
         return AttemptLog(
             attempt=attempt_idx, outcome=outcome, reason=reason,
             requires_clean_env=clean_flag, events=filtered, lines=raw_lines,
+            crash=crash,
         )
 
     @staticmethod
@@ -382,7 +423,7 @@ class KernelHarness:
     def _interpret_test_events(events: list[Event]) -> tuple[str, Optional[str], List[Event]]:
         outcome, reason = "infra", None
         filtered: List[Event] = []
-        started = ended = error_seen = False
+        started = ended = error_seen = crash_seen = False
         error_reason: Optional[str] = None
 
         for event in events:
@@ -397,6 +438,12 @@ class KernelHarness:
                 ended = True
                 outcome = payload.get("status", "pass")
                 reason = payload.get("reason")
+            elif etype == "test_crash":
+                crash_seen = True
+                ended = True
+                outcome = "fail"
+                trig = payload.get("trigger", "crash")
+                reason = f"crash: {trig}"
             elif etype == "error":
                 error_seen = True
                 error_reason = payload.get("message") or payload.get("reason")
@@ -409,7 +456,7 @@ class KernelHarness:
         if not ended and outcome in ("pass", "infra"):
             outcome = "timeout"
             reason = reason or "did not observe test_end"
-        if error_seen:
+        if error_seen and not crash_seen:
             if outcome in ("pass", "skipped"):
                 outcome = "fail"
                 reason = reason or error_reason or "error event emitted"
@@ -419,6 +466,112 @@ class KernelHarness:
         if outcome not in ("pass", "fail", "error", "skipped", "timeout"):
             outcome = "infra"
         return outcome, reason, filtered
+
+    @staticmethod
+    def _aggregate_crash(events: list[Event]) -> Optional[Crash]:
+        crash: Optional[Crash] = None
+        in_crash = False
+        for event in events:
+            if event.kind != "crash":
+                continue
+            payload = event.payload or {}
+            section = payload.get("section", "")
+            if section == "begin":
+                crash = Crash(
+                    trigger=payload.get("trigger", ""),
+                    vec=payload.get("vec"),
+                    err=payload.get("err"),
+                    test=payload.get("test"),
+                    message=payload.get("message"),
+                    file=payload.get("file"),
+                    line=payload.get("line"),
+                    ts=payload.get("ts"),
+                    cpu=payload.get("cpu"),
+                )
+                in_crash = True
+            elif not in_crash or crash is None:
+                continue
+            elif section == "reg":
+                crash.registers = {k: v for k, v in payload.items() if k != "section"}
+            elif section == "frame":
+                crash.frames.append({"i": payload.get("i"), "addr": payload.get("addr")})
+            elif section == "stack":
+                crash.stack = {k: v for k, v in payload.items() if k != "section"}
+            elif section == "log":
+                crash.log.append({k: v for k, v in payload.items() if k != "section"})
+            elif section == "end":
+                in_crash = False
+            if crash is not None:
+                crash.raw_lines.append(event.raw)
+        return crash
+
+
+# ----------------------------------------------------------------------
+# Outcome inversion for expects_crash tests
+# ----------------------------------------------------------------------
+def _invert_for_expected_crash(attempt: AttemptLog) -> AttemptLog:
+    """For tests marked KTEST_FLAG_EXPECTS_CRASH, a crash is the desired outcome.
+
+    Inverts pass/fail accordingly: crash -> pass, clean exit -> fail.
+    Infra/timeout still surface as their original outcome (the harness itself
+    misbehaved; that's not the test's fault).
+    """
+    if attempt.crash is not None:
+        # Crash captured -- this is what the test wanted.
+        attempt.outcome = "pass"
+        attempt.reason = f"expected crash captured ({attempt.crash.trigger})"
+    elif attempt.outcome == "pass":
+        # Test ran to completion without crashing -- the test failed to crash.
+        attempt.outcome = "fail"
+        attempt.reason = "expected crash, but test completed normally"
+    return attempt
+
+
+# ----------------------------------------------------------------------
+# Symbolication
+# ----------------------------------------------------------------------
+def _addr2line(kernel_elf: Path, addrs: List[str]) -> Dict[str, str]:
+    """Resolve hex addresses to 'function at file:line' via llvm-addr2line.
+
+    Returns a mapping addr -> resolved string. Missing/failed addresses map to "??".
+    """
+    result: Dict[str, str] = {a: "??" for a in addrs if a}
+    addrs = [a for a in addrs if a]
+    if not addrs or not kernel_elf.exists():
+        return result
+    binary = shutil.which("llvm-addr2line") or shutil.which("addr2line")
+    if not binary:
+        return result
+    try:
+        proc = subprocess.run(
+            [binary, "-e", str(kernel_elf), "-f", "-p", "-C", *addrs],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[harness] addr2line failed: {exc}\n")
+        return result
+    lines = [ln for ln in proc.stdout.splitlines() if ln]
+    for addr, line in zip(addrs, lines):
+        result[addr] = line.strip()
+    return result
+
+
+def symbolicate_crash(crash: Crash, kernel_elf: Path) -> None:
+    addrs: List[str] = []
+    rip = crash.registers.get("rip")
+    if rip:
+        addrs.append(rip)
+    for frame in crash.frames:
+        addr = frame.get("addr")
+        if addr:
+            addrs.append(addr)
+    resolved = _addr2line(kernel_elf, addrs)
+    if rip and rip in resolved:
+        crash.registers["rip_symbol"] = resolved[rip]
+    for frame in crash.frames:
+        addr = frame.get("addr")
+        if addr and addr in resolved:
+            frame["symbol"] = resolved[addr]
 
 
 # ----------------------------------------------------------------------
@@ -448,8 +601,69 @@ def write_artifacts(base_dir: Optional[Path], result: TestResult) -> None:
             {"attempt": a.attempt, "outcome": a.outcome, "reason": a.reason, "requires_clean_env": a.requires_clean_env}
             for a in result.attempts
         ],
+        "crash": _crash_summary(final.crash) if final.crash else None,
     }
     (case_dir / "harness.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    if final.crash is not None:
+        _write_crash_artifacts(case_dir, final.crash)
+
+
+def _crash_summary(crash: Crash) -> Dict[str, Any]:
+    return {
+        "trigger": crash.trigger, "vec": crash.vec, "err": crash.err, "test": crash.test,
+        "message": crash.message, "file": crash.file, "line": crash.line,
+        "rip": crash.registers.get("rip"), "rip_symbol": crash.registers.get("rip_symbol"),
+        "frame_count": len(crash.frames), "log_count": len(crash.log),
+    }
+
+
+def _write_crash_artifacts(case_dir: Path, crash: Crash) -> None:
+    payload = {
+        "trigger": crash.trigger, "vec": crash.vec, "err": crash.err,
+        "test": crash.test, "message": crash.message, "file": crash.file, "line": crash.line,
+        "ts": crash.ts, "cpu": crash.cpu,
+        "registers": crash.registers, "frames": crash.frames,
+        "stack": crash.stack, "log": crash.log,
+    }
+    (case_dir / "crash.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    text_lines = ["*** KERNEL CRASH ***"]
+    text_lines.append(f"Trigger: {crash.trigger}" + (f" (vec={crash.vec}, err={crash.err})" if crash.vec is not None else ""))
+    if crash.message:
+        text_lines.append(f"Message: {crash.message}")
+    if crash.file:
+        text_lines.append(f"At:      {crash.file}:{crash.line}")
+    if crash.test:
+        text_lines.append(f"Test:    {crash.test}")
+    text_lines.append("")
+    if crash.registers:
+        text_lines.append("Registers:")
+        if rip_sym := crash.registers.get("rip_symbol"):
+            text_lines.append(f"  rip = {crash.registers.get('rip')}  ({rip_sym})")
+        else:
+            text_lines.append(f"  rip = {crash.registers.get('rip')}")
+        for name in ("rsp", "rbp", "rflags", "cr2", "cr3"):
+            if name in crash.registers:
+                text_lines.append(f"  {name:5s} = {crash.registers[name]}")
+        text_lines.append("")
+    if crash.frames:
+        text_lines.append(f"Backtrace ({len(crash.frames)} frames):")
+        for frame in crash.frames:
+            sym = frame.get("symbol", "??")
+            text_lines.append(f"  [{frame.get('i')}] {frame.get('addr')}  {sym}")
+        text_lines.append("")
+    if crash.stack:
+        text_lines.append(f"Stack ({crash.stack.get('len')} bytes from {crash.stack.get('rsp')}):")
+        text_lines.append(f"  {crash.stack.get('hex', '')}")
+        text_lines.append("")
+    if crash.log:
+        text_lines.append(f"Recent log ({len(crash.log)} entries):")
+        for entry in crash.log:
+            ns = entry.get("ns", 0)
+            sec = ns // 1_000_000_000
+            ms  = (ns // 1_000_000) % 1000
+            text_lines.append(f"  [{sec:03d}.{ms:03d} {entry.get('lvl', '?')}] {entry.get('text', '')}")
+    (case_dir / "crash.txt").write_text("\n".join(text_lines) + "\n", encoding="utf-8")
 
 
 # ----------------------------------------------------------------------
@@ -481,6 +695,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p.add_argument("--qemu-arg", action="append", default=[], help="Extra QEMU argument (repeatable)")
     p.add_argument("--no-artifacts", action="store_true", help="Disable artifact generation")
     p.add_argument("--no-exit-device", action="store_true", help="Don't attach isa-debug-exit")
+    p.add_argument("--kernel-elf", type=Path, default=Path("build/obj/sys/kernel/kernel.elf"),
+                   help="Unstripped kernel ELF for crash symbolication")
     p.add_argument("--verbose", action="store_true", help="Verbose harness logging")
     return p.parse_args(argv)
 
@@ -539,9 +755,12 @@ def main(argv: Sequence[str]) -> int:
             result = harness.run_test(
                 test_name, timeout=args.test_timeout, retries=args.retries,
                 requires_clean_env=desc.requires_clean_env if desc else False,
+                expects_crash=desc.expects_crash if desc else False,
                 module=desc.module if desc else None,
             )
             results.append(result)
+            if result.attempts and result.attempts[-1].crash is not None:
+                symbolicate_crash(result.attempts[-1].crash, args.kernel_elf)
             write_artifacts(artifact_dir, result)
 
             if result.outcome in ("pass", "skipped"):

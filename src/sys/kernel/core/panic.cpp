@@ -1,16 +1,13 @@
-#include "kernel/log.h"
+#include "kernel/panic.h"
 
-// UNUSED macro
-#define UNUSED(x) (void)(x)
+#include "kernel/crash.h"
 
 [[noreturn]] void hcf() {
-    asm("cli");
-    for (;;) { asm("hlt"); }
+    asm volatile("cli");
+    for (;;) { asm volatile("hlt"); }
 }
 
 [[noreturn]]
 void panic(const char* message) {
-    g_log.fatal("Kernel panic: {0}", message);
-    g_log.flush();  // Force a flush to ensure the message is printed
-    hcf();
+    kernel::crash::dispatch(kernel::crash::trigger_kind::panic, nullptr, message);
 }

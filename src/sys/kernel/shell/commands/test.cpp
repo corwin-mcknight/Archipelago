@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_SHELL && CONFIG_KERNEL_TESTING
 
+#include <kernel/crash.h>
 #include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 #include <kernel/time.h>
@@ -78,6 +79,7 @@ void send_test_end(kernel::shell::ShellOutput& output, const kernel::testing::kt
 
 void execute_test(kernel::shell::ShellOutput& output, kernel::testing::ktest& test) {
     g_current_test = &test;
+    kernel::crash::set_test_name(test.name);
     reset_test_state();
     send_test_start(output, test);
 
@@ -90,15 +92,18 @@ void execute_test(kernel::shell::ShellOutput& output, kernel::testing::ktest& te
         send_test_end(output, test, "pass");
     }
     g_current_test = nullptr;
+    kernel::crash::set_test_name(nullptr);
 }
 
 void list_tests(kernel::shell::ShellOutput& output) {
     for (auto* test = tests_begin(); test != tests_end(); ++test) {
-        const char* module = test->submodule ? test->submodule : "";
-        const char* suffix =
-            (test->flags & kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV) ? ",\"requires_clean_env\":true}" : "}";
-        emit_harness_event(output, "@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}\n",
-                           test->name, module, suffix);
+        const char* module    = test->submodule ? test->submodule : "";
+        bool clean_env        = (test->flags & kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV) != 0;
+        bool expects_crash    = (test->flags & kernel::testing::KTEST_FLAG_EXPECTS_CRASH) != 0;
+        const char* clean_str = clean_env ? ",\"requires_clean_env\":true" : "";
+        const char* crash_str = expects_crash ? ",\"expects_crash\":true" : "";
+        emit_harness_event(output, "@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}{3}}}\n",
+                           test->name, module, clean_str, crash_str);
     }
 }
 
