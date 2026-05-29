@@ -44,33 +44,39 @@ __attribute__((used,
 
 uintptr_t g_hhdm_offset = 0;
 
-void core_init(uint32_t core_id) {
-    assert(core_id < CONFIG_MAX_CORES, "Core ID exceeds maximum cores");
-    g_cpu_cores[core_id].lapic_id = core_id;
+// Bring a single CPU online. core_index is a dense logical index in [0, CONFIG_MAX_CORES) used to
+// subscript the per-core tables (g_cpu_cores[], gdts[]); it is derived from the bootloader CPU-list
+// position, never from the hardware LAPIC id (which may be sparse or exceed CONFIG_MAX_CORES).
+// lapic_id is stored as data only. is_boot_processor selects the one-time global init the BP performs.
+void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
+    assert(core_index < CONFIG_MAX_CORES, "Logical core index exceeds maximum cores");
+    g_cpu_cores[core_index].lapic_id = lapic_id;
 
     // Start basic hardware initialisation
-    g_log.debug("cpu{0}: Initializing", core_id);
-    kernel::x86::init_gdt((int)core_id);
+    g_log.debug("cpu{0} (lapic {1}): Initializing", core_index, lapic_id);
+    kernel::x86::init_gdt((int)core_index);
     kernel::x86::init_idt();
 
-    if (core_id == 0) { g_interrupt_manager.initialize(); }
+    if (is_boot_processor) { g_interrupt_manager.initialize(); }
 
     kernel::x86::enable_interrupts();
-    g_log.debug("cpu{0}: Interrupts Enabled", core_id);
+    g_log.debug("cpu{0}: Interrupts Enabled", core_index);
 
     // Boot Processor is responsible for initializing the time
-    if (core_id == 0) {
+    if (is_boot_processor) {
         timer.init();
-        g_log.info("Time subsystem initialized", core_id);
+        g_log.info("Time subsystem initialized");
     }
 
-    g_log.debug("cpu{0}: Now running", core_id);
-    g_cpu_cores[core_id].initialized = true;
+    g_log.debug("cpu{0}: Now running", core_index);
+    g_cpu_cores[core_index].initialized = true;
 }
 
 extern "C" [[noreturn]] void ap_startup(struct limine_mp_info* info) {
-    g_log.info("cpu{0}: Starting", info->lapic_id);
-    core_init(info->lapic_id);
+    // The dense logical index was published in extra_argument by cpu_start_cores() before this AP was
+    // released; the hardware LAPIC id is reported separately and is never used as an array subscript.
+    g_log.info("cpu{0}: Starting (lapic {1})", info->extra_argument, info->lapic_id);
+    core_init((uint32_t)info->extra_argument, info->lapic_id, /*is_boot_processor=*/false);
     while (true) { __asm__ volatile("hlt"); }
 }
 
@@ -124,7 +130,23 @@ extern "C" [[noreturn]] void _start(void) {
     g_log.info("Booting on cpu{0}. CPU has {1} cores", mp_request.response->bsp_lapic_id,
                mp_request.response->cpu_count);
 
-    core_init(mp_request.response->bsp_lapic_id);
+    // The boot processor's dense logical index is its position in the bootloader CPU list, which is
+    // not necessarily 0 nor equal to its LAPIC id. Locate it so the BP keys the per-core tables the
+    // same way the APs (and the startup gate) do.
+    uint32_t bsp_index = 0;
+    bool found_bsp     = false;
+    for (uint64_t i = 0; i < mp_request.response->cpu_count; i++) {
+        if (mp_request.response->cpus[i]->lapic_id == mp_request.response->bsp_lapic_id) {
+            bsp_index = (uint32_t)i;
+            found_bsp = true;
+            break;
+        }
+    }
+    // Fail fast on a malformed response rather than silently keying the BP into slot 0 (which could
+    // collide with whichever core occupies list position 0).
+    assert(found_bsp, "Boot processor LAPIC id not present in bootloader CPU list");
+
+    core_init(bsp_index, mp_request.response->bsp_lapic_id, /*is_boot_processor=*/true);
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
 

@@ -19,7 +19,10 @@ void kernel::cpu_start_cores() {
     for (size_t i = 0; i < mp_request.response->cpu_count; i++) {
         const struct limine_mp_info* cpu = mp_request.response->cpus[i];
         if (cpu->lapic_id != mp_request.response->bsp_lapic_id) {
-            g_log.info("Starting cpu{0}", cpu->lapic_id);
+            g_log.info("Starting cpu{0} (lapic {1})", i, cpu->lapic_id);
+            // Publish this AP's dense logical index (its CPU-list position) before releasing it. The
+            // SEQ_CST store of goto_address below acts as the release that makes extra_argument visible.
+            const_cast<struct limine_mp_info*>(cpu)->extra_argument = i;
             __atomic_store_n(const_cast<void**>(reinterpret_cast<void* const*>(&cpu->goto_address)), (void*)ap_startup,
                              __ATOMIC_SEQ_CST);
         }
