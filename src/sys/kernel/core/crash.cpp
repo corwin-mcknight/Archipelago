@@ -134,9 +134,9 @@ void emit_backtrace(const arch::fp_walk_result& bt, bool harness) {
     char name_buf[256];
     if (harness) {
         for (size_t i = 0; i < bt.depth; i++) {
-            size_t off              = 0;
-            const char* raw         = kernel::symbols::lookup(bt.frames[i], &off);
-            const char* pretty      = display_name(raw, name_buf, sizeof(name_buf));
+            size_t off         = 0;
+            const char* raw    = kernel::symbols::lookup(bt.frames[i], &off);
+            const char* pretty = display_name(raw, name_buf, sizeof(name_buf));
             if (pretty != nullptr) {
                 crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\",\"sym\":\"{2}\",\"off\":{3}}}\n", i,
                            bt.frames[i], pretty, off);
@@ -147,9 +147,9 @@ void emit_backtrace(const arch::fp_walk_result& bt, bool harness) {
     } else {
         crash_emit("Backtrace ({0} frames, frame-pointer walk):\n", bt.depth);
         for (size_t i = 0; i < bt.depth; i++) {
-            size_t off              = 0;
-            const char* raw         = kernel::symbols::lookup(bt.frames[i], &off);
-            const char* pretty      = display_name(raw, name_buf, sizeof(name_buf));
+            size_t off         = 0;
+            const char* raw    = kernel::symbols::lookup(bt.frames[i], &off);
+            const char* pretty = display_name(raw, name_buf, sizeof(name_buf));
             if (pretty != nullptr) {
                 crash_emit("  [{0}] 0x{1:016p}  {2} +0x{3:x}\n", i, bt.frames[i], pretty, off);
             } else {
