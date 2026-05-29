@@ -12,6 +12,8 @@ void interrupt_manager::initialize() {
 }
 
 void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* handler, uint64_t flags) {
+    if (id >= IM_MAX_HANDLERS) { return; }
+
     handlers[id].handler.object = handler;
     handlers[id].flags          = flags;
 
@@ -25,6 +27,8 @@ void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* h
 }
 
 void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*), uint64_t flags) {
+    if (id >= IM_MAX_HANDLERS) { return; }
+
     handlers[id].handler.function = handler;
     handlers[id].flags            = flags;
 
@@ -36,11 +40,15 @@ void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(regi
 }
 
 void interrupt_manager::clear_handler(unsigned int id) {
+    if (id >= IM_MAX_HANDLERS) { return; }
+
     handlers[id].handler.function = nullptr;
     handlers[id].flags            = 0;
 }
 
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {
+    if (id >= IM_MAX_HANDLERS) { return; }
+
     const int core = 0;  // For now.
     core_reentrant_state[core]++;
 
@@ -50,6 +58,7 @@ void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* re
     // Check if the interrupt is enabled
     if ((handlers[id].flags & InterruptHandlerEntry::ENABLED_MASK) == 0) {
         g_log.warn("Interrupt 0x{0:x} is not enabled", id);
+        core_reentrant_state[core]--;
         return;
     }
 
