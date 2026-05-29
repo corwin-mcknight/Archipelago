@@ -19,12 +19,13 @@ static const char* log_level_colors[] = {
 #endif
 
 void kernel::system_log::flush() {
-    kernel::synchronization::lock_guard guard(flush_lock);
-    message_gate.acquire();
-    this->last_flushed_sequence = this->for_each(this->last_flushed_sequence, [&](const log_message* message) {
+    // Single active flusher: the ring's flushing flag is a try-skip, so concurrent (and
+    // interrupt-context) flushes never block. The drain emits READY slots in sequence order and
+    // stops at the first in-progress slot.
+    m_ring.drain([this](const log_message& message) {
         char status = '-';
 
-        switch (message->level()) {
+        switch (message.level()) {
             case log_level::trace: status = 't'; break;
             default:
             case log_level::debug: status = 'd'; break;
@@ -36,7 +37,7 @@ void kernel::system_log::flush() {
 
 #if CONFIG_KERNEL_LOG_COLORS
         int color = 0;
-        switch (message->level()) {
+        switch (message.level()) {
             case log_level::trace: color = 1; break;
             case log_level::debug:
             default: color = 1; break;
@@ -47,7 +48,7 @@ void kernel::system_log::flush() {
         }
 #endif
 
-        time_ns_t timestamp   = kernel::time::ktime_to_ns(message->timestamp);
+        time_ns_t timestamp   = kernel::time::ktime_to_ns(message.timestamp);
         uint64_t time_seconds = (uint64_t)timestamp / 1'000'000'000;
         uint64_t time_ms      = (uint64_t)(timestamp / 1'000'000) % 1'000;
 
@@ -57,14 +58,13 @@ void kernel::system_log::flush() {
 #if CONFIG_KERNEL_LOG_COLORS
         ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:s}{1:03d}.{2:03d} {3:1c} | ",
                                           log_level_colors[color], time_seconds, time_ms, status);
-
-#else 
-            ktl::format::format_to_buffer_raw(front.m_buffer, front.size(),
-                                                "{0:03d}.{1:03d} {2:1c} | ", time_seconds, time_ms, status);
+#else
+        ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:03d}.{1:03d} {2:1c} | ", time_seconds,
+                                          time_ms, status);
 #endif
         for (auto dev : devices) {
             dev->write_string(front);
-            message->text.for_each([&](char c) {
+            message.text.for_each([&](char c) {
                 dev->write_byte(c);
                 if (c == '\n') {
                     for (size_t i = 0; i < 10; i++) { dev->write_byte(' '); }
@@ -79,5 +79,4 @@ void kernel::system_log::flush() {
             dev->write_byte('\n');
         }
     });
-    message_gate.release();
 }
