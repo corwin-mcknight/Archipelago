@@ -31,7 +31,7 @@ template <typename T, size_t N> class static_vector : public static_array<T, N> 
     const T* end() const { return this->m_buffer + m_count; }
 
    private:
-    size_t m_count;
+    size_t m_count = 0;
 };
 
 }  // namespace ktl

@@ -46,9 +46,12 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
 
         // We have an argument specifier, parse it.
         size_t argument_index = 0;
-        while (fmt[++format_index] != '}' && fmt[format_index] != ':') {
-            argument_index = argument_index * 10 + ((size_t)fmt[format_index] - '0');
+        while (++format_index < fmt.size() && fmt[format_index] != '}' && fmt[format_index] != ':') {
+            if (fmt[format_index] >= '0' && fmt[format_index] <= '9') {
+                argument_index = argument_index * 10 + ((size_t)fmt[format_index] - '0');
+            }
         }
+        if (format_index >= fmt.size()) { break; }
 
         if (fmt[format_index] == ':') {
             // Parse the format specifier
@@ -80,7 +83,7 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
             if (fmt[format_index] != '}') { fmtargs.specifier = fmt[format_index]; }
 
             // Advance until next }
-            while (fmt[++format_index] != '}') {}
+            while (++format_index < fmt.size() && fmt[format_index] != '}') {}
         }
 
         if (argument_index < sizeof...(args)) {
@@ -94,7 +97,7 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
         } else {
             // print the string "<invalid argument>"
             const char* invalid_argument = "<invalid argument>";
-            while (*invalid_argument) { buffer[buffer_index++] = *invalid_argument++; }
+            while (*invalid_argument && buffer_index < buffer_max - 1) { buffer[buffer_index++] = *invalid_argument++; }
         }
     }
     buffer[buffer_index] = '\0';  // null-terminate the string

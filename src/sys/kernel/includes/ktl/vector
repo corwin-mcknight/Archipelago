@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <ktl/maybe>
 #include <ktl/type_traits>
@@ -208,7 +209,13 @@ template <typename T> class vector {
         if (required <= m_capacity) { return true; }
 
         size_t new_capacity = m_capacity == 0 ? k_initial_capacity : m_capacity;
-        while (new_capacity < required) { new_capacity *= 2; }
+        while (new_capacity < required) {
+            if (new_capacity > SIZE_MAX / 2) {
+                new_capacity = required;
+                break;
+            }
+            new_capacity *= 2;
+        }
         return reallocate(new_capacity);
     }
 

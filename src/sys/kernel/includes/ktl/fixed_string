@@ -14,7 +14,7 @@ template <size_t N> class fixed_string {
     fixed_string() { memset(m_buffer, 0, N); }
     fixed_string(const char* str) {
         memset(m_buffer, 0, N);
-        for (size_t i = 0; i < strlen(str); i++) { m_buffer[i] = str[i]; }
+        for (size_t i = 0; i + 1 < N && str[i]; i++) { m_buffer[i] = str[i]; }
     }
 
     fixed_string(const ktl::string_view str) {

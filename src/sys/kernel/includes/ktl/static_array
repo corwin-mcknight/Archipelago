@@ -13,7 +13,7 @@ template <typename T, size_t N> class static_array {
     size_t capacity() const { return N; }
 
     T operator[](size_t index) { return at(index).value_or(T()); }
-    maybe<T> at(size_t index) { return index >= N ? m_buffer[index] : ktl::nothing; }
+    maybe<T> at(size_t index) { return index < N ? m_buffer[index] : ktl::nothing; }
 
     bool set(size_t index, T value) {
         if (index >= N) { return false; }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <ktl/algorithm>
 #include <ktl/maybe>
@@ -161,6 +162,7 @@ template <typename T> class deque {
     }
 
     bool reserve(size_t new_capacity) {
+        if (new_capacity > SIZE_MAX - (k_block_capacity - 1)) { new_capacity = SIZE_MAX - (k_block_capacity - 1); }
         size_t required_blocks = (new_capacity + k_block_capacity - 1) / k_block_capacity;
         if (!m_blocks.reserve(required_blocks)) { return false; }
 
