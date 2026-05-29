@@ -86,5 +86,13 @@ void idt_set_gate(unsigned char num, uintptr_t base, unsigned short sel, unsigne
 void enable_interrupts();
 void disable_interrupts();
 
+// Save the current RFLAGS (including the interrupt-enable flag) and disable interrupts; pair with
+// restore_interrupts() to return to exactly the saved state. This is the arch hook for the
+// IRQ-safe spinlock lock_guard, and nests correctly (each save captures the then-current state).
+uint64_t save_and_disable_interrupts();
+void restore_interrupts(uint64_t flags);
+// True if the interrupt-enable flag (IF, RFLAGS bit 9) is currently set.
+bool interrupts_enabled();
+
 }  // namespace x86
 };  // namespace kernel
