@@ -1,14 +1,36 @@
 #include <stdlib.h>
 
 int atoi(const char* str) {
-    int result = 0;
-    int sign   = (*str == '-') ? -1 : 1;
+    if (str == nullptr) { return 0; }
+
+    int sign = (*str == '-') ? -1 : 1;
     if (sign == -1) ++str;
-    while (*str) { result = result * 10 + (*str++ - '0'); }
-    return sign * result;
+
+    constexpr int INT_MAX_VALUE = 2147483647;
+    constexpr int INT_MIN_VALUE = -2147483647 - 1;
+
+    unsigned long long acc      = 0;
+    while (*str >= '0' && *str <= '9') {
+        acc = acc * 10 + (unsigned long long)(*str - '0');
+        if (sign == 1 && acc > (unsigned long long)INT_MAX_VALUE) { return INT_MAX_VALUE; }
+        if (sign == -1 && acc > (unsigned long long)INT_MAX_VALUE + 1) { return INT_MIN_VALUE; }
+        ++str;
+    }
+
+    if (sign == -1) {
+        if (acc == (unsigned long long)INT_MAX_VALUE + 1) { return INT_MIN_VALUE; }
+        return -(int)acc;
+    }
+    return (int)acc;
 }
 
 void itoa(unsigned long long n, char* buffer, unsigned int base) {
+    if (base < 2 || base > 16) {
+        buffer[0] = '0';
+        buffer[1] = '\0';
+        return;
+    }
+
     if (n == 0) {
         buffer[0] = '0';
         buffer[1] = '\0';
