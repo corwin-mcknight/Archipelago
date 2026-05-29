@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/atomic>
+
 // Kernel time is represented as a 'clock tick'. The duration of a tick is set to the minimum granularity of the highest
 // precision clock.
 /** @typedef ktime_t
@@ -48,7 +50,7 @@ class time {
 
    private:
     /** Current kernel tick count. */
-    static ktime_t _now;
+    static ktl::atomic<ktime_t> _now;
     /** Nanoseconds represented by a single kernel tick. */
     static time_ns_t _ns_per_tick;
 };

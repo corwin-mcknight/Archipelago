@@ -11,10 +11,15 @@
 
 namespace kernel::x86::drivers {
 
+// PIT base frequency in Hz and the divisor programmed into the channel-0 reload register.
+// These are the single source of truth for both set_phase() and resolution_ns().
+static constexpr uint64_t PIT_BASE_FREQ_HZ = 1193182;
+static constexpr unsigned int PIT_DIVISOR  = 1193;
+
 void pit_timer::init() {
     kernel::time::init(resolution_ns());
     g_interrupt_manager.register_interrupt(kernel::x86::IRQ0, this, 0);
-    set_phase(1193);
+    set_phase(PIT_DIVISOR);
 }
 
 bool pit_timer::handle_interrupt(register_frame_t* regs) {
@@ -25,7 +30,7 @@ bool pit_timer::handle_interrupt(register_frame_t* regs) {
     return true;
 }
 
-time_ns_t pit_timer::resolution_ns() { return 1000000000 / 1000; }
+time_ns_t pit_timer::resolution_ns() { return (time_ns_t)((uint64_t)PIT_DIVISOR * 1000000000ULL / PIT_BASE_FREQ_HZ); }
 
 void pit_timer::set_phase(unsigned int divisor) {
     outb(0x43, 0x36);                       // Command 0x36
