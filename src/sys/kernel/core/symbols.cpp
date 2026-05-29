@@ -122,7 +122,9 @@ void init(const void* elf_data, size_t elf_size) {
     }
     if (hdr->e_ident[4] != kElfClass64) { return; }
     if (hdr->e_shoff == 0 || hdr->e_shentsize < sizeof(Elf64_Shdr)) { return; }
-    if (hdr->e_shoff + static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize > elf_size) { return; }
+    if (hdr->e_shoff > elf_size || static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize > elf_size - hdr->e_shoff) {
+        return;
+    }
 
     const auto* sections     = reinterpret_cast<const Elf64_Shdr*>(base + hdr->e_shoff);
 
@@ -136,11 +138,11 @@ void init(const void* elf_data, size_t elf_size) {
     }
     if (sym_sh == nullptr) { return; }
     if (sym_sh->sh_entsize < sizeof(Elf64_Sym)) { return; }
-    if (sym_sh->sh_offset + sym_sh->sh_size > elf_size) { return; }
+    if (sym_sh->sh_offset > elf_size || sym_sh->sh_size > elf_size - sym_sh->sh_offset) { return; }
     if (sym_sh->sh_link >= hdr->e_shnum) { return; }
 
     const Elf64_Shdr& str_sh = sections[sym_sh->sh_link];
-    if (str_sh.sh_offset + str_sh.sh_size > elf_size) { return; }
+    if (str_sh.sh_offset > elf_size || str_sh.sh_size > elf_size - str_sh.sh_offset) { return; }
 
     const auto* syms       = reinterpret_cast<const Elf64_Sym*>(base + sym_sh->sh_offset);
     const size_t sym_count = static_cast<size_t>(sym_sh->sh_size / sym_sh->sh_entsize);
@@ -219,7 +221,7 @@ bool demangle(const char* mangled, char* out, size_t out_size) {
         if (!first) {
             if (!put_str("::")) { return false; }
         }
-        first = false;
+        first                            = false;
 
         static constexpr char kAnonTag[] = "_GLOBAL__N_1";
         constexpr size_t kAnonTagLen     = sizeof(kAnonTag) - 1;
