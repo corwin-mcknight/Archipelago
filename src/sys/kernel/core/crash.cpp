@@ -233,6 +233,13 @@ void crash_write_n(const char* s, size_t n) {
     if (g_in_dump) {
         // Recursive crash inside the dumper -- abandon and halt.
         crash_write("\n*** RECURSIVE CRASH -- HALTING ***\n");
+        if (g_harness_enabled) {
+            // Emit a minimal terminator so harness mode sees a structured abort
+            // instead of timing out on the spin loop below.
+            crash_write("@@CRASH_END {}\n");
+            crash_emit("@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n", static_cast<unsigned>(kind));
+            terminate(kind);
+        }
         asm volatile("cli");
         for (;;) { asm volatile("hlt"); }
     }
