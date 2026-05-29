@@ -15,6 +15,14 @@ constexpr size_t pdpt_index(uintptr_t vaddr) { return (vaddr >> 30) & 0x1FF; }
 constexpr size_t pd_index(uintptr_t vaddr) { return (vaddr >> 21) & 0x1FF; }
 constexpr size_t pt_index(uintptr_t vaddr) { return (vaddr >> 12) & 0x1FF; }
 
+// The index helpers only consume bits 12..47. An address is canonical iff
+// sign-extending bit 47 reproduces bits 48..63, so bits 48..63 carry no extra
+// information; reject non-canonical addresses rather than silently aliasing.
+constexpr bool is_canonical(uintptr_t vaddr) {
+    int64_t s = static_cast<int64_t>(vaddr) >> 47;
+    return s == 0 || s == -1;
+}
+
 ktl::maybe<vm_paddr_t> alloc_table() { return g_page_frame_allocator.alloc(); }
 
 // Recursively free intermediate page-table pages owned by an entry. Levels go
@@ -87,6 +95,7 @@ void address_space::destroy() {
 
 bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) {
     if (m_pml4_phys == 0) { return false; }
+    if (!is_canonical(vaddr)) { return false; }
     if ((vaddr & 0xFFF) != 0) { return false; }
     if ((paddr & 0xFFF) != 0) { return false; }
 
@@ -102,6 +111,7 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) 
 
 ktl::maybe<vm_paddr_t> address_space::walk(uintptr_t vaddr) const {
     if (m_pml4_phys == 0) { return ktl::nothing; }
+    if (!is_canonical(vaddr)) { return ktl::nothing; }
     uint64_t* leaf = find_pt_slot(m_pml4_phys, vaddr);
     if (leaf == nullptr) { return ktl::nothing; }
     if (!(*leaf & pte::PRESENT)) { return ktl::nothing; }
@@ -110,6 +120,7 @@ ktl::maybe<vm_paddr_t> address_space::walk(uintptr_t vaddr) const {
 
 ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
     if (m_pml4_phys == 0) { return ktl::nothing; }
+    if (!is_canonical(vaddr)) { return ktl::nothing; }
     if ((vaddr & 0xFFF) != 0) { return ktl::nothing; }
 
     uint64_t* leaf = find_pt_slot(m_pml4_phys, vaddr);
