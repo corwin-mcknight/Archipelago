@@ -2,10 +2,12 @@
 
 #include <stdint.h>
 
+#include <ktl/atomic>
+
 namespace kernel {
 
 struct cpu_core {
-    bool initialized;
+    ktl::atomic<bool> initialized;
     uint32_t lapic_id;
 };
 

@@ -25,7 +25,7 @@ KTEST(cpu_smp_cores_initialized, "x86/cpu") {
     if (count > CONFIG_MAX_CORES) { count = CONFIG_MAX_CORES; }
 
     for (uint64_t i = 0; i < count; i++) {
-        KTEST_EXPECT_TRUE(g_cpu_cores[i].initialized);
+        KTEST_EXPECT_TRUE(g_cpu_cores[i].initialized.load(ktl::memory_order::acquire));
         KTEST_EXPECT_EQUAL((size_t)g_cpu_cores[i].lapic_id, (size_t)mp_request.response->cpus[i]->lapic_id);
     }
 }
