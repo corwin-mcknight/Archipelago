@@ -2,6 +2,7 @@
 #include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 
+#include <ktl/atomic>
 #include <ktl/circular_buffer>
 #include <ktl/fixed_string>
 #include <ktl/fmt>
@@ -69,7 +70,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     }
 
     g_log.debug("cpu{0}: Now running", core_index);
-    g_cpu_cores[core_index].initialized = true;
+    g_cpu_cores[core_index].initialized.store(true, ktl::memory_order::release);
 }
 
 extern "C" [[noreturn]] void ap_startup(struct limine_mp_info* info) {
