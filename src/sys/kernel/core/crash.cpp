@@ -6,6 +6,7 @@
 #include <ktl/fmt>
 
 #include "kernel/drivers/uart.h"
+#include "kernel/json_escape.h"
 #include "kernel/log.h"
 #include "kernel/symbols.h"
 #include "kernel/x86/ioport.h"
@@ -193,18 +194,32 @@ void emit_stack(register_frame_t* regs, bool harness) {
 }
 
 void emit_log_drain(bool harness) {
-    // Walk g_log.messages directly. No locks (single-CPU at crash time, recursion guard
-    // prevents reentrance). Iterating after acquiring the semaphore could deadlock if the
-    // panic originated from inside the log path.
-    g_log.messages.for_each([&](const kernel::log_message& msg) {
-        time_ns_t ns = kernel::time::ktime_to_ns(msg.timestamp);
+    // The producer path holds no lock; force the flush flag (its holder may be the flush that
+    // just faulted) and scan the retained window. In-progress slots are shown as a placeholder
+    // since their bytes may be torn. SMP: a peer core mid-log during the dump races this scan;
+    // that quiescing is deferred (best-effort dump) -- see the spec. Single-core (the only
+    // configuration today) has no such peer.
+    g_log.crash_for_each([&](const kernel::log_message* msg, bool in_progress) {
+        if (in_progress) {
+            if (harness) {
+                crash_write("@@CRASH_LOG {\"seq\":0,\"ns\":0,\"lvl\":\"?\",\"text\":\"<in-progress>\"}\n");
+            } else {
+                crash_write("  [in-progress writer]\n");
+            }
+            return;
+        }
+        time_ns_t ns = kernel::time::ktime_to_ns(msg->timestamp);
         if (harness) {
-            crash_emit("@@CRASH_LOG {{\"seq\":{0},\"ns\":{1},\"lvl\":\"{2}\",\"text\":\"{3}\"}}\n", msg.sequence(), ns,
-                       level_letter(msg.level()), msg.text.c_str());
+            // Emit in pieces so the user-controlled text is JSON-escaped (a quote/newline in a log
+            // line -- e.g. an assertion's stringized expression -- would otherwise break the record).
+            crash_emit("@@CRASH_LOG {{\"seq\":{0},\"ns\":{1},\"lvl\":\"{2}\",\"text\":\"", msg->sequence(), ns,
+                       level_letter(msg->level()));
+            kernel::write_json_escaped([](char ch) { uart.write_byte(ch); }, msg->text.c_str());
+            crash_write("\"}\n");
         } else {
             uint64_t sec = static_cast<uint64_t>(ns) / 1'000'000'000ULL;
             uint64_t ms  = (static_cast<uint64_t>(ns) / 1'000'000ULL) % 1'000ULL;
-            crash_emit("  [{0:03d}.{1:03d} {2}] {3}\n", sec, ms, level_letter(msg.level()), msg.text.c_str());
+            crash_emit("  [{0:03d}.{1:03d} {2}] {3}\n", sec, ms, level_letter(msg->level()), msg->text.c_str());
         }
     });
 }

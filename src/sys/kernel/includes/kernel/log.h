@@ -4,16 +4,16 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <ktl/circular_buffer>
+#include <ktl/atomic>
 #include <ktl/fixed_string>
+#include <ktl/fmt>
 #include <ktl/static_vector>
 #include <ktl/string_view>
 #include <ktl/utility>
 
 #include "kernel/config.h"
 #include "kernel/drivers/logging_device.h"
-#include "kernel/synchronization/semaphore.h"
-#include "kernel/synchronization/spinlock.h"
+#include "kernel/log_ring.h"
 #include "kernel/time.h"
 
 namespace kernel {
@@ -74,31 +74,30 @@ struct log_message {
         return *this;
     }
 
-    // Sequence is first 56 bits, level is last 4 bits (and really only consumes 3.)
+    // Sequence is the low 60 bits, level is the top 4 bits (and really only consumes 3).
     uint64_t sequence() const { return level_seq & 0xFFFFFFFFFFFFFFF; }
     log_level level() const { return static_cast<log_level>(level_seq >> sequence_bits); }
 };
 
 class system_log {
    public:
-    static constexpr size_t max_messages = 64;
-    uint64_t last_seq                    = 0;
-
-    ktl::circular_buffer<log_message, max_messages> messages;
-    kernel::synchronization::semaphore message_gate;
-    kernel::synchronization::spinlock flush_lock;
+    static constexpr size_t max_messages = 128;
 
     template <log_level level, typename... Args>
     INLINE_RELEASE_ONLY void log(const ktl::string_view fmt, Args... args) {
-        message_gate.acquire();
-        uint64_t seq = last_seq++;
+        uint64_t seq;
+        log_message* message = m_ring.reserve(seq);
+        if (message == nullptr) { return; }  // ring full -- fail-to-log (see m_ring.dropped())
 
-        ktl::fixed_string<log_message::max_message_size> string;
-        ktl::format::format_to_buffer_raw(string.m_buffer, log_message::max_message_size, fmt, args...);
+        message->timestamp = kernel::time::now();
+        message->level_seq = (static_cast<uint64_t>(level) << log_message::sequence_bits) | (seq & k_sequence_mask);
+        ktl::format::format_to_buffer_raw(message->text.m_buffer, log_message::max_message_size, fmt, args...);
+        m_ring.publish(seq);
 
-        messages.emplace(log_message(kernel::time::now(), level, seq, string));
-        message_gate.release();
-
+        // Autoflush puts messages on the console during bring-up. Flushing from interrupt context
+        // is permitted and deadlock-free (the flush flag never blocks); a per-CPU in-interrupt gate
+        // to make interrupt producers enqueue-only, and the autoflush-off background-worker mode,
+        // are deferred refinements.
         if (this->m_autoflush) { flush(); }
     }
 
@@ -115,24 +114,27 @@ class system_log {
     LOG_LEVEL_HELPER(error)
     LOG_LEVEL_HELPER(fatal)
 
+    // History scan over the retained window in sequence order (shell `log show`).
     template <typename F> uint64_t for_each(uint64_t minimum_sequence_id, F func) {
-        uint64_t next_sequence = minimum_sequence_id;
-        messages.for_each([&next_sequence, func](const log_message message) {
-            if (message.sequence() >= next_sequence) {
-                func(&message);
-                next_sequence = message.sequence() + 1;
-            }
-        });
-        return next_sequence;
+        return m_ring.for_each(minimum_sequence_id, [&func](const log_message& message) { func(&message); });
+    }
+
+    // Crash-time drain: forces the flush flag and scans the retained window. `visit` is called as
+    // visit(const log_message*, bool in_progress); an in-progress slot's bytes are untrustworthy.
+    template <typename F> void crash_for_each(F visit) {
+        m_ring.crash_scan([&visit](const log_message& message, bool in_progress) { visit(&message, in_progress); });
     }
 
     void flush();
     ktl::static_vector<kernel::driver::logging_device*, CONFIG_LOG_MAX_DEVICES> devices;
 
+    uint64_t dropped() const { return m_ring.dropped(); }
+
    private:
-    uint64_t last_flushed_sequence = 0;
-    bool m_autoflush               = true;
-    [[maybe_unused]] char pad[7];  // Ensure 64-byte alignment
+    static constexpr uint64_t k_sequence_mask = (static_cast<uint64_t>(1) << log_message::sequence_bits) - 1;
+
+    log_ring<log_message, max_messages> m_ring;
+    bool m_autoflush = true;
 };
 
 };  // namespace kernel
