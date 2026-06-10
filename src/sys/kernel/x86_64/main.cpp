@@ -154,7 +154,9 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
 
-    auto evt_id = kernel::obj::g_handle_table.emplace<kernel::obj::Event>(kernel::obj::RIGHTS_ALL).unwrap();
+    auto evt_id =
+        kernel::obj::g_handle_table.emplace<kernel::obj::Event>(kernel::obj::RIGHT_READ | kernel::obj::RIGHT_SIGNAL)
+            .unwrap();
     kernel::obj::g_handle_table.get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
 #if CONFIG_KERNEL_SHELL

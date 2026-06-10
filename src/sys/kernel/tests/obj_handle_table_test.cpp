@@ -114,6 +114,56 @@ KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_tabl
     KTEST_EXPECT_TRUE(g_handle_table.count() == before);
 }
 
+// F033: rights outside the type's registered valid_rights contract are rejected, not clamped.
+KTEST_WITH_INIT(obj_handle_table_rejects_out_of_contract_rights, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    auto bad = table.emplace<TestObjRestricted>(RIGHT_WRITE);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_RIGHTS_VIOLATION, table.count() == 0);
+}
+
+// F033: a mix of in-contract and out-of-contract bits is rejected outright (no silent clamping).
+KTEST_WITH_INIT(obj_handle_table_rejects_mixed_rights, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    auto bad = table.emplace<TestObjRestricted>(RIGHT_READ | RIGHT_WRITE);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_RIGHTS_VIOLATION, table.count() == 0);
+}
+
+// F033: rights within the contract still work, including duplicate (whose rights are a masked subset).
+KTEST_WITH_INIT(obj_handle_table_accepts_in_contract_rights, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjRestricted>(TEST_RESTRICTED_VALID_RIGHTS));
+    KTEST_REQUIRE_VALUE(info, table.info(id));
+    KTEST_EXPECT_TRUE(info.rights == TEST_RESTRICTED_VALID_RIGHTS);
+    KTEST_UNWRAP(dup, table.duplicate(id, RIGHT_READ));
+    KTEST_REQUIRE_VALUE(dup_info, table.info(dup));
+    KTEST_EXPECT_ALL(dup_info.rights == RIGHT_READ, table.count() == 2);
+}
+
+// F033: objects whose type was never registered cannot be given handles at all.
+KTEST_WITH_INIT(obj_handle_table_rejects_unregistered_type, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    auto bad = table.emplace<TestObjUnregistered>(RIGHT_READ);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_WRONG_TYPE, table.count() == 0);
+}
+
+// F021: a slot whose generation counter saturates is retired on close instead of being recycled,
+// so a stale HandleId can never revalidate after the counter would have wrapped.
+KTEST_WITH_INIT(obj_handle_table_generation_wrap_retires_slot, "obj/handle_table", handle_table_init) {
+    HandleTable table;
+    KTEST_UNWRAP(initial, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_REQUIRE_VALUE(id, table.testing_set_generation(initial, 0xFFFFFFFFu));
+    KTEST_REQUIRE_TRUE(table.is_valid(id));
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
+    KTEST_EXPECT_ALL(!table.is_valid(id), table.count() == 0);
+
+    // The retired slot must not be handed out again; the next emplace gets a different index.
+    KTEST_UNWRAP(next, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_EXPECT_ALL(next.index != id.index, table.is_valid(next), !table.is_valid(id), table.count() == 1);
+
+    // A handle forged with generation 0 against the retired slot must not validate either.
+    KTEST_EXPECT_FALSE(table.is_valid(HandleId{id.index, 0}));
+}
+
 KTEST_WITH_INIT(obj_handle_table_destructor_closes_all, "obj/handle_table", handle_table_init) {
     bool d1 = false, d2 = false;
     {

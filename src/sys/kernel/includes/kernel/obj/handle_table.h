@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/config.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/types.h>
 #include <kernel/synchronization/spinlock.h>
@@ -48,6 +49,12 @@ class HandleTable {
     bool is_valid(HandleId id);
     size_t count();
 
+#if CONFIG_KERNEL_TESTING
+    // Test-only seam: force a slot's generation so generation-wrap retirement (F021) can be
+    // exercised without 2^32 close/reopen cycles. Returns the updated id for the live handle.
+    ktl::maybe<HandleId> testing_set_generation(HandleId id, uint32_t generation);
+#endif
+
    private:
     struct HandleEntry {
         ktl::ref<Object> object;
@@ -71,7 +78,8 @@ class HandleTable {
 // Template implementations
 
 template <typename T, typename... Args> Result<HandleId, result_t> HandleTable::emplace(Rights rights, Args&&... args) {
-    auto obj                  = ktl::make_ref<T>(ktl::forward<Args>(args)...);
+    auto obj = ktl::make_ref<T>(ktl::forward<Args>(args)...);
+    if (!obj) { return Result<HandleId, result_t>::err(RESULT_OOM); }
     ktl::ref<Object> base_ref = obj;
     return create_handle(ktl::move(base_ref), rights);
 }

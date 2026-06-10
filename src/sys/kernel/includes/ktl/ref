@@ -3,8 +3,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <std/new.h>
+
 #include <ktl/atomic>
 #include <ktl/utility>
+
+#include "kernel/panic.h"
 
 namespace ktl {
 
@@ -15,6 +19,14 @@ struct ref_control_block_base {
     virtual void destroy()            = 0;
     virtual ~ref_control_block_base() = default;
 };
+
+// Bump the strong count, guarding against wrap-around (F047). A saturated count
+// would wrap to 0 and trigger premature destruction, so treat it as fatal.
+inline void ref_acquire(ref_control_block_base* block) {
+    if (!block) { return; }
+    uint32_t prev = block->ref_count.fetch_add(1, memory_order::relaxed);
+    if (prev == UINT32_MAX) { panic("ktl::ref strong count overflow"); }
+}
 
 template <typename T> struct ref_control_block : ref_control_block_base {
     T* ptr;
@@ -28,9 +40,7 @@ template <typename T> class ref {
    public:
     ref() : m_ptr(nullptr), m_block(nullptr) {}
 
-    ref(const ref& other) : m_ptr(other.m_ptr), m_block(other.m_block) {
-        if (m_block) { m_block->ref_count.fetch_add(1, memory_order::relaxed); }
-    }
+    ref(const ref& other) : m_ptr(other.m_ptr), m_block(other.m_block) { detail::ref_acquire(m_block); }
 
     ref(ref&& other) noexcept : m_ptr(other.m_ptr), m_block(other.m_block) {
         other.m_ptr   = nullptr;
@@ -39,7 +49,7 @@ template <typename T> class ref {
 
     // Converting constructor: ref<Derived> -> ref<Base>
     template <typename U> ref(const ref<U>& other) : m_ptr(other.get()), m_block(other.control_block()) {
-        if (m_block) { m_block->ref_count.fetch_add(1, memory_order::relaxed); }
+        detail::ref_acquire(m_block);
     }
 
     template <typename U> ref(ref<U>&& other) : m_ptr(other.get()), m_block(other.control_block()) { other.clear(); }
@@ -49,7 +59,7 @@ template <typename T> class ref {
         release();
         m_ptr   = other.m_ptr;
         m_block = other.m_block;
-        if (m_block) { m_block->ref_count.fetch_add(1, memory_order::relaxed); }
+        detail::ref_acquire(m_block);
         return *this;
     }
 
@@ -108,16 +118,25 @@ template <typename T> class ref {
     detail::ref_control_block_base* m_block;
 };
 
+// Returns an empty ref<T>() if either allocation fails (F032). The nothrow new form is
+// required here: the ordinary form is assumed non-null by the compiler, which would elide
+// these checks entirely. Today the underlying allocator panics on OOM, so the null paths
+// are forward-proofing for a failing allocator.
 template <typename T, typename... Args> ref<T> make_ref(Args&&... args) {
-    T* obj    = new T(ktl::forward<Args>(args)...);
-    auto* blk = new detail::ref_control_block<T>(obj);
+    T* obj = new (std::nothrow) T(ktl::forward<Args>(args)...);
+    if (!obj) { return ref<T>(); }
+    auto* blk = new (std::nothrow) detail::ref_control_block<T>(obj);
+    if (!blk) {
+        delete obj;
+        return ref<T>();
+    }
     return ref<T>(obj, blk);
 }
 
 template <typename T, typename U> ref<T> static_ref_cast(const ref<U>& other) {
     if (!other) { return ref<T>(); }
     auto* block = other.control_block();
-    block->ref_count.fetch_add(1, memory_order::relaxed);
+    detail::ref_acquire(block);
     return ref<T>(static_cast<T*>(other.get()), block);
 }
 

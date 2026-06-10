@@ -1,4 +1,5 @@
 #include <kernel/obj/handle_table.h>
+#include <kernel/obj/type_registry.h>
 
 namespace kernel::obj {
 
@@ -26,6 +27,16 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
 }
 
 Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
+    if (!object) { return Result<HandleId, result_t>::err(RESULT_NULL_ARGUMENT); }
+
+    // F033: requested rights must stay within the contract registered for this object's type.
+    // Out-of-contract bits are rejected outright rather than silently clamped.
+    auto descriptor = g_type_registry.lookup(object->type_id());
+    if (!descriptor.has_value()) { return Result<HandleId, result_t>::err(RESULT_WRONG_TYPE); }
+    if ((rights & ~descriptor.value()->valid_rights) != 0) {
+        return Result<HandleId, result_t>::err(RESULT_RIGHTS_VIOLATION);
+    }
+
     kernel::synchronization::lock_guard guard(m_lock);
 
     if (m_free_head == -1) {
@@ -69,10 +80,19 @@ Result<bool, result_t> HandleTable::close(HandleId id) {
 
     entry->object.reset();
     entry->rights = 0;
+    m_count--;
+
+    // F021: if the generation counter is saturated, incrementing would wrap to 0 and let a stale
+    // (index, generation) HandleId revalidate against a recycled slot. Retire the slot permanently
+    // instead of returning it to the free list.
+    if (entry->generation == UINT32_MAX) {
+        entry->next_free = -1;
+        return Result<bool, result_t>::ok(true);
+    }
+
     entry->generation++;
     entry->next_free = m_free_head;
     m_free_head      = static_cast<int32_t>(id.index);
-    m_count--;
 
     return Result<bool, result_t>::ok(true);
 }
@@ -101,5 +121,15 @@ bool HandleTable::is_valid(HandleId id) {
     kernel::synchronization::lock_guard guard(m_lock);
     return lookup_entry(id) != nullptr;
 }
+
+#if CONFIG_KERNEL_TESTING
+ktl::maybe<HandleId> HandleTable::testing_set_generation(HandleId id, uint32_t generation) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    HandleEntry* entry = lookup_entry(id);
+    if (!entry) { return ktl::nothing; }
+    entry->generation = generation;
+    return HandleId{id.index, generation};
+}
+#endif
 
 }  // namespace kernel::obj
