@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/panic.h>
 #include <ktl/fmt>
 #include <ktl/string_view>
 #include <ktl/type_traits>
@@ -21,20 +22,40 @@ template <typename T> class maybe {
     T m_value;
 
    public:
-    maybe() : m_has_value(false) {}
-    maybe(nothing_t) : m_has_value(false) {}
+    maybe() : m_has_value(false), m_value{} {}
+    maybe(nothing_t) : m_has_value(false), m_value{} {}
     maybe(const T& value) : m_has_value(true), m_value(value) {}
 
     bool has_value() const { return m_has_value; }
     bool has_value() { return m_has_value; }
 
-    T& value() { return m_value; }
-    const T& value() const { return m_value; }
+    // Accessing the value of an empty maybe is a kernel bug and panics, mirroring Result::unwrap.
+    T& value() {
+        if (!m_has_value) { panic("maybe::value on empty maybe"); }
+        return m_value;
+    }
+    const T& value() const {
+        if (!m_has_value) { panic("maybe::value on empty maybe"); }
+        return m_value;
+    }
 
-    T& operator*() { return m_value; }
-    const T& operator*() const { return m_value; }
+    T& operator*() {
+        if (!m_has_value) { panic("maybe::operator* on empty maybe"); }
+        return m_value;
+    }
+    const T& operator*() const {
+        if (!m_has_value) { panic("maybe::operator* on empty maybe"); }
+        return m_value;
+    }
 
-    T* operator->() { return &m_value; }
+    T* operator->() {
+        if (!m_has_value) { panic("maybe::operator-> on empty maybe"); }
+        return &m_value;
+    }
+    const T* operator->() const {
+        if (!m_has_value) { panic("maybe::operator-> on empty maybe"); }
+        return &m_value;
+    }
 
     bool operator==(const maybe<T>& other) const {
         if (m_has_value != other.m_has_value) { return false; }

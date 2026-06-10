@@ -92,4 +92,32 @@ KTEST(ktl_result_error_flow, "ktl/result") {
     KTEST_EXPECT_TRUE((err_result != Result<int, const char*>::err("oops")));
 }
 
+namespace {
+struct point {
+    int x = 0;
+    int y = 0;
+};
+}  // namespace
+
+KTEST(ktl_maybe_value_round_trip, "ktl/maybe") {
+    ktl::maybe<point> p{point{3, 4}};
+    KTEST_REQUIRE_TRUE(p.has_value());
+
+    // value(), operator* and operator-> all expose the stored value.
+    KTEST_EXPECT_EQUAL(p.value().x, 3);
+    KTEST_EXPECT_EQUAL((*p).y, 4);
+    KTEST_EXPECT_EQUAL(p->x, 3);
+
+    // Mutation through the non-const accessors round-trips.
+    p.value().x = 10;
+    (*p).y      = 20;
+    p->x += 1;
+
+    const ktl::maybe<point>& const_ref = p;
+    KTEST_REQUIRE_TRUE(const_ref.has_value());
+    KTEST_EXPECT_EQUAL(const_ref.value().x, 11);
+    KTEST_EXPECT_EQUAL((*const_ref).y, 20);
+    KTEST_EXPECT_EQUAL(const_ref->y, 20);
+}
+
 #endif  // CONFIG_KERNEL_TESTING

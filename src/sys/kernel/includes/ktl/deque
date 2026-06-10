@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <kernel/panic.h>
 #include <ktl/algorithm>
 #include <ktl/maybe>
 #include <ktl/utility>
@@ -184,7 +185,7 @@ template <typename T> class deque {
             if (remaining < blk.size()) { return blk.values[remaining]; }
             remaining -= blk.size();
         }
-        return m_blocks[0].values[0];
+        panic("deque index out of range");
     }
 
     ktl::maybe<T> at(size_t index) const {

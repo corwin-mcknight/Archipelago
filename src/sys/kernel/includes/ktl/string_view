@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/panic.h>
 #include <ktl/algorithm>
 #include <ktl/string>
 
@@ -32,7 +33,11 @@ class string_view {
         return npos;
     }
 
-    char at(size_t idx) const { return m_ptr[idx]; }
+    // Bounds-checked element access; out-of-range indices are a kernel bug and panic.
+    constexpr char at(size_t idx) const {
+        if (idx >= m_size) { panic("string_view::at index out of range"); }
+        return m_ptr[idx];
+    }
 
     constexpr char operator[](size_t idx) const { return m_ptr[idx]; }
 
