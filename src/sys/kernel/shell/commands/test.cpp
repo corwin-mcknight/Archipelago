@@ -112,29 +112,27 @@ void list_tests(kernel::shell::ShellOutput& output) {
     }
 }
 
-void test_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void test_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: test list|run|run-all\n");
         return;
     }
 
-    ktl::string_view sub(argv[1]);
-    if (sub == "list") {
+    if (argv[1] == "list") {
         list_tests(output);
-    } else if (sub == "run") {
+    } else if (argv[1] == "run") {
         if (argc < 3) {
             output.print("usage: test run <name>\n");
             return;
         }
-        ktl::string_view name(argv[2]);
-        auto test = find_test(name);
+        auto test = find_test(argv[2]);
         if (!test) {
             emit_harness_event(output, "@@HARNESS {{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}\n",
                                argv[2]);
             return;
         }
         execute_test(output, *test);
-    } else if (sub == "run-all") {
+    } else if (argv[1] == "run-all") {
         int total  = 0;
         int passed = 0;
         int failed = 0;

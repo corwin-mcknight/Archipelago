@@ -10,13 +10,12 @@
 
 namespace {
 
-void cpu_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void cpu_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: cpu info\n");
         return;
     }
-    ktl::string_view sub(argv[1]);
-    if (sub == "info") {
+    if (argv[1] == "info") {
         auto uptime_ns = kernel::time::ns_since_boot();
         auto uptime_ms = uptime_ns / 1000000;
         output.print("Uptime: {0} ms\n", uptime_ms);

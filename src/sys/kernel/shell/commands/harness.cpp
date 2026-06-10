@@ -7,17 +7,16 @@
 
 namespace {
 
-void harness_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void harness_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: harness enable|disable\n");
         return;
     }
 
-    ktl::string_view sub(argv[1]);
-    if (sub == "enable") {
+    if (argv[1] == "enable") {
         output.set_protocol_mode(true);
         kernel::crash::set_harness_enabled(true);
-    } else if (sub == "disable") {
+    } else if (argv[1] == "disable") {
         output.set_protocol_mode(false);
         kernel::crash::set_harness_enabled(false);
     } else {

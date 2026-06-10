@@ -21,13 +21,12 @@ const char* level_name(kernel::log_level level) {
     }
 }
 
-void log_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void log_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: log show\n");
         return;
     }
-    ktl::string_view sub(argv[1]);
-    if (sub == "show") {
+    if (argv[1] == "show") {
         g_log.for_each(0, [&output](const kernel::log_message* msg) {
             output.print("[{0}] {1}\n", level_name(msg->level()), msg->text.c_str());
         });

@@ -6,9 +6,11 @@
 
 #include <kernel/shell/output.h>
 
+#include <ktl/string_view>
+
 namespace kernel::shell {
 
-using shell_handler_fn = void (*)(int argc, const char* const argv[], ShellOutput& output);
+using shell_handler_fn = void (*)(int argc, const ktl::string_view argv[], ShellOutput& output);
 
 struct shell_command {
     const char* name;

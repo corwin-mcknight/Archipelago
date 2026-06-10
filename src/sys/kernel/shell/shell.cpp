@@ -41,32 +41,30 @@ void read_line(char* buffer, size_t buffer_size) {
     buffer[idx] = '\0';
 }
 
-int tokenize(char* buffer, const char* argv[], size_t max_args) {
-    int argc = 0;
-    char* p  = buffer;
+int tokenize(const char* buffer, ktl::string_view argv[], size_t max_args) {
+    int argc      = 0;
+    const char* p = buffer;
     while (*p && static_cast<size_t>(argc) < max_args) {
         // skip whitespace
         while (*p == ' ' || *p == '\t') { ++p; }
         if (*p == '\0') { break; }
-        argv[argc++] = p;
+        const char* start = p;
         // advance to next whitespace or end
         while (*p && *p != ' ' && *p != '\t') { ++p; }
-        if (*p) { *p++ = '\0'; }
+        argv[argc++] = ktl::string_view(start, static_cast<size_t>(p - start));
     }
     return argc;
 }
 
-ktl::maybe<kernel::shell::shell_command&> find_command(const char* name) {
-    ktl::string_view name_sv(name);
+ktl::maybe<kernel::shell::shell_command&> find_command(ktl::string_view name) {
     return ktl::find_if(__start__kshell_cmds, __stop__kshell_cmds,
-                        [&](const kernel::shell::shell_command& cmd) { return name_sv == cmd.name; });
+                        [&](const kernel::shell::shell_command& cmd) { return name == cmd.name; });
 }
 
-void dispatch(int argc, const char* const argv[]) {
+void dispatch(int argc, const ktl::string_view argv[]) {
     if (argc == 0) { return; }
 
-    ktl::string_view first(argv[0]);
-    if (first == "help") {
+    if (argv[0] == "help") {
         g_output.print("Available commands:\n");
         g_output.print("  help -- show this message\n");
         for (auto* cmd = __start__kshell_cmds; cmd != __stop__kshell_cmds; ++cmd) {
@@ -90,7 +88,7 @@ namespace kernel::shell {
 
 void shell_main() {
     char buffer[kCommandBufferSize];
-    const char* argv[kMaxArgs];
+    ktl::string_view argv[kMaxArgs];
 
     while (!g_boot_continue) {
         if (g_output.protocol_mode()) {

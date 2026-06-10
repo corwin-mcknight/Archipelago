@@ -28,22 +28,21 @@ namespace {
     for (;;) { asm volatile("hlt"); }
 }
 
-void crash_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void crash_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: crash panic|assert|pagefault|invop|int3\n");
         return;
     }
 
-    ktl::string_view sub(argv[1]);
-    if (sub == "panic") {
+    if (argv[1] == "panic") {
         panic("crash command: induced panic");
-    } else if (sub == "assert") {
+    } else if (argv[1] == "assert") {
         assert(false, "crash command: induced assertion");
-    } else if (sub == "pagefault") {
+    } else if (argv[1] == "pagefault") {
         trigger_pagefault();
-    } else if (sub == "invop") {
+    } else if (argv[1] == "invop") {
         trigger_invalid_opcode();
-    } else if (sub == "int3") {
+    } else if (argv[1] == "int3") {
         trigger_breakpoint();
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);

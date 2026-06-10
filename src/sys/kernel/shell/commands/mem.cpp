@@ -10,16 +10,15 @@
 
 namespace {
 
-void mem_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void mem_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: mem info|pmm\n");
         return;
     }
-    ktl::string_view sub(argv[1]);
-    if (sub == "info") {
+    if (argv[1] == "info") {
         output.print("Early heap state:\n");
         g_early_heap.debug_print_state();
-    } else if (sub == "pmm") {
+    } else if (argv[1] == "pmm") {
         output.print("Physical memory state:\n");
         kernel::mm::g_page_frame_allocator.debug_print_state();
     } else {

@@ -64,6 +64,15 @@ class string_view {
     constexpr bool operator==(const char* s) const { return compare(s) == 0; }
     constexpr bool operator!=(const char* s) const { return compare(s) != 0; }
 
+    constexpr bool operator==(string_view other) const {
+        if (m_size != other.m_size) { return false; }
+        for (size_t i = 0; i < m_size; i++) {
+            if (m_ptr[i] != other.m_ptr[i]) { return false; }
+        }
+        return true;
+    }
+    constexpr bool operator!=(string_view other) const { return !(*this == other); }
+
     // Copy the string into the destination buffer, up to c characters.
     size_t copy(char* destination, size_t c, size_t pos = 0) const {
         if (pos > m_size) { pos = m_size; }

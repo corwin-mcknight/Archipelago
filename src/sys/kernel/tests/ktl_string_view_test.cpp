@@ -73,6 +73,26 @@ KTEST(ktl_string_view_compare_lexicographic, "ktl/string_view") {
     KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
 }
 
+KTEST(ktl_string_view_equality_with_view, "ktl/string_view") {
+    ktl::string_view a("kernel");
+    ktl::string_view b("kernel");
+    ktl::string_view prefix("kern");
+
+    KTEST_EXPECT_TRUE(a == b);
+    KTEST_EXPECT_TRUE(a != prefix);
+    KTEST_EXPECT_TRUE(a.substr(0, 4) == prefix);
+    KTEST_EXPECT_TRUE(ktl::string_view() == ktl::string_view());
+}
+
+KTEST(ktl_string_view_equality_ignores_terminator, "ktl/string_view") {
+    // Views over the middle of a buffer are not NUL-terminated; equality must only read size() chars.
+    const char buffer[] = "kernelspace";
+    ktl::string_view middle(buffer + 3, 3);  // "nel"
+
+    KTEST_EXPECT_TRUE(middle == ktl::string_view("nel"));
+    KTEST_EXPECT_TRUE(middle != ktl::string_view("nels"));
+}
+
 KTEST(ktl_string_view_at_in_range, "ktl/string_view") {
     ktl::string_view view("kernel");
 

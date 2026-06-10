@@ -6,14 +6,13 @@
 
 namespace {
 
-void boot_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void boot_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: boot continue\n");
         return;
     }
 
-    ktl::string_view sub(argv[1]);
-    if (sub == "continue") {
+    if (argv[1] == "continue") {
         kernel::shell::request_boot_continue();
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);

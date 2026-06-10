@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include <ktl/string_view>
+
 #include "kernel/symbols.h"
 #include "kernel/testing/testing.h"
 
@@ -66,34 +68,23 @@ KTEST(symbols_lookup_garbage_address, "symbols") {
     KTEST_EXPECT_TRUE(name == nullptr);
 }
 
-namespace {
-
-bool str_equal(const char* a, const char* b) {
-    while (*a != '\0' && *b != '\0') {
-        if (*a++ != *b++) { return false; }
-    }
-    return *a == '\0' && *b == '\0';
-}
-
-}  // namespace
-
 KTEST(symbols_demangle_nested, "symbols") {
     char buf[128];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle("_ZN6kernel5shell10shell_mainEv", buf, sizeof(buf)));
-    KTEST_EXPECT_TRUE(str_equal(buf, "kernel::shell::shell_main()"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buf) == "kernel::shell::shell_main()");
 }
 
 KTEST(symbols_demangle_anonymous_namespace, "symbols") {
     char buf[128];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle(
         "_ZN12_GLOBAL__N_112execute_testERN6kernel5shell11ShellOutputERNS0_7testing5ktestE", buf, sizeof(buf)));
-    KTEST_EXPECT_TRUE(str_equal(buf, "(anonymous namespace)::execute_test()"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buf) == "(anonymous namespace)::execute_test()");
 }
 
 KTEST(symbols_demangle_unscoped, "symbols") {
     char buf[64];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle("_Z9vsnprintfPcmPKc", buf, sizeof(buf)));
-    KTEST_EXPECT_TRUE(str_equal(buf, "vsnprintf()"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buf) == "vsnprintf()");
 }
 
 KTEST(symbols_demangle_rejects_non_mangled, "symbols") {
