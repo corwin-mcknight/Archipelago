@@ -16,9 +16,12 @@
 - Wired page tracking belongs to the VMM; boot code passes kernel physical ranges to VMM init separately from PMM.
 - Global page descriptor array -- deferred until VMM/VMO design is settled.
 - Implement NUMA awareness and reserved region handling.
+- PMM usable pool includes Limine bootloader-reclaimable regions that contain the live boot stack -- draining the PMM to exhaustion zeroes the active stack page (found 2026-06-10 while testing rollback). Defer reclaiming those regions until execution moves off them.
 - Complete paging and virtual memory manager interfaces, including page table helpers.
     - ~~x86_64 page-table primitives (init/destroy, map_page, walk, unmap_page).~~ Done.
     - CR3 activation and kernel-mapping cloning for new address spaces.
+    - TLB maintenance before CR3 activation goes live -- cross-CPU shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits.
+    - EFER.NXE enablement so NO_EXECUTE mappings can stop being rejected.
     - Region tree, VMO, and pager objects.
 - Deliver slab allocators and the unified heap backed by the Archipelago Unified Memory Interface.
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
@@ -27,12 +30,13 @@
 - Build the per-CPU scheduler with run queues, priority balancing, and idle thread handling.
 - Implement context switching, timeslice accounting, and cross-CPU load balancing.
 - Provide kernel synchronization primitives (spinlocks, mutexes) with contention diagnostics.
+- Replace the CPUID-based current-core lookup in interrupt dispatch with a GS-based per-CPU pointer (CPUID serializes and VM-exits on every interrupt); make per-core lapic_id reads atomic to silence the formal bring-up race.
 
 ## Handles & Syscalls
 - ~~Implement handle table with create, duplicate, close, type-safe get, and generation counters.~~ Done.
 - ~~Implement type registry with registration, lookup, and live object accounting.~~ Done.
 - ~~Implement Event and Counter kernel object types.~~ Done.
-- Cap handle rights at creation time against the type's valid rights mask.
+- ~~Cap handle rights at creation time against the type's valid rights mask.~~ Done (create_handle rejects unregistered types and any rights outside the type's valid_rights).
 - Implement handle transfer between tables for cross-process capability passing.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
@@ -56,6 +60,7 @@
 ## Device Drivers
 - Expand x86_64 bring-up with APIC/IOAPIC, HPET, and interrupt controller configuration.
 - Harden UART routines, add keyboard and framebuffer/console drivers, and capture early logs.
+- UART follow-ups from the 2026-06-10 fixes: writes before init are now dropped by the health gate (pre-init panics lose output); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
 - Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers.
 
 ## Security & Reliability
@@ -67,6 +72,7 @@
 - Grow unit, integration, and stress suites covering kernel core, drivers, and IPC subsystems.
 - Automate QEMU smoke tests, add CI integration, and track coverage metrics.
 - Provide fuzzing or chaos harness hooks for scheduler, memory, and syscall interfaces.
+- Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - Extend test coverage for `std/ctype.cpp`, `std/stdlib.cpp`, `std/string.cpp` boundary conditions.
 - Add scenario coverage for `x86_64/descriptor_tables.cpp`, `x86_64/drivers/pit.cpp`, `x86_64/interrupts.cpp`, `x86_64/main.cpp`, and `x86_64/uart.cpp`.
