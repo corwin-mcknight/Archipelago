@@ -238,4 +238,27 @@ KTEST(ktl_deque_range_for, "ktl/deque") {
     KTEST_EXPECT_EQUAL(verify_sum, total_sum);
 }
 
+KTEST(ktl_deque_index_across_blocks, "ktl/deque") {
+    // Spans several 16-element blocks so operator[] has to walk past block 0.
+    constexpr int element_count = 50;
+
+    ktl::deque<int> dq;
+    for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i * 3)); }
+    KTEST_REQUIRE_EQUAL(dq.size(), static_cast<size_t>(element_count));
+
+    const auto& const_ref = dq;
+    for (int i = 0; i < element_count; ++i) {
+        KTEST_EXPECT_EQUAL(dq[static_cast<size_t>(i)], i * 3);
+        KTEST_EXPECT_EQUAL(const_ref[static_cast<size_t>(i)], i * 3);
+    }
+
+    // Non-const operator[] returns a mutable reference into the right block.
+    dq[static_cast<size_t>(element_count - 1)] = -7;
+    KTEST_EXPECT_EQUAL(const_ref[static_cast<size_t>(element_count - 1)], -7);
+
+    // at() stays the soft bounds-checked API.
+    KTEST_EXPECT_VALUE(dq.at(0), 0);
+    KTEST_EXPECT_FALSE(dq.at(static_cast<size_t>(element_count)).has_value());
+}
+
 #endif  // CONFIG_KERNEL_TESTING

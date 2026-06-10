@@ -73,4 +73,16 @@ KTEST(ktl_string_view_compare_lexicographic, "ktl/string_view") {
     KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
 }
 
+KTEST(ktl_string_view_at_in_range, "ktl/string_view") {
+    ktl::string_view view("kernel");
+
+    KTEST_EXPECT_EQUAL(view.at(0), 'k');
+    KTEST_EXPECT_EQUAL(view.at(3), 'n');
+    KTEST_EXPECT_EQUAL(view.at(view.size() - 1), 'l');
+    KTEST_EXPECT_EQUAL(view.at(2), view[2]);
+
+    // The in-range path stays constant-evaluable.
+    static_assert(ktl::string_view("abc").at(1) == 'b');
+}
+
 #endif  // CONFIG_KERNEL_TESTING
