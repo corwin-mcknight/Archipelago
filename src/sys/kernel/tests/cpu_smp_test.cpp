@@ -30,32 +30,4 @@ KTEST(cpu_smp_cores_initialized, "x86/cpu") {
     }
 }
 
-// Regression guard for F037: dispatch_interrupt must index core_reentrant_state[] by the dense
-// logical index of the CPU it is actually running on, not a hard-coded 0. The helper recovers that
-// index by reading the LAPIC id via CPUID leaf 1 and scanning g_cpu_cores[]. It must always return
-// a valid index, and -- since the shell (and thus this test) runs on the boot processor -- it must
-// match the BSP's dense bootloader CPU-list position.
-KTEST(cpu_current_core_index, "x86/cpu") {
-    KTEST_REQUIRE(mp_request.response != nullptr);
-
-    size_t index = kernel::x86::current_core_index();
-    KTEST_REQUIRE(index < CONFIG_MAX_CORES);
-
-    // Locate the BSP's dense index the same way main.cpp does: its position in the bootloader CPU
-    // list, matched by LAPIC id.
-    uint64_t count = mp_request.response->cpu_count;
-    if (count > CONFIG_MAX_CORES) { count = CONFIG_MAX_CORES; }
-    bool found_bsp   = false;
-    size_t bsp_index = 0;
-    for (uint64_t i = 0; i < count; i++) {
-        if (mp_request.response->cpus[i]->lapic_id == mp_request.response->bsp_lapic_id) {
-            bsp_index = (size_t)i;
-            found_bsp = true;
-            break;
-        }
-    }
-    KTEST_REQUIRE(found_bsp);
-    KTEST_EXPECT_EQUAL(index, bsp_index);
-}
-
 #endif

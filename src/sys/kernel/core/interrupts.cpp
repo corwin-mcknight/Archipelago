@@ -1,4 +1,3 @@
-#include "kernel/cpu.h"
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 
@@ -7,81 +6,42 @@ kernel::hal::interrupt_manager g_interrupt_manager;
 namespace kernel {
 namespace hal {
 
-void interrupt_manager::initialize() {
-    memset(handlers, 0, sizeof(handlers));
-    memset(core_reentrant_state, 0, sizeof(core_reentrant_state));
-}
+void interrupt_manager::initialize() { memset(handlers, 0, sizeof(handlers)); }
 
+// Register an object handler for interrupt id.
 void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* handler, uint64_t flags) {
     if (id >= IM_MAX_HANDLERS) { return; }
-
     handlers[id].handler.object = handler;
-    handlers[id].flags          = flags;
-
-    // Enable this interrupt
-    handlers[id].flags |= InterruptHandlerEntry::ENABLED_MASK;
-    // Set this as an object handler instead of a function handler
-    handlers[id].flags |= 0b10;
-
-    // Trace this
+    handlers[id].flags = (flags | InterruptHandlerEntry::ENABLED_MASK) | InterruptHandlerEntry::OBJECT_HANDLER_MASK;
     g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
+// Register a function handler for interrupt id.
 void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*), uint64_t flags) {
     if (id >= IM_MAX_HANDLERS) { return; }
-
     handlers[id].handler.function = handler;
-    handlers[id].flags            = flags;
-
-    // Enable this interrupt
-    handlers[id].flags |= InterruptHandlerEntry::ENABLED_MASK;
-
-    // Set this as a function handler instead of an object handler
-    handlers[id].flags &= ~(uint64_t)0b10;
+    handlers[id].flags = (flags | InterruptHandlerEntry::ENABLED_MASK) & (~InterruptHandlerEntry::OBJECT_HANDLER_MASK);
+    g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
 void interrupt_manager::clear_handler(unsigned int id) {
     if (id >= IM_MAX_HANDLERS) { return; }
-
     handlers[id].handler.function = nullptr;
     handlers[id].flags            = 0;
 }
 
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {
     if (id >= IM_MAX_HANDLERS) { return; }
-
-    // Dense logical index of the core that took this interrupt. With a correct per-core index each
-    // core only ever touches its own core_reentrant_state slot, and same-core nesting is strictly
-    // sequential (a nested interrupt runs to completion before the outer frame resumes), so plain
-    // non-atomic ints are sufficient -- no cross-core sharing, no torn RMWs.
-    const size_t core = kernel::x86::current_core_index();
-    core_reentrant_state[core]++;
-
-    // Ignore if it's 32, the timer interrupt
-    if (id != 32) { g_log.trace("im: START int 0x{0:x} rep: {1}", id, core_reentrant_state[core] - 1); }
-
-    // Check if the interrupt is enabled
     if ((handlers[id].flags & InterruptHandlerEntry::ENABLED_MASK) == 0) {
-        g_log.warn("Interrupt 0x{0:x} is not enabled", id);
-        core_reentrant_state[core]--;
+        g_log.warn("Interrupt 0x{0:x} had no handlers listening for it.", id);
         return;
     }
 
-    if ((handlers[id].flags & 0b10) == 0) {
-        // Function handler
-        if (!handlers[id].handler.function(registers)) {
-            // If the handler returns false, we should log an error
-            g_log.error("Interrupt 0x{0:x} was not handled successfully", id);
-        }
-    } else {
-        // Object handler
-        if (!handlers[id].handler.object->handle_interrupt(registers)) {
-            g_log.error("Interrupt 0x{0:x} was not handled successfully", id);
-        }
-    }
+    const bool ret = (handlers[id].flags & InterruptHandlerEntry::OBJECT_HANDLER_MASK)
+                         ? handlers[id].handler.object->handle_interrupt(registers)  // Object handler
+                         : handlers[id].handler.function(registers);                 // Function handler
 
-    if (id != 32) { g_log.trace("Interrupt Manager: End {0}", id); }
-    core_reentrant_state[core]--;
+    if (!ret) { g_log.error("Interrupt 0x{0:x} was not handled successfully", id); }
 }
 
 }  // namespace hal

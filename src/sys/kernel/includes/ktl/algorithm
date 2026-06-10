@@ -18,6 +18,12 @@ template <class T> constexpr const T& clamp(const T& v, const T& lo, const T& hi
     return (v < lo) ? lo : (hi < v) ? hi : v;
 }
 
+/// Returns the number of elements in a container, as reported by its size() member.
+template <typename C> constexpr auto size(const C& c) -> decltype(c.size()) { return c.size(); }
+
+/// Returns the number of elements in a built-in array.
+template <typename T, size_t N> constexpr size_t size(const T (&)[N]) noexcept { return N; }
+
 template <class T> constexpr void swap(T& a, T& b) noexcept {
     T temp = ktl::move(a);
     a      = ktl::move(b);

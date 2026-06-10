@@ -1,7 +1,7 @@
 #pragma once
 
 #define ARCH_X86 1
-#define PRODUCT_DEBUG 1
+#define PRODUCT_DEBUG 0
 
 #define CONFIG_CPU_CACHE_LINE_SIZE 64
 #define KERNEL_MINIMUM_PAGE_SIZE 0x1000
@@ -29,7 +29,7 @@
 #define CONFIG_KERNEL_LOG_COLORS 0
 #endif
 
-#ifdef PRODUCT_DEBUG
+#if PRODUCT_DEBUG
 #define INLINE_RELEASE_ONLY
 #else
 #define INLINE_RELEASE_ONLY inline

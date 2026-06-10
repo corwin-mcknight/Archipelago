@@ -26,8 +26,9 @@ struct InterruptHandlerEntry {
     } handler;
 
     // Flags store information about this interrupt.
-    constexpr static uint64_t ENABLED_MASK = 0b01;
-    const static uint64_t OBJECT_HANDLER   = 0b10;
+    constexpr static uint64_t ENABLED_MASK      = 0b01;
+    const static uint64_t OBJECT_HANDLER_MASK   = 0b10;
+    const static uint64_t FUNCTION_HANDLER_MASK = ~OBJECT_HANDLER_MASK;
     uint64_t flags;
 };
 
@@ -42,9 +43,6 @@ class interrupt_manager {
 
    private:
     InterruptHandlerEntry handlers[IM_MAX_HANDLERS];
-    int core_reentrant_state[CONFIG_MAX_CORES];
-
-    [[maybe_unused]] int pad;  // purposefully unused
 };
 }  // namespace hal
 }  // namespace kernel
