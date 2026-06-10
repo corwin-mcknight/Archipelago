@@ -9,6 +9,13 @@
 - Finalize the panic/log pipelines with severity filtering, buffered sinks, and crash dump emission.
 - ~~Provide structured panic artefacts suitable for post-mortem debugging and automated triage.~~ Done (crash subsystem with frame-pointer backtrace, register dump, log drain, harness-side symbolication).
 
+## KTL & Error Handling
+- Monadic-style audit (2026-06-10, `.claude/audits/monad-audit.md`): findings on replacing sentinels/bool+out-param with maybe/Result, plus proposed KTL additions.
+- ~~maybe improvements (maybe<T&>, inspect, expect/take/reset/operator bool, map_or fix, from_ptr, ok_or) and first deployments (registry lookups, BSP search, Limine chain, find_test).~~ Done 2026-06-10; 41 audit findings remain open.
+- ~~Monadic search algorithms: ktl::find_if/find -> maybe<T&>, ktl::find_index_if -> maybe<size_t>; deployed to find_bsp_index, find_test, find_command, TypeRegistry lookups.~~ Done 2026-06-10.
+- Remaining KTL additions from the audit: result<void,E> specialization, KTRY propagation macro, errc unification, container accessor maybe<T&> overloads.
+- Live bugs found by that audit: `mm/pmm.h` add_region ignores push_back failure (corrupts page accounting); `ktl/fixed_string` string_view ctor leaves no null terminator when the view fills the buffer; `ktl/static_vector` at() bounds-checks against capacity instead of size; `kernel/assert.h:23` warn-arm format typo `(1})`.
+
 ## Memory Management
 - ~~PMM refactor -- strip allocator down to a simple free-pool manager.~~ Done.
 - Background page-zeroing worker thread (gated on scheduler).
