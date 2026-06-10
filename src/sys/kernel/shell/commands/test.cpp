@@ -11,6 +11,7 @@
 #include <ktl/algorithm>
 #include <ktl/fixed_string>
 #include <ktl/fmt>
+#include <ktl/maybe>
 #include <ktl/string_view>
 
 extern "C" kernel::testing::ktest __start__ktests[], __stop__ktests[];
@@ -26,6 +27,10 @@ ktl::fixed_string<256> g_failure_reason{};
 
 kernel::testing::ktest* tests_begin() { return __start__ktests; }
 kernel::testing::ktest* tests_end() { return __stop__ktests; }
+
+ktl::maybe<kernel::testing::ktest&> find_test(ktl::string_view name) {
+    return ktl::find_if(tests_begin(), tests_end(), [&](const kernel::testing::ktest& t) { return name == t.name; });
+}
 
 template <typename... Args>
 void emit_harness_event(kernel::shell::ShellOutput& output, const char* fmt, const Args&... args) {
@@ -122,13 +127,7 @@ void test_handler(int argc, const char* const argv[], kernel::shell::ShellOutput
             return;
         }
         ktl::string_view name(argv[2]);
-        kernel::testing::ktest* test = nullptr;
-        for (auto* t = tests_begin(); t != tests_end(); ++t) {
-            if (name == t->name) {
-                test = t;
-                break;
-            }
-        }
+        auto test = find_test(name);
         if (!test) {
             emit_harness_event(output, "@@HARNESS {{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}\n",
                                argv[2]);

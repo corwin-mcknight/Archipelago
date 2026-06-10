@@ -14,8 +14,8 @@ namespace kernel::obj {
 class TypeRegistry {
    public:
     Result<TypeId, result_t> register_type(TypeId id, const char* name, Rights valid_rights, Rights default_rights);
-    ktl::maybe<const TypeDescriptor*> lookup(TypeId id) const;
-    ktl::maybe<const TypeDescriptor*> lookup_by_name(const char* name) const;
+    ktl::maybe<const TypeDescriptor&> lookup(TypeId id) const;
+    ktl::maybe<const TypeDescriptor&> lookup_by_name(const char* name) const;
     size_t count() const;
 
     void on_object_created(TypeId id);

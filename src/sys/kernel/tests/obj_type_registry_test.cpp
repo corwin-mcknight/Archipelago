@@ -19,9 +19,9 @@ KTEST(obj_type_registry_lookup_by_id, "obj/type_registry") {
     registry.register_type(10, "test_type", RIGHTS_ALL, RIGHT_READ);
     auto found = registry.lookup(10);
     KTEST_REQUIRE_TRUE(found.has_value());
-    KTEST_EXPECT_TRUE(found.value()->id == 10);
-    KTEST_EXPECT_TRUE(found.value()->valid_rights == RIGHTS_ALL);
-    KTEST_EXPECT_TRUE(found.value()->default_rights == RIGHT_READ);
+    KTEST_EXPECT_TRUE(found.value().id == 10);
+    KTEST_EXPECT_TRUE(found.value().valid_rights == RIGHTS_ALL);
+    KTEST_EXPECT_TRUE(found.value().default_rights == RIGHT_READ);
 }
 
 KTEST(obj_type_registry_lookup_by_name, "obj/type_registry") {
@@ -29,7 +29,7 @@ KTEST(obj_type_registry_lookup_by_name, "obj/type_registry") {
     registry.register_type(10, "test_type", RIGHTS_ALL, RIGHT_READ);
     auto found = registry.lookup_by_name("test_type");
     KTEST_REQUIRE_TRUE(found.has_value());
-    KTEST_EXPECT_TRUE(found.value()->id == 10);
+    KTEST_EXPECT_TRUE(found.value().id == 10);
 }
 
 KTEST(obj_type_registry_duplicate_id_fails, "obj/type_registry") {

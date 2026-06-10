@@ -148,3 +148,14 @@ template <typename T, typename E> struct Result {
         return func(value.err);
     }
 };
+
+namespace ktl {
+
+/// Bridges maybe into Result: an engaged maybe becomes ok, an empty one becomes the given error.
+/// Lives here rather than on maybe itself because this header already includes <ktl/maybe>.
+template <typename T, typename E> Result<T, E> ok_or(const maybe<T>& m, E error) {
+    if (m.has_value()) { return Result<T, E>::ok(m.value()); }
+    return Result<T, E>::err(ktl::move(error));
+}
+
+}  // namespace ktl

@@ -4,6 +4,8 @@
 
 #include <kernel/drivers/uart.h>
 
+#include <ktl/algorithm>
+#include <ktl/maybe>
 #include <ktl/string_view>
 
 extern kernel::driver::uart uart;
@@ -54,12 +56,10 @@ int tokenize(char* buffer, const char* argv[], size_t max_args) {
     return argc;
 }
 
-kernel::shell::shell_command* find_command(const char* name) {
+ktl::maybe<kernel::shell::shell_command&> find_command(const char* name) {
     ktl::string_view name_sv(name);
-    for (auto* cmd = __start__kshell_cmds; cmd != __stop__kshell_cmds; ++cmd) {
-        if (name_sv == cmd->name) { return cmd; }
-    }
-    return nullptr;
+    return ktl::find_if(__start__kshell_cmds, __stop__kshell_cmds,
+                        [&](const kernel::shell::shell_command& cmd) { return name_sv == cmd.name; });
 }
 
 void dispatch(int argc, const char* const argv[]) {
@@ -75,7 +75,7 @@ void dispatch(int argc, const char* const argv[]) {
         return;
     }
 
-    auto* cmd = find_command(argv[0]);
+    auto cmd = find_command(argv[0]);
     if (!cmd) {
         g_output.print("unknown command: {0}\n", argv[0]);
         return;

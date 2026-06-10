@@ -1,6 +1,8 @@
 #include <kernel/obj/type_registry.h>
 #include <std/string.h>
 
+#include <ktl/algorithm>
+
 namespace kernel::obj {
 
 namespace {
@@ -34,18 +36,12 @@ Result<TypeId, result_t> TypeRegistry::register_type(TypeId id, const char* name
     return Result<TypeId, result_t>::ok(id);
 }
 
-ktl::maybe<const TypeDescriptor*> TypeRegistry::lookup(TypeId id) const {
-    for (size_t i = 0; i < m_count; i++) {
-        if (m_types[i].id == id) { return &m_types[i]; }
-    }
-    return ktl::nothing;
+ktl::maybe<const TypeDescriptor&> TypeRegistry::lookup(TypeId id) const {
+    return ktl::find_if(m_types, m_types + m_count, [&](const TypeDescriptor& t) { return t.id == id; });
 }
 
-ktl::maybe<const TypeDescriptor*> TypeRegistry::lookup_by_name(const char* name) const {
-    for (size_t i = 0; i < m_count; i++) {
-        if (str_equal(m_types[i].name, name)) { return &m_types[i]; }
-    }
-    return ktl::nothing;
+ktl::maybe<const TypeDescriptor&> TypeRegistry::lookup_by_name(const char* name) const {
+    return ktl::find_if(m_types, m_types + m_count, [&](const TypeDescriptor& t) { return str_equal(t.name, name); });
 }
 
 size_t TypeRegistry::count() const { return m_count; }
