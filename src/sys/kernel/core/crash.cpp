@@ -165,8 +165,9 @@ void emit_stack(register_frame_t* regs, bool harness) {
     if (!regs) return;
     uintptr_t rsp = regs->userrsp;
 
-    // Range-check rsp before dereferencing. Kernel stacks live in higher half.
-    if (rsp < 0xffff800000000000ULL || (rsp & 0x7) != 0) {
+    // Range-check rsp before dereferencing. Kernel stacks live in higher half;
+    // also reject rsp so close to the top of the address space that the window wraps.
+    if (rsp < 0xffff800000000000ULL || (rsp & 0x7) != 0 || rsp > UINTPTR_MAX - kStackBytes) {
         if (harness) {
             crash_emit("@@CRASH_STACK {{\"rsp\":\"0x{0:016p}\",\"len\":0,\"hex\":\"\"}}\n", rsp);
         } else {
@@ -175,21 +176,33 @@ void emit_stack(register_frame_t* regs, bool harness) {
         return;
     }
 
+    // Probe each page in [rsp, rsp + kStackBytes) and dump only the mapped prefix,
+    // so a stack window ending near an unmapped page does not page-fault inside the dump.
+    size_t len = 0;
+    while (len < kStackBytes) {
+        uintptr_t addr = rsp + len;
+        if (!arch::probe_readable(addr)) break;
+        size_t in_page = static_cast<size_t>(0x1000 - (addr & 0xFFF));
+        size_t left    = kStackBytes - len;
+        len += in_page < left ? in_page : left;
+    }
+
     if (harness) {
-        crash_emit("@@CRASH_STACK {{\"rsp\":\"0x{0:016p}\",\"len\":{1},\"hex\":\"", rsp, kStackBytes);
+        crash_emit("@@CRASH_STACK {{\"rsp\":\"0x{0:016p}\",\"len\":{1},\"hex\":\"", rsp, len);
         const uint8_t* p = reinterpret_cast<const uint8_t*>(rsp);
-        for (size_t i = 0; i < kStackBytes; i++) { crash_emit("{0:02x}", static_cast<unsigned>(p[i])); }
+        for (size_t i = 0; i < len; i++) { crash_emit("{0:02x}", static_cast<unsigned>(p[i])); }
         crash_write("\"}\n");
     } else {
-        crash_emit("Stack ({0} bytes from rsp=0x{1:016p}):\n", kStackBytes, rsp);
+        crash_emit("Stack ({0} bytes from rsp=0x{1:016p}):\n", len, rsp);
         const uint8_t* p = reinterpret_cast<const uint8_t*>(rsp);
-        for (size_t row = 0; row < kStackBytes; row += 16) {
+        for (size_t row = 0; row < len; row += 16) {
             crash_emit("  +0x{0:03x}: ", row);
-            for (size_t col = 0; col < 16 && row + col < kStackBytes; col++) {
+            for (size_t col = 0; col < 16 && row + col < len; col++) {
                 crash_emit("{0:02x} ", static_cast<unsigned>(p[row + col]));
             }
             crash_write("\n");
         }
+        if (len < kStackBytes) { crash_emit("  (truncated at +0x{0:03x}: page unmapped)\n", len); }
     }
 }
 

@@ -1,10 +1,18 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "kernel/registers.h"
 
 namespace kernel::crash {
+
+namespace arch {
+// True if vaddr is mapped (present at every level of a software walk of the
+// current CR3, honoring huge pages) and thus safe for the crash dumper to
+// read. Safe on garbage input: canonical check first, bounded 4-level loop.
+bool probe_readable(uintptr_t vaddr);
+}  // namespace arch
 
 enum class trigger_kind : unsigned {
     panic     = 1,
