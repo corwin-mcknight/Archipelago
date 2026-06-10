@@ -8,6 +8,20 @@
 extern volatile struct limine_mp_request mp_request;
 extern "C" void ap_startup(struct limine_mp_info* info);
 
+size_t kernel::x86::current_core_index() {
+    // CPUID leaf 1: the initial APIC id of the executing core is reported in EBX bits 31:24.
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1U), "c"(0U));
+    const uint32_t lapic_id = ebx >> 24;
+
+    // g_cpu_cores[] is keyed by the dense bootloader CPU-list position with the LAPIC id stored as
+    // data (see core_init()); scan for the matching id to recover this core's dense index.
+    for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
+        if (g_cpu_cores[i].lapic_id == lapic_id) { return i; }
+    }
+    return 0;
+}
+
 void kernel::cpu_init_cores() {
     for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
         g_cpu_cores[i].initialized.store(false, ktl::memory_order::relaxed);

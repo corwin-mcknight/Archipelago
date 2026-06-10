@@ -1,3 +1,4 @@
+#include "kernel/cpu.h"
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 
@@ -49,7 +50,11 @@ void interrupt_manager::clear_handler(unsigned int id) {
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {
     if (id >= IM_MAX_HANDLERS) { return; }
 
-    const int core = 0;  // For now.
+    // Dense logical index of the core that took this interrupt. With a correct per-core index each
+    // core only ever touches its own core_reentrant_state slot, and same-core nesting is strictly
+    // sequential (a nested interrupt runs to completion before the outer frame resumes), so plain
+    // non-atomic ints are sufficient -- no cross-core sharing, no torn RMWs.
+    const size_t core = kernel::x86::current_core_index();
     core_reentrant_state[core]++;
 
     // Ignore if it's 32, the timer interrupt
