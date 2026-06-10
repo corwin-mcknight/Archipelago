@@ -10,13 +10,12 @@
 
 namespace {
 
-void obj_handler(int argc, const char* const argv[], kernel::shell::ShellOutput& output) {
+void obj_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
         output.print("usage: obj types\n");
         return;
     }
-    ktl::string_view sub(argv[1]);
-    if (sub == "types") {
+    if (argv[1] == "types") {
         output.print("Registered types: {0}\n", kernel::obj::g_type_registry.count());
         for (size_t i = 0; i < CONFIG_MAX_OBJECT_TYPES; ++i) {
             kernel::obj::g_type_registry.lookup(static_cast<kernel::obj::TypeId>(i))

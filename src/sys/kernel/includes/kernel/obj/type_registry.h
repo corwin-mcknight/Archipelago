@@ -13,9 +13,10 @@ namespace kernel::obj {
 
 class TypeRegistry {
    public:
-    Result<TypeId, result_t> register_type(TypeId id, const char* name, Rights valid_rights, Rights default_rights);
+    Result<TypeId, result_t> register_type(TypeId id, ktl::string_view name, Rights valid_rights,
+                                           Rights default_rights);
     ktl::maybe<const TypeDescriptor&> lookup(TypeId id) const;
-    ktl::maybe<const TypeDescriptor&> lookup_by_name(const char* name) const;
+    ktl::maybe<const TypeDescriptor&> lookup_by_name(ktl::string_view name) const;
     size_t count() const;
 
     void on_object_created(TypeId id);
@@ -29,8 +30,7 @@ class TypeRegistry {
     size_t m_count                                     = 0;
     kernel::synchronization::spinlock m_lock;
 
-    const TypeDescriptor* find_by_id(TypeId id) const;
-    size_t index_for_id(TypeId id) const;
+    ktl::maybe<size_t> index_for_id(TypeId id) const;
 };
 
 extern TypeRegistry g_type_registry;

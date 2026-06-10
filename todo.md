@@ -15,6 +15,7 @@
 - ~~Monadic search algorithms: ktl::find_if/find -> maybe<T&>, ktl::find_index_if -> maybe<size_t>; deployed to find_bsp_index, find_test, find_command, TypeRegistry lookups.~~ Done 2026-06-10.
 - Remaining KTL additions from the audit: result<void,E> specialization, KTRY propagation macro, errc unification, container accessor maybe<T&> overloads.
 - Live bugs found by that audit: `mm/pmm.h` add_region ignores push_back failure (corrupts page accounting); `ktl/fixed_string` string_view ctor leaves no null terminator when the view fills the buffer; `ktl/static_vector` at() bounds-checks against capacity instead of size; `kernel/assert.h:23` warn-arm format typo `(1})`.
+- `ktl/fmt` parser: a format spec with width but no specifier (e.g. `{0:8}`) silently swallows all output until the next `}` -- the post-spec scan skips past the closing brace it is already on. Either support the specifier-less form or make it fail loudly. Found 2026-06-10.
 
 ## Memory Management
 - ~~PMM refactor -- strip allocator down to a simple free-pool manager.~~ Done.

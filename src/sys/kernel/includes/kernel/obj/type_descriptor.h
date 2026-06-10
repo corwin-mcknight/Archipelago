@@ -2,11 +2,13 @@
 
 #include <kernel/obj/types.h>
 
+#include <ktl/string_view>
+
 namespace kernel::obj {
 
 struct TypeDescriptor {
     TypeId id;
-    const char* name;
+    ktl::string_view name;
     Rights valid_rights;
     Rights default_rights;
 };
