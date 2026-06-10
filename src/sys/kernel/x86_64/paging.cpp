@@ -25,6 +25,24 @@ constexpr bool is_canonical(uintptr_t vaddr) {
 
 ktl::maybe<vm_paddr_t> alloc_table() { return g_page_frame_allocator.alloc(); }
 
+// Leaf permission bits callers may request. NO_EXECUTE is rejected separately
+// in map_page until EFER.NXE support exists -- with NXE clear, bit 63 of a
+// present PTE is reserved and faults.
+constexpr uint64_t LEAF_FLAG_MASK = pte::WRITABLE | pte::USER | pte::WRITE_THROUGH | pte::CACHE_DISABLE | pte::GLOBAL;
+
+inline vm_paddr_t current_cr3() {
+    uintptr_t cr3;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    return cr3 & pte::ADDR_MASK;
+}
+
+// Invalidate the TLB entry for vaddr if this address space is live on this
+// CPU. Cross-CPU TLB shootdown is future work; only one CPU is active today.
+void flush_tlb_page(vm_paddr_t pml4_phys, uintptr_t vaddr) {
+    if (current_cr3() != (pml4_phys & pte::ADDR_MASK)) { return; }
+    asm volatile("invlpg (%0)" ::"r"(vaddr) : "memory");
+}
+
 // Recursively free intermediate page-table pages owned by an entry. Levels go
 // 4 (PML4) down to 1 (PT). PT-level entries point at user data pages and are
 // not freed here -- ownership of leaf pages stays with the caller.
@@ -46,14 +64,30 @@ uint64_t* ensure_pt_slot(vm_paddr_t pml4_phys, uintptr_t vaddr, uint64_t interme
     uint64_t* table   = table_at(pml4_phys);
     size_t indices[4] = {pml4_index(vaddr), pdpt_index(vaddr), pd_index(vaddr), pt_index(vaddr)};
 
+    // Slots filled in by this walk, so a deeper allocation failure can unwind
+    // them and leave no leaf-less subtree behind.
+    uint64_t* new_slots[3];
+    int new_count = 0;
+
     for (int level = 0; level < 3; ++level) {
         uint64_t& slot = table[indices[level]];
         if (!(slot & pte::PRESENT)) {
             auto child = alloc_table();
-            if (!child.has_value()) { return nullptr; }
-            slot = (child.value() & pte::ADDR_MASK) | pte::PRESENT | intermediate_flags;
+            if (!child.has_value()) {
+                for (int i = new_count - 1; i >= 0; --i) {
+                    g_page_frame_allocator.free(*new_slots[i] & pte::ADDR_MASK);
+                    *new_slots[i] = 0;
+                }
+                return nullptr;
+            }
+            slot                   = (child.value() & pte::ADDR_MASK) | pte::PRESENT | intermediate_flags;
+            new_slots[new_count++] = &slot;
         } else if (slot & pte::HUGE) {
             return nullptr;
+        } else {
+            // x86_64 requires USER at every level of the walk; widen an
+            // existing kernel-only intermediate when a user mapping joins it.
+            slot |= intermediate_flags & pte::USER;
         }
         table = table_at(slot & pte::ADDR_MASK);
     }
@@ -99,10 +133,19 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) 
     if ((vaddr & 0xFFF) != 0) { return false; }
     if ((paddr & 0xFFF) != 0) { return false; }
 
+    // Reject NO_EXECUTE until the kernel enables EFER.NXE; with NXE clear the
+    // bit is reserved and a present PTE carrying it page-faults. Mask the rest
+    // of the caller's flags down to the supported permission bits.
+    if (flags & pte::NO_EXECUTE) { return false; }
+    flags &= LEAF_FLAG_MASK;
+
     uint64_t intermediate = pte::WRITABLE | (flags & pte::USER);
 
     uint64_t* leaf        = ensure_pt_slot(m_pml4_phys, vaddr, intermediate);
     if (leaf == nullptr) { return false; }
+
+    // Present leaves are rejected rather than replaced, so no TLB flush is
+    // needed here -- map_page never changes an existing translation.
     if (*leaf & pte::PRESENT) { return false; }
 
     *leaf = (paddr & pte::ADDR_MASK) | (flags | pte::PRESENT);
@@ -129,6 +172,7 @@ ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
 
     vm_paddr_t paddr = *leaf & pte::ADDR_MASK;
     *leaf            = 0;
+    flush_tlb_page(m_pml4_phys, vaddr);
     return paddr;
 }
 
