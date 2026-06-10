@@ -1,9 +1,16 @@
 #pragma once
 
+#include <stddef.h>
+
 #include <ktl/type_traits>
 #include <ktl/utility>
 
 namespace ktl {
+
+// Forward declaration only: <ktl/maybe> includes <ktl/string_view>, which includes this header, so
+// pulling in the full definition here would be circular. The find functions below are templates, so
+// completeness is only needed at the call site -- include <ktl/maybe> alongside <ktl/algorithm>.
+template <typename T> class maybe;
 
 template <typename T> constexpr T const& max(T const& a, T const& b) { return a > b ? a : b; }
 template <typename T> constexpr T const& min(T const& a, T const& b) { return a < b ? a : b; }
@@ -15,6 +22,35 @@ template <class T> constexpr void swap(T& a, T& b) noexcept {
     T temp = ktl::move(a);
     a      = ktl::move(b);
     b      = ktl::move(temp);
+}
+
+// Monadic searches: absence is a typed empty maybe instead of an end-iterator sentinel. For pointer
+// ranges the result is maybe<T&>, aliasing the found element.
+
+/// Returns a reference to the first element satisfying the predicate, or nothing.
+template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pred) -> maybe<decltype(*first)> {
+    for (It it = first; it != last; ++it) {
+        if (pred(*it)) { return maybe<decltype(*first)>(*it); }
+    }
+    return maybe<decltype(*first)>();
+}
+
+/// Returns a reference to the first element equal to value, or nothing.
+template <typename It, typename V> auto find(It first, It last, const V& value) -> maybe<decltype(*first)> {
+    return find_if(first, last, [&](const auto& element) { return element == value; });
+}
+
+/// Returns the position of the first element satisfying the predicate, or nothing.
+/// The index type is size_t, but spelled dependently (decltype(sizeof(*first))) so this definition
+/// only instantiates the forward-declared maybe at call sites, where it is complete.
+template <typename It, typename Pred>
+auto find_index_if(It first, It last, Pred&& pred) -> maybe<decltype(sizeof(*first))> {
+    using index_t = decltype(sizeof(*first));
+    index_t index = 0;
+    for (It it = first; it != last; ++it, ++index) {
+        if (pred(*it)) { return maybe<index_t>(index); }
+    }
+    return maybe<index_t>();
 }
 
 }  // namespace ktl

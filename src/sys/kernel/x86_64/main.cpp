@@ -2,6 +2,7 @@
 #include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 
+#include <ktl/algorithm>
 #include <ktl/atomic>
 #include <ktl/circular_buffer>
 #include <ktl/fixed_string>
@@ -84,6 +85,14 @@ extern "C" [[noreturn]] void ap_startup(struct limine_mp_info* info) {
 extern uintptr_t _initial_heap_start;
 extern uintptr_t _initial_heap_end;
 
+// The boot processor's dense logical index is its position in the bootloader CPU list, which is
+// not necessarily 0 nor equal to its LAPIC id. A malformed response may omit the BP entirely.
+static ktl::maybe<uint32_t> find_bsp_index(const limine_mp_response& mp) {
+    return ktl::find_index_if(mp.cpus, mp.cpus + mp.cpu_count,
+                              [&](const limine_mp_info* cpu) { return cpu->lapic_id == mp.bsp_lapic_id; })
+        .map([](size_t i) { return (uint32_t)i; });
+}
+
 extern "C" [[noreturn]] void _start(void) {
     g_early_heap.on_boot((uintptr_t)&_initial_heap_start, (uintptr_t)&_initial_heap_end);
 
@@ -96,18 +105,22 @@ extern "C" [[noreturn]] void _start(void) {
 
     g_log.info("Starting Archipelago ver. {0}", CONFIG_KERNEL_VERSION);
 
-    // Snapshot the kernel ELF's symbol table before PMM reclaims bootloader memory.
-    if (executable_file_request.response != nullptr && executable_file_request.response->executable_file != nullptr) {
-        auto* f = executable_file_request.response->executable_file;
-        kernel::symbols::init(f->address, f->size);
-        if (kernel::symbols::available()) {
-            g_log.info("symbols: kernel symbol table loaded");
-        } else {
-            g_log.warn("symbols: kernel symbol table unavailable");
-        }
-    } else {
-        g_log.warn("symbols: executable_file request not honored");
-    }
+    // Snapshot the kernel ELF's symbol table before PMM reclaims bootloader memory. The bootloader
+    // response pointers are optional, so they flow as maybes instead of nested null checks.
+    ktl::from_ptr(executable_file_request.response)
+        .and_then([](limine_executable_file_response& resp) { return ktl::from_ptr(resp.executable_file); })
+        .inspect([](limine_file& f) {
+            kernel::symbols::init(f.address, f.size);
+            if (kernel::symbols::available()) {
+                g_log.info("symbols: kernel symbol table loaded");
+            } else {
+                g_log.warn("symbols: kernel symbol table unavailable");
+            }
+        })
+        .or_else([]() -> ktl::maybe<limine_file&> {
+            g_log.warn("symbols: executable_file request not honored");
+            return ktl::nothing;
+        });
 
     if (hhdm_request.response == nullptr) { panic("Limine HHDM request failed"); }
     g_hhdm_offset = hhdm_request.response->offset;
@@ -131,21 +144,11 @@ extern "C" [[noreturn]] void _start(void) {
     g_log.info("Booting on cpu{0}. CPU has {1} cores", mp_request.response->bsp_lapic_id,
                mp_request.response->cpu_count);
 
-    // The boot processor's dense logical index is its position in the bootloader CPU list, which is
-    // not necessarily 0 nor equal to its LAPIC id. Locate it so the BP keys the per-core tables the
-    // same way the APs (and the startup gate) do.
-    uint32_t bsp_index = 0;
-    bool found_bsp     = false;
-    for (uint64_t i = 0; i < mp_request.response->cpu_count; i++) {
-        if (mp_request.response->cpus[i]->lapic_id == mp_request.response->bsp_lapic_id) {
-            bsp_index = (uint32_t)i;
-            found_bsp = true;
-            break;
-        }
-    }
-    // Fail fast on a malformed response rather than silently keying the BP into slot 0 (which could
-    // collide with whichever core occupies list position 0).
-    assert(found_bsp, "Boot processor LAPIC id not present in bootloader CPU list");
+    // Locate the BP's dense logical index so it keys the per-core tables the same way the APs (and
+    // the startup gate) do. Fail fast on a malformed response rather than silently keying the BP
+    // into slot 0 (which could collide with whichever core occupies list position 0).
+    uint32_t bsp_index =
+        find_bsp_index(*mp_request.response).expect("Boot processor LAPIC id not present in bootloader CPU list");
 
     core_init(bsp_index, mp_request.response->bsp_lapic_id, /*is_boot_processor=*/true);
     kernel::cpu_start_cores();

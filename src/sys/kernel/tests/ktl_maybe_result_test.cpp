@@ -2,9 +2,12 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/testing/tracking_value.h>
+
 #include <ktl/maybe>
 #include <ktl/result>
 #include <ktl/string_view>
+#include <ktl/utility>
 
 using namespace kernel::testing;
 
@@ -28,7 +31,8 @@ KTEST(ktl_maybe_basic_operations, "ktl/maybe") {
     KTEST_EXPECT_TRUE(value.filter([](int v) { return v == 5; }).has_value());
     KTEST_EXPECT_FALSE(value.filter([](int v) { return v != 5; }).has_value());
 
-    KTEST_EXPECT_EQUAL(empty.map_or([](int v) { return v * 3; }, 7), 21);
+    // map_or returns the default untouched when empty; the function only ever sees a real value.
+    KTEST_EXPECT_EQUAL(empty.map_or([](int v) { return v * 3; }, 7), 7);
     KTEST_EXPECT_EQUAL(value.map_or([](int v) { return v * 3; }, 7), 15);
 
     KTEST_EXPECT_ALL(value == ktl::maybe<int>{5}, value != empty);
@@ -90,6 +94,147 @@ KTEST(ktl_result_error_flow, "ktl/result") {
     KTEST_EXPECT_EQUAL(recovered.unwrap(), -1);
 
     KTEST_EXPECT_TRUE((err_result != Result<int, const char*>::err("oops")));
+}
+
+KTEST(ktl_maybe_operator_bool, "ktl/maybe") {
+    ktl::maybe<int> empty;
+    ktl::maybe<int> value{5};
+
+    KTEST_EXPECT_TRUE(static_cast<bool>(value));
+    KTEST_EXPECT_FALSE(static_cast<bool>(empty));
+    if (!value) { KTEST_EXPECT_TRUE(false); }
+}
+
+KTEST(ktl_maybe_expect_returns_value, "ktl/maybe") {
+    ktl::maybe<int> value{5};
+    KTEST_EXPECT_EQUAL(value.expect("value must be present"), 5);
+
+    // expect returns a mutable reference, like value().
+    value.expect("mutable access") = 6;
+    KTEST_EXPECT_EQUAL(value.value(), 6);
+}
+
+KTEST(ktl_maybe_reset_empties, "ktl/maybe") {
+    ktl::maybe<int> value{5};
+    value.reset();
+    KTEST_EXPECT_FALSE(value.has_value());
+}
+
+KTEST(ktl_maybe_move_construction, "ktl/maybe") {
+    tracking_value tv{7};
+    ktl::maybe<tracking_value> moved_in{ktl::move(tv)};
+
+    KTEST_REQUIRE_TRUE(moved_in.has_value());
+    KTEST_EXPECT_EQUAL(moved_in.value().value, 7);
+    KTEST_EXPECT_TRUE(moved_in.value().move_observed);
+    KTEST_EXPECT_EQUAL(tv.value, -1);
+}
+
+KTEST(ktl_maybe_take_moves_value_out, "ktl/maybe") {
+    ktl::maybe<tracking_value> source{tracking_value{42}};
+    auto taken = source.take();
+
+    KTEST_REQUIRE_TRUE(taken.has_value());
+    KTEST_EXPECT_EQUAL(taken.value().value, 42);
+    KTEST_EXPECT_TRUE(taken.value().move_observed);
+    KTEST_EXPECT_FALSE(source.has_value());
+
+    auto taken_again = source.take();
+    KTEST_EXPECT_FALSE(taken_again.has_value());
+}
+
+KTEST(ktl_maybe_inspect_side_effect, "ktl/maybe") {
+    ktl::maybe<int> empty;
+    ktl::maybe<int> value{5};
+
+    int seen = 0;
+    value.inspect([&](int v) { seen = v; });
+    KTEST_EXPECT_EQUAL(seen, 5);
+
+    empty.inspect([&](int) { seen = -1; });
+    KTEST_EXPECT_EQUAL(seen, 5);
+
+    // The non-const overload exposes a mutable reference.
+    value.inspect([](int& v) { v += 1; });
+    KTEST_EXPECT_EQUAL(value.value(), 6);
+
+    // inspect returns the maybe unchanged, so it chains.
+    KTEST_EXPECT_VALUE(value.inspect([](int) {}).map([](int v) { return v + 1; }), 7);
+}
+
+KTEST(ktl_maybe_ref_basics, "ktl/maybe") {
+    int x = 5;
+    ktl::maybe<int&> ref{x};
+    ktl::maybe<int&> empty;
+
+    KTEST_EXPECT_ALL(ref.has_value(), !empty.has_value());
+    KTEST_EXPECT_TRUE(static_cast<bool>(ref));
+    KTEST_EXPECT_EQUAL(ref.value(), 5);
+    KTEST_EXPECT_EQUAL(*ref, 5);
+
+    // maybe<T&> aliases the referent: writes through it land at the origin.
+    ref.value() = 7;
+    KTEST_EXPECT_EQUAL(x, 7);
+
+    int fallback = 9;
+    KTEST_EXPECT_EQUAL(empty.value_or(fallback), 9);
+    KTEST_EXPECT_EQUAL(ref.value_or(fallback), 7);
+    KTEST_EXPECT_EQUAL(ref.expect("present"), 7);
+
+    KTEST_EXPECT_TRUE(empty.ptr_or() == nullptr);
+    KTEST_EXPECT_TRUE(ref.ptr_or() == &x);
+
+    ref.reset();
+    KTEST_EXPECT_FALSE(ref.has_value());
+}
+
+KTEST(ktl_maybe_ref_combinators, "ktl/maybe") {
+    int x = 5;
+    ktl::maybe<int&> ref{x};
+    ktl::maybe<int&> empty;
+
+    KTEST_EXPECT_VALUE(ref.map([](int& v) { return v * 2; }), 10);
+    KTEST_EXPECT_FALSE(empty.map([](int& v) { return v * 2; }).has_value());
+
+    KTEST_EXPECT_VALUE(ref.and_then([](int& v) { return ktl::maybe<int>(v + 1); }), 6);
+    KTEST_EXPECT_FALSE(empty.and_then([](int& v) { return ktl::maybe<int>(v + 1); }).has_value());
+
+    KTEST_EXPECT_TRUE(ref.filter([](int& v) { return v == 5; }).has_value());
+    KTEST_EXPECT_FALSE(ref.filter([](int& v) { return v != 5; }).has_value());
+
+    int seen = 0;
+    ref.inspect([&](int& v) { seen = v; });
+    KTEST_EXPECT_EQUAL(seen, 5);
+
+    int y          = 1;
+    auto recovered = empty.or_else([&]() -> ktl::maybe<int&> { return ktl::maybe<int&>(y); });
+    KTEST_REQUIRE_TRUE(recovered.has_value());
+    KTEST_EXPECT_TRUE(&recovered.value() == &y);
+}
+
+KTEST(ktl_from_ptr_bridges_nullable_pointers, "ktl/maybe") {
+    int x        = 3;
+    auto present = ktl::from_ptr(&x);
+    KTEST_REQUIRE_TRUE(present.has_value());
+
+    present.value() = 4;
+    KTEST_EXPECT_EQUAL(x, 4);
+
+    int* null_ptr = nullptr;
+    KTEST_EXPECT_FALSE(ktl::from_ptr(null_ptr).has_value());
+}
+
+KTEST(ktl_maybe_ok_or_bridges_to_result, "ktl/result") {
+    ktl::maybe<int> value{5};
+    ktl::maybe<int> empty;
+
+    auto ok = ktl::ok_or(value, static_cast<result_t>(RESULT_OOM));
+    KTEST_REQUIRE_TRUE(ok.is_ok());
+    KTEST_EXPECT_EQUAL(ok.unwrap(), 5);
+
+    auto err = ktl::ok_or(empty, static_cast<result_t>(RESULT_OOM));
+    KTEST_REQUIRE_TRUE(err.is_err());
+    KTEST_EXPECT_TRUE(err.unwrap_err() == RESULT_OOM);
 }
 
 namespace {

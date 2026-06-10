@@ -19,12 +19,11 @@ void obj_handler(int argc, const char* const argv[], kernel::shell::ShellOutput&
     if (sub == "types") {
         output.print("Registered types: {0}\n", kernel::obj::g_type_registry.count());
         for (size_t i = 0; i < CONFIG_MAX_OBJECT_TYPES; ++i) {
-            auto desc = kernel::obj::g_type_registry.lookup(static_cast<kernel::obj::TypeId>(i));
-            if (desc.has_value()) {
-                auto* d = desc.value();
-                output.print("  [{0}] {1} (live: {2})\n", d->id, d->name,
-                             kernel::obj::g_type_registry.live_count(d->id));
-            }
+            kernel::obj::g_type_registry.lookup(static_cast<kernel::obj::TypeId>(i))
+                .inspect([&](const kernel::obj::TypeDescriptor& d) {
+                    output.print("  [{0}] {1} (live: {2})\n", d.id, d.name,
+                                 kernel::obj::g_type_registry.live_count(d.id));
+                });
         }
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);

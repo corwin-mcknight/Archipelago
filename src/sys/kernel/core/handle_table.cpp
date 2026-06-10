@@ -33,7 +33,7 @@ Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, R
     // Out-of-contract bits are rejected outright rather than silently clamped.
     auto descriptor = g_type_registry.lookup(object->type_id());
     if (!descriptor.has_value()) { return Result<HandleId, result_t>::err(RESULT_WRONG_TYPE); }
-    if ((rights & ~descriptor.value()->valid_rights) != 0) {
+    if ((rights & ~descriptor.value().valid_rights) != 0) {
         return Result<HandleId, result_t>::err(RESULT_RIGHTS_VIOLATION);
     }
 

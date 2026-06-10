@@ -4,6 +4,7 @@
 #include <ktl/fmt>
 #include <ktl/string_view>
 #include <ktl/type_traits>
+#include <ktl/utility>
 
 namespace ktl {
 
@@ -25,9 +26,11 @@ template <typename T> class maybe {
     maybe() : m_has_value(false), m_value{} {}
     maybe(nothing_t) : m_has_value(false), m_value{} {}
     maybe(const T& value) : m_has_value(true), m_value(value) {}
+    maybe(T&& value) : m_has_value(true), m_value(ktl::move(value)) {}
 
     bool has_value() const { return m_has_value; }
     bool has_value() { return m_has_value; }
+    explicit operator bool() const { return m_has_value; }
 
     // Accessing the value of an empty maybe is a kernel bug and panics, mirroring Result::unwrap.
     T& value() {
@@ -37,6 +40,29 @@ template <typename T> class maybe {
     const T& value() const {
         if (!m_has_value) { panic("maybe::value on empty maybe"); }
         return m_value;
+    }
+
+    // Like value(), but panics with a caller-supplied diagnosis, mirroring Result::expect.
+    T& expect(const char* error_message) {
+        if (!m_has_value) { panic(error_message); }
+        return m_value;
+    }
+    const T& expect(const char* error_message) const {
+        if (!m_has_value) { panic(error_message); }
+        return m_value;
+    }
+
+    void reset() {
+        m_has_value = false;
+        m_value     = T{};
+    }
+
+    /// Moves the value out (leaving this maybe empty), or returns nothing if already empty.
+    maybe<T> take() {
+        if (!m_has_value) { return nothing; }
+        maybe<T> out(ktl::move(m_value));
+        reset();
+        return out;
     }
 
     T& operator*() {
@@ -88,9 +114,21 @@ template <typename T> class maybe {
         return func();
     }
 
-    template <typename F> auto map_or(F&& func, const T& default_value) const {
-        if (!m_has_value) { return func(default_value); }
+    /// Maps the contained value, or returns the default untouched when empty.
+    template <typename F, typename U> auto map_or(F&& func, U&& default_value) const -> decltype(func(m_value)) {
+        if (!m_has_value) { return static_cast<decltype(func(m_value))>(ktl::forward<U>(default_value)); }
         return func(m_value);
+    }
+
+    /// Calls func with the contained value for its side effect (if any), returning the maybe unchanged.
+    /// Fills the gap where map cannot take a void-returning function.
+    template <typename F> maybe<T>& inspect(F&& func) {
+        if (m_has_value) { func(m_value); }
+        return *this;
+    }
+    template <typename F> const maybe<T>& inspect(F&& func) const {
+        if (m_has_value) { func(m_value); }
+        return *this;
     }
 
     /// @brief Filters this maybe by predicate, returning the original value or nothing
@@ -103,6 +141,91 @@ template <typename T> class maybe {
         return nothing;
     }
 };
+
+/// Reference specialization: a non-owning optional reference, stored internally as a pointer.
+/// Engaged implies valid -- it cannot hold a null reference -- so it replaces both the
+/// raw-pointer-as-sentinel idiom and the maybe<T*> double-optional. Unlike the primary template
+/// it places no default-constructible or copyable requirement on T and never copies the referent.
+template <typename T> class maybe<T&> {
+   private:
+    T* m_ptr;
+
+   public:
+    maybe() : m_ptr(nullptr) {}
+    maybe(nothing_t) : m_ptr(nullptr) {}
+    maybe(T& ref) : m_ptr(&ref) {}
+    maybe(T&&) = delete;  // a temporary would dangle immediately
+
+    bool has_value() const { return m_ptr != nullptr; }
+    explicit operator bool() const { return m_ptr != nullptr; }
+
+    T& value() const {
+        if (!m_ptr) { panic("maybe::value on empty maybe"); }
+        return *m_ptr;
+    }
+
+    T& expect(const char* error_message) const {
+        if (!m_ptr) { panic(error_message); }
+        return *m_ptr;
+    }
+
+    T& operator*() const {
+        if (!m_ptr) { panic("maybe::operator* on empty maybe"); }
+        return *m_ptr;
+    }
+
+    T* operator->() const {
+        if (!m_ptr) { panic("maybe::operator-> on empty maybe"); }
+        return m_ptr;
+    }
+
+    T& value_or(T& fallback) const { return m_ptr ? *m_ptr : fallback; }
+
+    /// Escape hatch for raw-pointer interop.
+    T* ptr_or(T* fallback = nullptr) const { return m_ptr ? m_ptr : fallback; }
+
+    void reset() { m_ptr = nullptr; }
+
+    // Monadic operations
+
+    template <typename F> auto map(F&& func) const -> maybe<decltype(func(*m_ptr))> {
+        if (!m_ptr) { return nothing; }
+        return maybe<decltype(func(*m_ptr))>(func(*m_ptr));
+    }
+
+    /// Flat map
+    template <typename F> auto and_then(F&& func) const -> decltype(func(*m_ptr)) {
+        if (!m_ptr) { return nothing; }
+        return func(*m_ptr);
+    }
+
+    template <typename F> maybe<T&> or_else(F&& func) const {
+        if (m_ptr) { return *this; }
+        return func();
+    }
+
+    template <typename F, typename U> auto map_or(F&& func, U&& default_value) const -> decltype(func(*m_ptr)) {
+        if (!m_ptr) { return static_cast<decltype(func(*m_ptr))>(ktl::forward<U>(default_value)); }
+        return func(*m_ptr);
+    }
+
+    template <typename F> maybe<T&> filter(F&& predicate) const {
+        if (!m_ptr) { return nothing; }
+        if (predicate(*m_ptr)) { return *this; }
+        return nothing;
+    }
+
+    template <typename F> const maybe<T&>& inspect(F&& func) const {
+        if (m_ptr) { func(*m_ptr); }
+        return *this;
+    }
+};
+
+/// Bridges a nullable raw pointer (C ABI, bootloader/vendor structs) into the maybe world.
+template <typename T> maybe<T&> from_ptr(T* ptr) {
+    if (ptr == nullptr) { return nothing; }
+    return maybe<T&>(*ptr);
+}
 
 template <typename T, typename F> void filter(maybe<T>* arr, int count, F&& func) {
     for (int i = 0; i < count; i++) { arr[i] = arr[i].filter(func); }
