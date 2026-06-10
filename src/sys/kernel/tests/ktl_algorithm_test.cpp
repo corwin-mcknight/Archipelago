@@ -7,6 +7,7 @@
 
 #include <ktl/algorithm>
 #include <ktl/maybe>
+#include <ktl/vector>
 
 using namespace kernel::testing;
 
@@ -48,6 +49,19 @@ KTEST(ktl_algorithm_find_index_if_chains, "ktl/algorithm") {
     KTEST_EXPECT_VALUE(doubled, (size_t)6);
 
     KTEST_EXPECT_FALSE(ktl::find_index_if(ids, ids + 4, [](uint32_t id) { return id == 99; }).has_value());
+}
+
+KTEST(ktl_algorithm_size, "ktl/algorithm") {
+    // Built-in arrays report their extent, usable at compile time.
+    static constexpr int values[5] = {1, 2, 3, 4, 5};
+    static_assert(ktl::size(values) == 5);
+    KTEST_EXPECT_EQUAL(ktl::size(values), (size_t)5);
+
+    // Containers defer to their size() member.
+    ktl::vector<uint32_t> vec;
+    vec.push_back(10);
+    vec.push_back(20);
+    KTEST_EXPECT_EQUAL(ktl::size(vec), (size_t)2);
 }
 
 KTEST(ktl_algorithm_find_if_empty_range, "ktl/algorithm") {
