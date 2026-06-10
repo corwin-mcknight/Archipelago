@@ -15,8 +15,13 @@
 namespace kernel::testing {
 
 // Shared type IDs for test-only Object subclasses.
-constexpr kernel::obj::TypeId TEST_TYPE_A = 50;
-constexpr kernel::obj::TypeId TEST_TYPE_B = 51;
+constexpr kernel::obj::TypeId TEST_TYPE_A                  = 50;
+constexpr kernel::obj::TypeId TEST_TYPE_B                  = 51;
+constexpr kernel::obj::TypeId TEST_TYPE_RESTRICTED         = 52;
+constexpr kernel::obj::TypeId TEST_TYPE_UNREGISTERED       = 53;
+
+// Rights contract for TestObjRestricted (see register_all_test_types).
+constexpr kernel::obj::Rights TEST_RESTRICTED_VALID_RIGHTS = kernel::obj::RIGHT_READ | kernel::obj::RIGHT_DUPLICATE;
 
 // Simple Object subclass with an optional destruction callback.
 class TestObjA : public kernel::obj::Object {
@@ -38,6 +43,20 @@ class TestObjB : public kernel::obj::Object {
     TestObjB() : Object(TYPE_ID) {}
 };
 
+// Type registered with a restricted valid_rights contract, for rights-validation checks.
+class TestObjRestricted : public kernel::obj::Object {
+   public:
+    DECLARE_OBJECT_TYPE(TestObjRestricted, TEST_TYPE_RESTRICTED)
+    TestObjRestricted() : Object(TYPE_ID) {}
+};
+
+// Type deliberately never registered with the type registry.
+class TestObjUnregistered : public kernel::obj::Object {
+   public:
+    DECLARE_OBJECT_TYPE(TestObjUnregistered, TEST_TYPE_UNREGISTERED)
+    TestObjUnregistered() : Object(TYPE_ID) {}
+};
+
 // One-shot init that registers TestObjA/TestObjB plus Event/Counter.
 inline void register_all_test_types() {
     static bool done = false;
@@ -45,6 +64,8 @@ inline void register_all_test_types() {
     using namespace kernel::obj;
     g_type_registry.register_type(TEST_TYPE_A, "test_obj_a", RIGHTS_ALL, RIGHTS_ALL);
     g_type_registry.register_type(TEST_TYPE_B, "test_obj_b", RIGHTS_ALL, RIGHTS_ALL);
+    g_type_registry.register_type(TEST_TYPE_RESTRICTED, "test_obj_restricted", TEST_RESTRICTED_VALID_RIGHTS,
+                                  RIGHT_READ);
     Event::register_type(g_type_registry);
     Counter::register_type(g_type_registry);
     done = true;
