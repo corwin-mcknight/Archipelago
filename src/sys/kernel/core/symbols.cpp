@@ -3,7 +3,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/algorithm>
+#include <ktl/maybe>
+#include <ktl/string_view>
+
 namespace kernel::symbols {
+
+using ktl::maybe;
+using ktl::nothing;
+using ktl::string_view;
 
 namespace {
 
@@ -63,35 +71,37 @@ struct Elf64_Sym {
     uint64_t st_size;
 };
 
-constexpr uint32_t kShtSymtab = 2;
-constexpr uint8_t kSttFunc    = 2;
+constexpr uint32_t kShtSymtab  = 2;
+constexpr uint8_t kSttFunc     = 2;
 
-constexpr uint8_t kElfMag0    = 0x7f;
-constexpr uint8_t kElfMag1    = 'E';
-constexpr uint8_t kElfMag2    = 'L';
-constexpr uint8_t kElfMag3    = 'F';
-constexpr uint8_t kElfClass64 = 2;
+// Magic bytes and class checked against e_ident before we trust any other field.
+constexpr uint8_t kElfMagic[4] = {0x7f, 'E', 'L', 'F'};
+constexpr uint8_t kElfClass64  = 2;
 
-uint8_t st_type(uint8_t info) { return info & 0xf; }
-
-size_t str_len(const char* s, const char* end) {
-    size_t n = 0;
-    while (s + n < end && s[n] != '\0') { n++; }
-    return n;
+// True when the half-open region [offset, offset + size) lies fully inside an
+// `elf_size`-byte blob, computed without overflow.
+bool region_in_bounds(uint64_t offset, uint64_t size, size_t elf_size) {
+    return offset <= elf_size && size <= elf_size - offset;
 }
 
-void mem_copy(char* dst, const char* src, size_t n) {
-    for (size_t i = 0; i < n; i++) { dst[i] = src[i]; }
+// View a NUL-terminated string starting at `s`, bounded by `end` so a missing
+// terminator can never run off the string table. Replaces a hand-rolled strlen.
+string_view bounded_view(const char* s, const char* end) {
+    string_view full(s, static_cast<size_t>(end - s));
+    size_t nul = full.find('\0');
+    return full.substr(0, nul == string_view::npos ? full.size() : nul);
 }
 
-bool intern_string(const char* s, const char* str_end, uint32_t& out_off) {
-    size_t len = str_len(s, str_end);
-    if (g_string_used + len + 1 > kStringPoolBytes) { return false; }
-    out_off = static_cast<uint32_t>(g_string_used);
-    mem_copy(&g_string_pool[g_string_used], s, len);
+// Copy `name` into the string pool, returning its offset or nothing if the pool
+// is full.
+maybe<uint32_t> intern(string_view name) {
+    size_t len = name.size();
+    if (g_string_used + len + 1 > kStringPoolBytes) { return nothing; }
+    uint32_t off = static_cast<uint32_t>(g_string_used);
+    name.copy(&g_string_pool[g_string_used], len);
     g_string_pool[g_string_used + len] = '\0';
     g_string_used += len + 1;
-    return true;
+    return off;
 }
 
 void sort_entries() {
@@ -107,64 +117,140 @@ void sort_entries() {
     }
 }
 
-}  // namespace
+// Greatest entry whose start address is <= `addr` and whose extent covers it.
+maybe<const func_entry&> find_entry(uintptr_t addr) {
+    size_t lo = 0;
+    size_t hi = g_entry_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (g_entries[mid].addr <= addr) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == 0) { return nothing; }
 
-void init(const void* elf_data, size_t elf_size) {
-    if (g_initialized) { return; }
-    if (elf_data == nullptr || elf_size < sizeof(Elf64_Ehdr)) { return; }
+    const func_entry& e = g_entries[lo - 1];
+    if (addr >= e.addr + e.size) { return nothing; }
+    return e;
+}
+
+// Bounded output buffer for the demangler: writes silently stop once the buffer
+// is full, and `finish()` reports whether the whole name fit. This collapses the
+// repeated `if (!put(...)) return false;` checks into a single trailing test.
+struct sym_writer {
+    char* out;
+    size_t cap;
+    size_t pos = 0;
+    bool ok    = true;
+
+    void put(char c) {
+        if (pos + 1 >= cap) {
+            ok = false;
+            return;
+        }
+        out[pos++] = c;
+    }
+
+    void put(string_view s) {
+        for (size_t i = 0; i < s.size(); i++) { put(s[i]); }
+    }
+
+    bool finish() {
+        if (ok) { out[pos] = '\0'; }
+        return ok;
+    }
+};
+
+// The validated symbol/string tables init() ingests, isolating the ELF parsing
+// from the ingestion loop.
+struct symbol_tables {
+    const Elf64_Sym* syms;
+    size_t count;
+    const char* strtab;
+    size_t strtab_size;
+};
+
+// Validate the ELF header, then locate .symtab and its associated string table.
+// Every malformed or out-of-bounds field short-circuits to nothing.
+maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size) {
+    if (elf_data == nullptr || elf_size < sizeof(Elf64_Ehdr)) { return nothing; }
 
     const auto* base = static_cast<const uint8_t*>(elf_data);
     const auto* hdr  = reinterpret_cast<const Elf64_Ehdr*>(base);
 
-    if (hdr->e_ident[0] != kElfMag0 || hdr->e_ident[1] != kElfMag1 || hdr->e_ident[2] != kElfMag2 ||
-        hdr->e_ident[3] != kElfMag3) {
-        return;
+    if (string_view(reinterpret_cast<const char*>(hdr->e_ident), sizeof(kElfMagic)) !=
+        string_view(reinterpret_cast<const char*>(kElfMagic), sizeof(kElfMagic))) {
+        return nothing;
     }
-    if (hdr->e_ident[4] != kElfClass64) { return; }
-    if (hdr->e_shoff == 0 || hdr->e_shentsize < sizeof(Elf64_Shdr)) { return; }
-    if (hdr->e_shoff > elf_size || static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize > elf_size - hdr->e_shoff) {
-        return;
+    if (hdr->e_ident[4] != kElfClass64) { return nothing; }
+    if (hdr->e_shoff == 0 || hdr->e_shentsize < sizeof(Elf64_Shdr)) { return nothing; }
+    if (!region_in_bounds(hdr->e_shoff, static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize, elf_size)) {
+        return nothing;
     }
 
-    const auto* sections     = reinterpret_cast<const Elf64_Shdr*>(base + hdr->e_shoff);
-
-    // Locate .symtab (and via its sh_link, the associated string table).
-    const Elf64_Shdr* sym_sh = nullptr;
-    for (uint16_t i = 0; i < hdr->e_shnum; i++) {
-        if (sections[i].sh_type == kShtSymtab) {
-            sym_sh = &sections[i];
-            break;
-        }
-    }
-    if (sym_sh == nullptr) { return; }
-    if (sym_sh->sh_entsize < sizeof(Elf64_Sym)) { return; }
-    if (sym_sh->sh_offset > elf_size || sym_sh->sh_size > elf_size - sym_sh->sh_offset) { return; }
-    if (sym_sh->sh_link >= hdr->e_shnum) { return; }
+    const auto* sections = reinterpret_cast<const Elf64_Shdr*>(base + hdr->e_shoff);
+    auto sym_sh =
+        ktl::find_if(sections, sections + hdr->e_shnum, [](const Elf64_Shdr& sh) { return sh.sh_type == kShtSymtab; });
+    if (!sym_sh) { return nothing; }
+    if (sym_sh->sh_entsize < sizeof(Elf64_Sym)) { return nothing; }
+    if (!region_in_bounds(sym_sh->sh_offset, sym_sh->sh_size, elf_size)) { return nothing; }
+    if (sym_sh->sh_link >= hdr->e_shnum) { return nothing; }
 
     const Elf64_Shdr& str_sh = sections[sym_sh->sh_link];
-    if (str_sh.sh_offset > elf_size || str_sh.sh_size > elf_size - str_sh.sh_offset) { return; }
+    if (!region_in_bounds(str_sh.sh_offset, str_sh.sh_size, elf_size)) { return nothing; }
 
-    const auto* syms       = reinterpret_cast<const Elf64_Sym*>(base + sym_sh->sh_offset);
-    const size_t sym_count = static_cast<size_t>(sym_sh->sh_size / sym_sh->sh_entsize);
-    const char* strtab     = reinterpret_cast<const char*>(base + str_sh.sh_offset);
-    const char* strtab_end = strtab + str_sh.sh_size;
+    return symbol_tables{
+        .syms        = reinterpret_cast<const Elf64_Sym*>(base + sym_sh->sh_offset),
+        .count       = static_cast<size_t>(sym_sh->sh_size / sym_sh->sh_entsize),
+        .strtab      = reinterpret_cast<const char*>(base + str_sh.sh_offset),
+        .strtab_size = static_cast<size_t>(str_sh.sh_size),
+    };
+}
 
-    for (size_t i = 0; i < sym_count && g_entry_count < kMaxSymbols; i++) {
-        const Elf64_Sym& s = syms[i];
-        if (st_type(s.st_info) != kSttFunc) { continue; }
+// Parse one Itanium `<decimal-length><identifier>` source-name, advancing `p`
+// past it. Returns nothing on a missing or zero-length prefix.
+maybe<string_view> read_source_name(const char*& p) {
+    if (*p < '0' || *p > '9') { return nothing; }
+
+    size_t len = 0;
+    while (*p >= '0' && *p <= '9') {
+        len = len * 10 + static_cast<size_t>(*p - '0');
+        p++;
+    }
+    if (len == 0) { return nothing; }
+
+    string_view name(p, len);
+    p += len;
+    return name;
+}
+
+}  // namespace
+
+void init(const void* elf_data, size_t elf_size) {
+    if (g_initialized) { return; }
+
+    auto tables = locate_symbol_tables(elf_data, elf_size);
+    if (!tables) { return; }
+
+    const char* strtab_end = tables->strtab + tables->strtab_size;
+    for (size_t i = 0; i < tables->count && g_entry_count < kMaxSymbols; i++) {
+        const Elf64_Sym& s = tables->syms[i];
+        if ((s.st_info & 0xf) != kSttFunc) { continue; }
         if (s.st_size == 0) { continue; }
-        if (s.st_name >= str_sh.sh_size) { continue; }
+        if (s.st_name >= tables->strtab_size) { continue; }
 
-        const char* name = strtab + s.st_name;
-        if (*name == '\0') { continue; }
+        string_view name = bounded_view(tables->strtab + s.st_name, strtab_end);
+        if (name.empty()) { continue; }
 
-        uint32_t name_off;
-        if (!intern_string(name, strtab_end, name_off)) { break; }
+        auto name_off = intern(name);
+        if (!name_off) { break; }
 
         g_entries[g_entry_count++] = {
             .addr     = static_cast<uintptr_t>(s.st_value),
             .size     = static_cast<uint32_t>(s.st_size),
-            .name_off = name_off,
+            .name_off = *name_off,
         };
     }
 
@@ -176,94 +262,35 @@ bool available() { return g_initialized; }
 
 bool demangle(const char* mangled, char* out, size_t out_size) {
     if (mangled == nullptr || out == nullptr || out_size < 4) { return false; }
-    if (mangled[0] != '_' || mangled[1] != 'Z') { return false; }
+    if (!string_view(mangled).starts_with("_Z")) { return false; }
 
     const char* p = mangled + 2;
-    size_t pos    = 0;
+    sym_writer w{out, out_size};
 
-    auto put_char = [&](char c) -> bool {
-        if (pos + 1 >= out_size) { return false; }
-        out[pos++] = c;
-        return true;
-    };
-    auto put_str = [&](const char* s) -> bool {
-        while (*s != '\0') {
-            if (!put_char(*s++)) { return false; }
-        }
-        return true;
-    };
-    auto put_n = [&](const char* s, size_t n) -> bool {
-        for (size_t i = 0; i < n; i++) {
-            if (!put_char(s[i])) { return false; }
-        }
-        return true;
-    };
-
-    bool nested = false;
-    if (*p == 'N') {
-        nested = true;
-        p++;
-    }
+    bool nested = (*p == 'N');
+    if (nested) { p++; }
 
     bool first = true;
     while (true) {
         if (nested && *p == 'E') { break; }
         if (!nested && !first) { break; }
-        if (*p < '0' || *p > '9') { return false; }
 
-        size_t len = 0;
-        while (*p >= '0' && *p <= '9') {
-            len = len * 10 + static_cast<size_t>(*p - '0');
-            p++;
-        }
-        if (len == 0) { return false; }
+        auto component = read_source_name(p);
+        if (!component) { return false; }
 
-        if (!first) {
-            if (!put_str("::")) { return false; }
-        }
-        first                            = false;
+        if (!first) { w.put(string_view("::")); }
+        first = false;
 
-        static constexpr char kAnonTag[] = "_GLOBAL__N_1";
-        constexpr size_t kAnonTagLen     = sizeof(kAnonTag) - 1;
-        bool is_anon                     = (len == kAnonTagLen);
-        for (size_t i = 0; is_anon && i < kAnonTagLen; i++) {
-            if (p[i] != kAnonTag[i]) { is_anon = false; }
-        }
-
-        if (is_anon) {
-            if (!put_str("(anonymous namespace)")) { return false; }
-        } else {
-            if (!put_n(p, len)) { return false; }
-        }
-        p += len;
+        w.put(*component == "_GLOBAL__N_1" ? string_view("(anonymous namespace)") : *component);
     }
 
-    if (!put_str("()")) { return false; }
-    out[pos] = '\0';
-    return true;
+    w.put(string_view("()"));
+    return w.finish();
 }
 
-const char* lookup(uintptr_t addr, size_t* offset_out) {
-    if (!g_initialized) { return nullptr; }
-
-    // Binary search for the greatest entry with addr <= target.
-    size_t lo = 0;
-    size_t hi = g_entry_count;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        if (g_entries[mid].addr <= addr) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if (lo == 0) { return nullptr; }
-
-    const func_entry& e = g_entries[lo - 1];
-    if (addr >= e.addr + e.size) { return nullptr; }
-
-    if (offset_out != nullptr) { *offset_out = addr - e.addr; }
-    return &g_string_pool[e.name_off];
+maybe<symbol> lookup(uintptr_t addr) {
+    if (!g_initialized) { return nothing; }
+    return find_entry(addr).map([&](const func_entry& e) { return symbol{&g_string_pool[e.name_off], addr - e.addr}; });
 }
 
 }  // namespace kernel::symbols

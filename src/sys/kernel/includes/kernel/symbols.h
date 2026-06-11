@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/maybe>
+
 namespace kernel::symbols {
 
 // Parse a kernel ELF blob and snapshot function symbols into a kernel-owned
@@ -15,10 +17,15 @@ void init(const void* elf_data, size_t elf_size);
 // True if init() succeeded and lookup() can return a name.
 bool available();
 
-// Look up the function containing `addr`. Returns nullptr if no symbol covers
-// the address. When non-null, `*offset_out` (if provided) is the byte offset
-// from the symbol's start.
-const char* lookup(uintptr_t addr, size_t* offset_out = nullptr);
+// Identifies the function symbol covering a looked-up address.
+struct symbol {
+    const char* name;  // NUL-terminated, owned by the symbol table
+    size_t offset;     // byte offset of the queried address from the symbol's start
+};
+
+// Look up the function containing `addr`. Returns nothing if no symbol covers
+// the address.
+ktl::maybe<symbol> lookup(uintptr_t addr);
 
 // Best-effort Itanium C++ ABI demangler. Handles `_ZN<len><name>...E` nested
 // names and the bare `_Z<len><name>` form; substitutes `_GLOBAL__N_1` for

@@ -23,17 +23,16 @@ KTEST(symbols_available, "symbols") { KTEST_EXPECT_TRUE(kernel::symbols::availab
 KTEST(symbols_resolve_self, "symbols") {
     KTEST_REQUIRE_TRUE(kernel::symbols::available());
 
-    uintptr_t addr   = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
-    size_t off       = 12345;
-    const char* name = kernel::symbols::lookup(addr, &off);
+    uintptr_t addr = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
+    auto sym       = kernel::symbols::lookup(addr);
 
-    KTEST_REQUIRE_TRUE(name != nullptr);
-    KTEST_EXPECT_EQUAL(off, static_cast<size_t>(0));
+    KTEST_REQUIRE_TRUE(sym.has_value());
+    KTEST_EXPECT_EQUAL(sym->offset, static_cast<size_t>(0));
 
     // The mangled name must contain the unmangled identifier as a substring.
     bool found          = false;
     const char needle[] = "symbols_test_anchor_fn";
-    for (const char* p = name; *p != '\0'; p++) {
+    for (const char* p = sym->name; *p != '\0'; p++) {
         bool match = true;
         for (size_t k = 0; needle[k] != '\0'; k++) {
             if (p[k] == '\0' || p[k] != needle[k]) {
@@ -52,20 +51,19 @@ KTEST(symbols_resolve_self, "symbols") {
 KTEST(symbols_resolve_interior_offset, "symbols") {
     KTEST_REQUIRE_TRUE(kernel::symbols::available());
 
-    uintptr_t base   = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
-    size_t off       = 0;
-    const char* name = kernel::symbols::lookup(base + 2, &off);
+    uintptr_t base = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
+    auto sym       = kernel::symbols::lookup(base + 2);
 
-    KTEST_REQUIRE_TRUE(name != nullptr);
-    KTEST_EXPECT_EQUAL(off, static_cast<size_t>(2));
+    KTEST_REQUIRE_TRUE(sym.has_value());
+    KTEST_EXPECT_EQUAL(sym->offset, static_cast<size_t>(2));
 }
 
 KTEST(symbols_lookup_garbage_address, "symbols") {
     KTEST_REQUIRE_TRUE(kernel::symbols::available());
 
     // Userspace-shaped address: nothing there.
-    const char* name = kernel::symbols::lookup(0x1000, nullptr);
-    KTEST_EXPECT_TRUE(name == nullptr);
+    auto sym = kernel::symbols::lookup(0x1000);
+    KTEST_EXPECT_FALSE(sym.has_value());
 }
 
 KTEST(symbols_demangle_nested, "symbols") {
