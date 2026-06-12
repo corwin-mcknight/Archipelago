@@ -72,14 +72,14 @@ KTEST_WITH_INIT(obj_handle_table_get_wrong_type, "obj/handle_table", handle_tabl
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
     auto got = table.get<TestObjB>(id);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == RESULT_WRONG_TYPE);
+    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::wrong_type);
 }
 
 KTEST_WITH_INIT(obj_handle_table_get_insufficient_rights, "obj/handle_table", handle_table_init) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ));
     auto got = table.get<TestObjA>(id, RIGHT_WRITE);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == RESULT_RIGHTS_VIOLATION);
+    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::rights_violation);
 }
 
 KTEST_WITH_INIT(obj_handle_table_get_sufficient_rights, "obj/handle_table", handle_table_init) {
@@ -103,7 +103,7 @@ KTEST_WITH_INIT(obj_handle_table_invalid_handle, "obj/handle_table", handle_tabl
     HandleTable table;
     KTEST_EXPECT_FALSE(table.is_valid(HandleId::invalid()));
     auto got = table.get<TestObjA>(HandleId::invalid());
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == RESULT_HANDLE_INVALID);
+    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::handle_invalid);
 }
 
 KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_table_init) {
@@ -118,14 +118,14 @@ KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_tabl
 KTEST_WITH_INIT(obj_handle_table_rejects_out_of_contract_rights, "obj/handle_table", handle_table_init) {
     HandleTable table;
     auto bad = table.emplace<TestObjRestricted>(RIGHT_WRITE);
-    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_RIGHTS_VIOLATION, table.count() == 0);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
 }
 
 // F033: a mix of in-contract and out-of-contract bits is rejected outright (no silent clamping).
 KTEST_WITH_INIT(obj_handle_table_rejects_mixed_rights, "obj/handle_table", handle_table_init) {
     HandleTable table;
     auto bad = table.emplace<TestObjRestricted>(RIGHT_READ | RIGHT_WRITE);
-    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_RIGHTS_VIOLATION, table.count() == 0);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
 }
 
 // F033: rights within the contract still work, including duplicate (whose rights are a masked subset).
@@ -143,7 +143,7 @@ KTEST_WITH_INIT(obj_handle_table_accepts_in_contract_rights, "obj/handle_table",
 KTEST_WITH_INIT(obj_handle_table_rejects_unregistered_type, "obj/handle_table", handle_table_init) {
     HandleTable table;
     auto bad = table.emplace<TestObjUnregistered>(RIGHT_READ);
-    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == RESULT_WRONG_TYPE, table.count() == 0);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::wrong_type, table.count() == 0);
 }
 
 // F021: a slot whose generation counter saturates is retired on close instead of being recycled,

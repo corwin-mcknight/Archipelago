@@ -57,17 +57,31 @@ class TestObjUnregistered : public kernel::obj::Object {
     TestObjUnregistered() : Object(TYPE_ID) {}
 };
 
+// already_registered is expected here: obj_init() registers Event/Counter at boot, and tests
+// re-enter this function freely. Any other registration failure is a real test-environment bug.
+inline void expect_registered(ktl::result<void> result, const char* msg) {
+    result
+        .or_else([](ktl::errc e) -> ktl::result<void> {
+            if (e == ktl::errc::already_registered) { return ktl::result<void>::ok(); }
+            return ktl::err(e);
+        })
+        .expect(msg);
+}
+
 // One-shot init that registers TestObjA/TestObjB plus Event/Counter.
 inline void register_all_test_types() {
     static bool done = false;
     if (done) return;
     using namespace kernel::obj;
-    g_type_registry.register_type(TEST_TYPE_A, "test_obj_a", RIGHTS_ALL, RIGHTS_ALL);
-    g_type_registry.register_type(TEST_TYPE_B, "test_obj_b", RIGHTS_ALL, RIGHTS_ALL);
-    g_type_registry.register_type(TEST_TYPE_RESTRICTED, "test_obj_restricted", TEST_RESTRICTED_VALID_RIGHTS,
-                                  RIGHT_READ);
-    Event::register_type(g_type_registry);
-    Counter::register_type(g_type_registry);
+    expect_registered(g_type_registry.register_type(TEST_TYPE_A, "test_obj_a", RIGHTS_ALL, RIGHTS_ALL),
+                      "test type A registration failed");
+    expect_registered(g_type_registry.register_type(TEST_TYPE_B, "test_obj_b", RIGHTS_ALL, RIGHTS_ALL),
+                      "test type B registration failed");
+    expect_registered(g_type_registry.register_type(TEST_TYPE_RESTRICTED, "test_obj_restricted",
+                                                    TEST_RESTRICTED_VALID_RIGHTS, RIGHT_READ),
+                      "restricted test type registration failed");
+    expect_registered(Event::register_type(g_type_registry), "Event test registration failed");
+    expect_registered(Counter::register_type(g_type_registry), "Counter test registration failed");
     done = true;
 }
 

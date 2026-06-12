@@ -19,11 +19,8 @@ class Counter : public Object {
     uint64_t increment(uint64_t amount = 1) { return m_value.fetch_add(amount, ktl::memory_order::seq_cst); }
     void reset() { m_value.store(0, ktl::memory_order::release); }
 
-    static Result<bool, result_t> register_type(TypeRegistry& registry) {
-        auto result =
-            registry.register_type(TYPE_ID, "counter", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE, RIGHT_READ);
-        if (result.is_err()) { return Result<bool, result_t>::err(result.unwrap_err()); }
-        return Result<bool, result_t>::ok(true);
+    static ktl::result<void> register_type(TypeRegistry& registry) {
+        return registry.register_type(TYPE_ID, "counter", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE, RIGHT_READ);
     }
 
    private:

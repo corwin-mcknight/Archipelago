@@ -31,7 +31,7 @@ KTEST_WITH_INIT(obj_event_wrong_type, "obj/event", obj_event_init) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<Event>(RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE));
     auto got = table.get<Counter>(id);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == RESULT_WRONG_TYPE);
+    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::wrong_type);
 }
 
 KTEST_WITH_INIT(obj_event_signals, "obj/event", obj_event_init) {

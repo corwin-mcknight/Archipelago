@@ -11,7 +11,6 @@ KTEST(obj_type_registry_register_returns_id, "obj/type_registry") {
     TypeRegistry registry;
     auto result = registry.register_type(10, "test_type", RIGHTS_ALL, RIGHT_READ);
     KTEST_REQUIRE_TRUE(result.is_ok());
-    KTEST_EXPECT_TRUE(result.unwrap() == 10);
 }
 
 KTEST(obj_type_registry_lookup_by_id, "obj/type_registry") {
@@ -37,7 +36,7 @@ KTEST(obj_type_registry_duplicate_id_fails, "obj/type_registry") {
     registry.register_type(10, "type_a", RIGHTS_ALL, RIGHT_READ);
     auto result = registry.register_type(10, "type_b", RIGHTS_ALL, RIGHT_READ);
     KTEST_EXPECT_TRUE(result.is_err());
-    KTEST_EXPECT_TRUE(result.unwrap_err() == RESULT_ALREADY_REGISTERED);
+    KTEST_EXPECT_TRUE(result.unwrap_err() == ktl::errc::already_registered);
 }
 
 KTEST(obj_type_registry_duplicate_name_fails, "obj/type_registry") {
@@ -45,7 +44,7 @@ KTEST(obj_type_registry_duplicate_name_fails, "obj/type_registry") {
     registry.register_type(10, "same_name", RIGHTS_ALL, RIGHT_READ);
     auto result = registry.register_type(11, "same_name", RIGHTS_ALL, RIGHT_READ);
     KTEST_EXPECT_TRUE(result.is_err());
-    KTEST_EXPECT_TRUE(result.unwrap_err() == RESULT_ALREADY_REGISTERED);
+    KTEST_EXPECT_TRUE(result.unwrap_err() == ktl::errc::already_registered);
 }
 
 KTEST(obj_type_registry_multiple_types, "obj/type_registry") {

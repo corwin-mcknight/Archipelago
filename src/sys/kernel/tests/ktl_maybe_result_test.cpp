@@ -228,13 +228,13 @@ KTEST(ktl_maybe_ok_or_bridges_to_result, "ktl/result") {
     ktl::maybe<int> value{5};
     ktl::maybe<int> empty;
 
-    auto ok = ktl::ok_or(value, static_cast<result_t>(RESULT_OOM));
+    auto ok = ktl::ok_or(value, ktl::errc::oom);
     KTEST_REQUIRE_TRUE(ok.is_ok());
     KTEST_EXPECT_EQUAL(ok.unwrap(), 5);
 
-    auto err = ktl::ok_or(empty, static_cast<result_t>(RESULT_OOM));
+    auto err = ktl::ok_or(empty, ktl::errc::oom);
     KTEST_REQUIRE_TRUE(err.is_err());
-    KTEST_EXPECT_TRUE(err.unwrap_err() == RESULT_OOM);
+    KTEST_EXPECT_TRUE(err.unwrap_err() == ktl::errc::oom);
 }
 
 namespace {
@@ -263,6 +263,107 @@ KTEST(ktl_maybe_value_round_trip, "ktl/maybe") {
     KTEST_EXPECT_EQUAL(const_ref.value().x, 11);
     KTEST_EXPECT_EQUAL((*const_ref).y, 20);
     KTEST_EXPECT_EQUAL(const_ref->y, 20);
+}
+
+KTEST(ktl_result_void_basic, "ktl/result") {
+    auto ok = Result<void, int>::ok();
+    KTEST_EXPECT_ALL(ok.is_ok(), !ok.is_err(), static_cast<bool>(ok));
+    ok.expect("void ok must not panic");
+    ok.unwrap();
+    KTEST_EXPECT_FALSE(ok.err().has_value());
+
+    auto err = Result<void, int>::err(-4);
+    KTEST_EXPECT_ALL(err.is_err(), !err.is_ok(), !static_cast<bool>(err));
+    KTEST_EXPECT_EQUAL(err.unwrap_err(), -4);
+    KTEST_EXPECT_VALUE(err.err(), -4);
+
+    using VoidIntResult = Result<void, int>;
+    KTEST_EXPECT_ALL(ok == VoidIntResult::ok(), err == VoidIntResult::err(-4), ok != err);
+
+    auto copied = err;
+    KTEST_EXPECT_ALL(copied.is_err(), copied.unwrap_err() == -4);
+}
+
+KTEST(ktl_result_void_combinators, "ktl/result") {
+    auto ok      = Result<void, int>::ok();
+    auto err     = Result<void, int>::err(-2);
+
+    auto chained = ok.and_then([] { return Result<int, long>::ok(7); });
+    KTEST_EXPECT_ALL(chained.is_ok(), chained.unwrap() == 7);
+    auto short_circuited = err.and_then([] { return Result<int, long>::ok(7); });
+    KTEST_EXPECT_ALL(short_circuited.is_err(), short_circuited.unwrap_err() == -2L);
+
+    auto recovered = err.or_else([](int) { return Result<void, int>::ok(); });
+    KTEST_EXPECT_TRUE(recovered.is_ok());
+    auto kept = ok.or_else([](int) { return Result<void, int>::err(-9); });
+    KTEST_EXPECT_TRUE(kept.is_ok());
+
+    auto remapped = err.map_err([](int e) { return e * 10; });
+    KTEST_EXPECT_ALL(remapped.is_err(), remapped.unwrap_err() == -20);
+    auto ok_remapped = ok.map_err([](int e) { return e * 10; });
+    KTEST_EXPECT_TRUE(ok_remapped.is_ok());
+}
+
+KTEST(ktl_result_map_err_primary, "ktl/result") {
+    auto ok        = Result<int, int>::ok(5);
+    auto err       = Result<int, int>::err(-3);
+
+    auto ok_mapped = ok.map_err([](int e) { return e - 1; });
+    KTEST_EXPECT_ALL(ok_mapped.is_ok(), ok_mapped.unwrap() == 5);
+
+    auto err_mapped = err.map_err([](int e) { return e - 1; });
+    KTEST_EXPECT_ALL(err_mapped.is_err(), err_mapped.unwrap_err() == -4);
+}
+
+namespace {
+
+Result<int, int> ktry_source(bool succeed) {
+    if (succeed) { return Result<int, int>::ok(21); }
+    return ktl::err(-6);
+}
+
+Result<int, int> ktry_chain(bool succeed) {
+    int v = KTRY(ktry_source(succeed));
+    return Result<int, int>::ok(v * 2);
+}
+
+Result<void, int> ktry_void_source(bool succeed) {
+    if (succeed) { return Result<void, int>::ok(); }
+    return ktl::err(-7);
+}
+
+// Caller's error type (long) differs from the callee's (int): exercises carrier conversion.
+Result<int, long> ktry_converting(bool succeed) {
+    KTRY(ktry_void_source(succeed));
+    return Result<int, long>::ok(1);
+}
+
+}  // namespace
+
+KTEST(ktl_result_ktry, "ktl/result") {
+    auto good = ktry_chain(true);
+    KTEST_EXPECT_ALL(good.is_ok(), good.unwrap() == 42);
+
+    auto bad = ktry_chain(false);
+    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == -6);
+
+    auto void_good = ktry_converting(true);
+    KTEST_EXPECT_ALL(void_good.is_ok(), void_good.unwrap() == 1);
+
+    auto void_bad = ktry_converting(false);
+    KTEST_EXPECT_ALL(void_bad.is_err(), void_bad.unwrap_err() == -7L);
+}
+
+KTEST(ktl_result_errc_alias, "ktl/result") {
+    ktl::result<int> good = ktl::result<int>::ok(3);
+    KTEST_EXPECT_ALL(good.is_ok(), good.unwrap() == 3);
+
+    ktl::result<void> fail = ktl::err(ktl::errc::oom);
+    KTEST_EXPECT_ALL(fail.is_err(), fail.unwrap_err() == ktl::errc::oom);
+
+    // errc preserves the retired RESULT_* numeric space for log continuity.
+    KTEST_EXPECT_EQUAL(static_cast<int>(ktl::errc::oom), -4);
+    KTEST_EXPECT_EQUAL(static_cast<int>(ktl::errc::registry_full), -9);
 }
 
 #endif  // CONFIG_KERNEL_TESTING

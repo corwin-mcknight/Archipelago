@@ -7,15 +7,15 @@ HandleTable g_handle_table;
 
 HandleTable::~HandleTable() = default;
 
-Result<bool, result_t> HandleTable::grow() {
+ktl::result<void> HandleTable::grow() {
     size_t old_size = m_entries.size();
     for (size_t i = 0; i < GROW_BATCH; i++) {
         HandleEntry entry;
         entry.next_free = m_free_head;
-        if (!m_entries.push_back(ktl::move(entry))) { return Result<bool, result_t>::err(RESULT_OOM); }
+        if (!m_entries.push_back(ktl::move(entry))) { return ktl::err(ktl::errc::oom); }
         m_free_head = static_cast<int32_t>(old_size + i);
     }
-    return Result<bool, result_t>::ok(true);
+    return ktl::result<void>::ok();
 }
 
 HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
@@ -26,23 +26,18 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
     return &entry;
 }
 
-Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
-    if (!object) { return Result<HandleId, result_t>::err(RESULT_NULL_ARGUMENT); }
+ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
+    if (!object) { return ktl::err(ktl::errc::null_argument); }
 
     // F033: requested rights must stay within the contract registered for this object's type.
     // Out-of-contract bits are rejected outright rather than silently clamped.
     auto descriptor = g_type_registry.lookup(object->type_id());
-    if (!descriptor.has_value()) { return Result<HandleId, result_t>::err(RESULT_WRONG_TYPE); }
-    if ((rights & ~descriptor.value().valid_rights) != 0) {
-        return Result<HandleId, result_t>::err(RESULT_RIGHTS_VIOLATION);
-    }
+    if (!descriptor.has_value()) { return ktl::err(ktl::errc::wrong_type); }
+    if ((rights & ~descriptor.value().valid_rights) != 0) { return ktl::err(ktl::errc::rights_violation); }
 
     kernel::synchronization::lock_guard guard(m_lock);
 
-    if (m_free_head == -1) {
-        auto grow_result = grow();
-        if (grow_result.is_err()) { return Result<HandleId, result_t>::err(grow_result.unwrap_err()); }
-    }
+    if (m_free_head == -1) { KTRY(grow()); }
 
     int32_t slot    = m_free_head;
     auto& entry     = m_entries[static_cast<size_t>(slot)];
@@ -54,17 +49,17 @@ Result<HandleId, result_t> HandleTable::create_handle(ktl::ref<Object> object, R
     m_count++;
 
     HandleId id{static_cast<uint32_t>(slot), entry.generation};
-    return Result<HandleId, result_t>::ok(id);
+    return ktl::result<HandleId>::ok(id);
 }
 
-Result<HandleId, result_t> HandleTable::duplicate(HandleId source, Rights rights_mask) {
+ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask) {
     ktl::ref<Object> obj_copy;
     Rights new_rights;
 
     {
         kernel::synchronization::lock_guard guard(m_lock);
         HandleEntry* src = lookup_entry(source);
-        if (!src) { return Result<HandleId, result_t>::err(RESULT_HANDLE_INVALID); }
+        if (!src) { return ktl::err(ktl::errc::handle_invalid); }
         new_rights = src->rights & rights_mask;
         obj_copy   = src->object;
     }
@@ -72,11 +67,11 @@ Result<HandleId, result_t> HandleTable::duplicate(HandleId source, Rights rights
     return create_handle(ktl::move(obj_copy), new_rights);
 }
 
-Result<bool, result_t> HandleTable::close(HandleId id) {
+ktl::result<void> HandleTable::close(HandleId id) {
     kernel::synchronization::lock_guard guard(m_lock);
 
     HandleEntry* entry = lookup_entry(id);
-    if (!entry) { return Result<bool, result_t>::err(RESULT_HANDLE_INVALID); }
+    if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
 
     entry->object.reset();
     entry->rights = 0;
@@ -87,14 +82,14 @@ Result<bool, result_t> HandleTable::close(HandleId id) {
     // instead of returning it to the free list.
     if (entry->generation == UINT32_MAX) {
         entry->next_free = -1;
-        return Result<bool, result_t>::ok(true);
+        return ktl::result<void>::ok();
     }
 
     entry->generation++;
     entry->next_free = m_free_head;
     m_free_head      = static_cast<int32_t>(id.index);
 
-    return Result<bool, result_t>::ok(true);
+    return ktl::result<void>::ok();
 }
 
 ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {

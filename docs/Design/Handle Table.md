@@ -25,10 +25,10 @@ Entry internals are never exposed to callers; all access goes through typed acce
 
 ## Lookup
 Lookup takes a handle ID and validates it in a fixed sequence: bounds check, generation check, and liveness check (object reference non-null).
-Invalid or stale handles return `RESULT_HANDLE_INVALID`.
+Invalid or stale handles return `errc::handle_invalid`.
 
 The primary accessor is `get<T>(id, required_rights)`, which performs type validation (comparing the object's stored type ID against the expected type) and rights checking in a single locked operation.
-It returns a borrowed pointer to the concrete object type, or a typed error (`RESULT_WRONG_TYPE`, `RESULT_RIGHTS_VIOLATION`).
+It returns a borrowed pointer to the concrete object type, or a typed error (`errc::wrong_type`, `errc::rights_violation`).
 A separate `info(id)` accessor returns a value-copy snapshot of handle metadata (rights, type ID, object ID) that is safe to hold across table mutations.
 
 ## Handle Operations
@@ -77,8 +77,8 @@ Closing an already-closed handle returns `ERR_BAD_HANDLE` through the generation
 When the kernel processes an operation, it often needs to verify that a handle refers to a specific kind of object -- a channel operation should not succeed against a VMO handle.
 
 The `get<T>(id, required_rights)` accessor performs this check by calling the object's `type_id()` method and comparing it against the expected type's compile-time `TYPE_ID`.
-Mismatches are rejected with `RESULT_WRONG_TYPE` before the operation reaches the object.
-Rights are validated in the same operation -- `RESULT_RIGHTS_VIOLATION` is returned if the handle lacks the required rights.
+Mismatches are rejected with `errc::wrong_type` before the operation reaches the object.
+Rights are validated in the same operation -- `errc::rights_violation` is returned if the handle lacks the required rights.
 
 On success, `get<T>()` returns a raw pointer to the concrete object type via `static_cast`.
 The pointer is borrowed -- the handle table owns the object's lifetime through its `ktl::ref<Object>`, so the pointer remains valid as long as the handle is open.

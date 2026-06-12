@@ -13,8 +13,7 @@ namespace kernel::obj {
 
 class TypeRegistry {
    public:
-    Result<TypeId, result_t> register_type(TypeId id, ktl::string_view name, Rights valid_rights,
-                                           Rights default_rights);
+    ktl::result<void> register_type(TypeId id, ktl::string_view name, Rights valid_rights, Rights default_rights);
     ktl::maybe<const TypeDescriptor&> lookup(TypeId id) const;
     ktl::maybe<const TypeDescriptor&> lookup_by_name(ktl::string_view name) const;
     size_t count() const;

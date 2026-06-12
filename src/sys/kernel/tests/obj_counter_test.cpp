@@ -41,7 +41,7 @@ KTEST_WITH_INIT(obj_counter_rights_enforcement, "obj/counter", obj_counter_init)
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<Counter>(RIGHT_READ, static_cast<uint64_t>(0)));
     auto got = table.get<Counter>(id, RIGHT_WRITE);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == RESULT_RIGHTS_VIOLATION);
+    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::rights_violation);
 }
 
 KTEST_WITH_INIT(obj_counter_and_event_coexist, "obj/counter", obj_counter_init) {

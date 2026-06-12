@@ -6,8 +6,8 @@
 namespace kernel::obj {
 
 void obj_init() {
-    Event::register_type(g_type_registry);
-    Counter::register_type(g_type_registry);
+    Event::register_type(g_type_registry).expect("obj_init: Event type registration failed");
+    Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
 }
 
 namespace { ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace

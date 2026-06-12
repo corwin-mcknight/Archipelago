@@ -9,22 +9,6 @@
 
 #include "kernel/panic.h"
 
-/// result_t is a type meant to be a return type. If less then zero, it dictates an error.
-/// If greater or equal to zero, it dictates a user specified quantity.
-typedef intptr_t result_t;
-
-#define result_error(x) (x < 0)
-
-#define RESULT_OK 0
-#define RESULT_UNKNOWN_ERROR -1
-#define RESULT_NULL_ARGUMENT -2
-#define RESULT_INVALID_OPERATION -3
-#define RESULT_OOM -4
-#define RESULT_WRONG_TYPE -5
-#define RESULT_HANDLE_INVALID -6
-#define RESULT_ALREADY_REGISTERED -7
-#define RESULT_RIGHTS_VIOLATION -8
-#define RESULT_REGISTRY_FULL -9
 
 enum class ResultType { Ok, Err };
 
@@ -100,10 +84,8 @@ template <typename T, typename E> struct Result {
     ktl::maybe<T> ok() const { return is_ok() ? ktl::maybe<T>(value.ok) : ktl::nothing; }
     ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
 
-    // Construction
+    // Construction -- use the static ok()/err() factories; no value constructors to avoid ambiguity when T == E.
     Result() : type(ResultType::Err) { new (&value.err) E(); }
-    explicit Result(T val) : type(ResultType::Ok) { new (&value.ok) T(ktl::move(val)); }
-    explicit Result(E val) : type(ResultType::Err) { new (&value.err) E(ktl::move(val)); }
 
     static Result<T, E> ok(T val) {
         Result<T, E> res;
@@ -147,9 +129,144 @@ template <typename T, typename E> struct Result {
         if (is_ok()) { return ok(value.ok); }
         return func(value.err);
     }
+
+    template <typename F> auto map_err(F&& func) const -> Result<T, decltype(func(value.err))> {
+        using R = Result<T, decltype(func(value.err))>;
+        if (is_ok()) { return R::ok(value.ok); }
+        return R::err(func(value.err));
+    }
+};
+
+/// Unit-value Result: a fallible operation with no success payload. The ok arm carries nothing;
+/// only the error is stored. Mirrors the primary template's API where extraction makes sense.
+template <typename E> struct Result<void, E> {
+   private:
+    union Storage {
+        E err;
+        Storage() {}
+        ~Storage() {}
+    } value;
+    ResultType type;
+
+    void destroy() {
+        if (type == ResultType::Err) { value.err.~E(); }
+    }
+
+    template <typename Src> void construct_from(Src&& other) {
+        type = other.type;
+        if (type == ResultType::Err) { new (&value.err) E(ktl::forward<Src>(other).value.err); }
+    }
+
+   public:
+    ~Result() { destroy(); }
+
+    Result(const Result& other) { construct_from(other); }
+    Result(Result&& other) noexcept { construct_from(ktl::move(other)); }
+
+    Result& operator=(const Result& other) {
+        if (this != &other) {
+            destroy();
+            construct_from(other);
+        }
+        return *this;
+    }
+
+    Result& operator=(Result&& other) noexcept {
+        if (this != &other) {
+            destroy();
+            construct_from(ktl::move(other));
+        }
+        return *this;
+    }
+
+    // Boolean
+    bool is_ok() const { return type == ResultType::Ok; }
+    bool is_err() const { return type == ResultType::Err; }
+    explicit operator bool() const { return is_ok(); }
+
+    // Extraction
+    void expect(const char* error_message) const {
+        if (is_err()) { panic(error_message); }
+    }
+
+    void unwrap() const {
+        if (is_err()) { panic("Result unwrap failed"); }
+    }
+
+    E unwrap_err() const {
+        if (!is_err()) { panic("Result unwrap_err failed"); }
+        return value.err;
+    }
+
+    // Transformation
+    ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
+
+    // Construction (default is err, matching the primary template)
+    Result() : type(ResultType::Err) { new (&value.err) E(); }
+
+    static Result ok() {
+        Result res;
+        res.destroy();
+        res.type = ResultType::Ok;
+        return res;
+    }
+
+    static Result err(E val) {
+        Result res;
+        res.destroy();
+        res.type = ResultType::Err;
+        new (&res.value.err) E(ktl::move(val));
+        return res;
+    }
+
+    // Operators
+    bool operator==(const Result& other) const {
+        if (type != other.type) { return false; }
+        if (type == ResultType::Ok) { return true; }
+        return value.err == other.value.err;
+    }
+
+    bool operator!=(const Result& other) const { return !(*this == other); }
+
+    // F takes no arguments and returns a Result with the same E; chains a void step into a pipeline.
+    template <typename F> auto and_then(F&& func) const -> decltype(func()) {
+        if (is_err()) { return decltype(func())::err(value.err); }
+        return func();
+    }
+
+    template <typename F> auto or_else(F&& func) const -> decltype(func(value.err)) {
+        if (is_ok()) { return Result::ok(); }
+        return func(value.err);
+    }
+
+    template <typename F> auto map_err(F&& func) const -> Result<void, decltype(func(value.err))> {
+        using R = Result<void, decltype(func(value.err))>;
+        if (is_ok()) { return R::ok(); }
+        return R::err(func(value.err));
+    }
 };
 
 namespace ktl {
+
+/// Unified kernel error codes. The first nine values preserve the numeric space of the retired
+/// RESULT_* macros so logged codes stay comparable across the migration.
+enum class errc : intptr_t {
+    unknown            = -1,
+    null_argument      = -2,
+    invalid_operation  = -3,
+    oom                = -4,
+    wrong_type         = -5,
+    handle_invalid     = -6,
+    already_registered = -7,
+    rights_violation   = -8,
+    registry_full      = -9,
+    capacity_exhausted = -10,
+    out_of_range       = -11,
+    truncated          = -12,
+};
+
+using ::Result;
+template <typename T, typename E = errc> using result = ::Result<T, E>;
 
 /// Bridges maybe into Result: an engaged maybe becomes ok, an empty one becomes the given error.
 /// Lives here rather than on maybe itself because this header already includes <ktl/maybe>.
@@ -158,4 +275,25 @@ template <typename T, typename E> Result<T, E> ok_or(const maybe<T>& m, E error)
     return Result<T, E>::err(ktl::move(error));
 }
 
+/// Error carrier: converts implicitly into any Result whose error type is constructible from E.
+/// Lets `return ktl::err(code);` and KTRY work without spelling the enclosing Result type.
+template <typename E> struct err_carrier {
+    E error;
+    template <typename T2, typename E2> operator Result<T2, E2>() const { return Result<T2, E2>::err(E2(error)); }
+};
+
+template <typename E> err_carrier<E> err(E error) { return err_carrier<E>{ktl::move(error)}; }
+
 }  // namespace ktl
+
+/// Early-return error propagation. Evaluates expr (a Result) once; on err, returns ktl::err(...)
+/// from the enclosing function, which must itself return a Result whose error type is constructible
+/// from expr's. On ok, the statement expression yields the unwrapped value (void for Result<void,E>),
+/// so `auto v = KTRY(f());` and bare `KTRY(g());` both work.
+/// Pass prvalues (`KTRY(f())`); applying KTRY to a named Result moves its ok payload out.
+#define KTRY(expr)                                                               \
+    ({                                                                           \
+        auto&& ktry_tmp_ = (expr);                                               \
+        if (ktry_tmp_.is_err()) { return ktl::err(ktry_tmp_.unwrap_err()); }     \
+        ktry_tmp_.unwrap();                                                      \
+    })
