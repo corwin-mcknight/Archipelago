@@ -30,17 +30,16 @@ void kernel::cpu_init_cores() {
 }
 
 void kernel::cpu_start_cores() {
-    // g_cpu_cores has only CONFIG_MAX_CORES slots; never start (and thus index) beyond that even if
-    // firmware reports more CPUs than this build supports.
-    size_t core_count = mp_request.response->cpu_count;
+    auto* response = mp_request.response;
+    size_t core_count = response->cpu_count;
     if (core_count > CONFIG_MAX_CORES) {
         g_log.warn("Firmware reported {0} CPUs but build supports only {1}; ignoring the rest", core_count,
                    (size_t)CONFIG_MAX_CORES);
         core_count = CONFIG_MAX_CORES;
     }
     for (size_t i = 0; i < core_count; i++) {
-        const struct limine_mp_info* cpu = mp_request.response->cpus[i];
-        if (cpu->lapic_id != mp_request.response->bsp_lapic_id) {
+        const struct limine_mp_info* cpu = response->cpus[i];
+        if (cpu->lapic_id != response->bsp_lapic_id) {
             g_log.info("Starting cpu{0} (lapic {1})", i, cpu->lapic_id);
             // Publish this AP's dense logical index (its CPU-list position) before releasing it. The
             // SEQ_CST store of goto_address below acts as the release that makes extra_argument visible.

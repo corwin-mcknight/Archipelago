@@ -2,6 +2,7 @@
 
 #include <std/string.h>
 
+#include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/mm/page.h"
 
@@ -9,34 +10,40 @@ extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
+namespace {
+constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE;
+
+// Logs a labeled page count, auto-scaling to KiB or MiB. The label carries its
+// own trailing padding so the columns line up.
+void log_size(const char* label, size_t pages) {
+    const size_t kb = pages * PAGE_SIZE / 1024;
+    const bool mb   = kb >= 1024;
+    g_log.info("  {0}{1} {3} ({2} pages)", label, mb ? (kb / 1024) : kb, pages, mb ? "MiB" : "KiB");
+}
+}  // namespace
+
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
-    auto addr = m_zeroed.pop();
-    if (!addr.has_value()) {
-        // Fallback: zero one page inline. The background zeroing worker is
-        // expected to keep the zeroed pool topped up; we land here only when
-        // the worker has not run yet (early boot) or is behind demand.
-        auto raw = pop_free_page();
-        if (!raw.has_value()) { return ktl::nothing; }
-        zero_page(raw.value());
-        addr = raw;
-    }
-    --m_free_pages;
-    return addr;
+    // Fetch a zerored page, or make one if we don't have one available.
+    return m_zeroed.pop()
+        .or_else([this] {
+            return pop_free_page().map([this](vm_paddr_t p) {
+                zero_page(p);
+                return p;
+            });
+        })
+        .inspect([this](vm_paddr_t) { --m_free_pages; });
 }
 
 void page_frame_allocator::free(vm_paddr_t addr) {
-    if (!m_dirty.push(addr)) {
+    if (m_dirty.push(addr)) {
+        ++m_free_pages;
+    } else {
         g_log.error("pmm: Failed to free page at 0x{0:p}", addr);
-        return;
     }
-    ++m_free_pages;
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page() {
-    if (!m_dirty.empty()) {
-        auto addr = m_dirty.pop();
-        if (addr.has_value()) { return addr; }
-    }
+    if (auto addr = m_dirty.pop()) { return addr; }
 
     while (!m_regions.empty()) {
         auto& region = m_regions[m_regions.size() - 1];
@@ -44,45 +51,21 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page() {
             m_regions.pop_back();
             continue;
         }
-        --region.count;
-        vm_paddr_t addr = region.start + region.count * 0x1000;
-        return addr;
+        return region.start + (--region.count) * PAGE_SIZE;
     }
-
     return ktl::nothing;
 }
 
 void page_frame_allocator::zero_page(vm_paddr_t addr) {
-    memset(reinterpret_cast<void*>(addr + g_hhdm_offset), 0, 0x1000);
+    memset(reinterpret_cast<void*>(addr + g_hhdm_offset), 0, PAGE_SIZE);
 }
 
 void page_frame_allocator::debug_print_state() {
-    size_t total_kb    = (m_total_pages * 0x1000) / 1024;
-    size_t free_kb     = (m_free_pages * 0x1000) / 1024;
-    size_t reserved_kb = (m_reserved_pages * 0x1000) / 1024;
-    size_t used_kb     = total_kb - free_kb;
-
     g_log.info("Page Frame Allocator State:");
-    if (total_kb >= 1024) {
-        g_log.info("  Total:    {0} MiB ({1} pages)", total_kb / 1024, m_total_pages);
-    } else {
-        g_log.info("  Total:    {0} KiB ({1} pages)", total_kb, m_total_pages);
-    }
-    if (free_kb >= 1024) {
-        g_log.info("  Free:     {0} MiB ({1} pages)", free_kb / 1024, m_free_pages);
-    } else {
-        g_log.info("  Free:     {0} KiB ({1} pages)", free_kb, m_free_pages);
-    }
-    if (used_kb >= 1024) {
-        g_log.info("  Used:     {0} MiB ({1} pages)", used_kb / 1024, m_total_pages - m_free_pages);
-    } else {
-        g_log.info("  Used:     {0} KiB ({1} pages)", used_kb, m_total_pages - m_free_pages);
-    }
-    if (reserved_kb >= 1024) {
-        g_log.info("  Reserved: {0} MiB ({1} pages)", reserved_kb / 1024, m_reserved_pages);
-    } else {
-        g_log.info("  Reserved: {0} KiB ({1} pages)", reserved_kb, m_reserved_pages);
-    }
+    log_size("Total:    ", m_total_pages);
+    log_size("Free:     ", m_free_pages);
+    log_size("Used:     ", m_total_pages - m_free_pages);
+    log_size("Reserved: ", m_reserved_pages);
     g_log.info("  Zeroed:   {0} pages", m_zeroed.size());
     g_log.info("  Dirty:    {0} pages", m_dirty.size());
     g_log.info("  Regions:  {0}", m_regions.size());
