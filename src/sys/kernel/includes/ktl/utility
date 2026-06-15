@@ -15,4 +15,50 @@ template <class T> constexpr T&& forward(typename remove_reference<T>::type&& t)
     return static_cast<T&&>(t);
 }
 
+// ktl::pair -- holds two heterogeneous values.
+template <typename T1, typename T2> struct pair {
+    using first_type  = T1;
+    using second_type = T2;
+
+    T1 first;
+    T2 second;
+
+    constexpr pair() : first(), second() {}
+    constexpr pair(const T1& a, const T2& b) : first(a), second(b) {}
+    template <typename U1, typename U2>
+    constexpr pair(U1&& a, U2&& b) : first(forward<U1>(a)), second(forward<U2>(b)) {}
+
+    constexpr pair(const pair&) = default;
+    constexpr pair(pair&&)      = default;
+    template <typename U1, typename U2>
+    constexpr pair(const pair<U1, U2>& other) : first(other.first), second(other.second) {}
+    template <typename U1, typename U2>
+    constexpr pair(pair<U1, U2>&& other) : first(move(other.first)), second(move(other.second)) {}
+
+    constexpr pair& operator=(const pair&) = default;
+    constexpr pair& operator=(pair&&)      = default;
+
+    constexpr void swap(pair& other) {
+        T1 t1   = move(first);
+        first   = move(other.first);
+        other.first = move(t1);
+        T2 t2   = move(second);
+        second  = move(other.second);
+        other.second = move(t2);
+    }
+};
+
+template <typename T1, typename T2>
+constexpr bool operator==(const pair<T1, T2>& a, const pair<T1, T2>& b) {
+    return a.first == b.first && a.second == b.second;
+}
+template <typename T1, typename T2>
+constexpr bool operator!=(const pair<T1, T2>& a, const pair<T1, T2>& b) {
+    return !(a == b);
+}
+
+template <typename T1, typename T2> constexpr pair<decay_t<T1>, decay_t<T2>> make_pair(T1&& a, T2&& b) {
+    return pair<decay_t<T1>, decay_t<T2>>(forward<T1>(a), forward<T2>(b));
+}
+
 }  // namespace ktl

@@ -1,0 +1,127 @@
+#pragma once
+
+#include <stddef.h>
+
+#include <ktl/type_traits>
+#include <ktl/utility>
+
+namespace ktl {
+
+// ktl::tuple -- fixed-size heterogeneous value sequence, stored as a recursive head/tail list.
+template <typename... Ts> struct tuple;
+
+template <> struct tuple<> {
+    constexpr tuple()                        = default;
+    constexpr tuple(const tuple&)            = default;
+    constexpr tuple(tuple&&)                 = default;
+    constexpr tuple& operator=(const tuple&) = default;
+    constexpr tuple& operator=(tuple&&)      = default;
+};
+
+template <typename Head, typename... Tail> struct tuple<Head, Tail...> {
+    Head head;
+    tuple<Tail...> tail;
+
+    constexpr tuple() : head(), tail() {}
+
+    // Element-wise construction. Disabled when a single argument is itself a tuple so that copy/move
+    // construction is not hijacked by this template.
+    template <typename UHead, typename... UTail,
+              typename = enable_if_t<sizeof...(UTail) == sizeof...(Tail) && !is_same_v<decay_t<UHead>, tuple>>>
+    constexpr explicit tuple(UHead&& h, UTail&&... t) : head(forward<UHead>(h)), tail(forward<UTail>(t)...) {}
+
+    constexpr tuple(const tuple&)            = default;
+    constexpr tuple(tuple&&)                 = default;
+    constexpr tuple& operator=(const tuple&) = default;
+    constexpr tuple& operator=(tuple&&)      = default;
+
+    // Element-wise converting assignment -- lets tie() targets accept a differently-typed tuple
+    // (e.g. tuple<int&, char&> = tuple<int, char>).
+    template <typename... Us> constexpr tuple& operator=(const tuple<Us...>& other) {
+        head = other.head;
+        tail = other.tail;
+        return *this;
+    }
+    template <typename... Us> constexpr tuple& operator=(tuple<Us...>&& other) {
+        head = move(other.head);
+        tail = move(other.tail);
+        return *this;
+    }
+};
+
+// tuple_size
+template <typename T> struct tuple_size;
+template <typename... Ts> struct tuple_size<tuple<Ts...>> : integral_constant<size_t, sizeof...(Ts)> {};
+template <typename T> constexpr size_t tuple_size_v = tuple_size<T>::value;
+
+// tuple_element
+template <size_t I, typename T> struct tuple_element;
+template <typename Head, typename... Tail> struct tuple_element<0, tuple<Head, Tail...>> {
+    using type = Head;
+};
+template <size_t I, typename Head, typename... Tail>
+struct tuple_element<I, tuple<Head, Tail...>> : tuple_element<I - 1, tuple<Tail...>> {};
+template <size_t I, typename T> using tuple_element_t = typename tuple_element<I, T>::type;
+
+namespace detail {
+template <size_t I> struct tuple_accessor {
+    template <typename Tuple> static constexpr auto& get(Tuple& t) { return tuple_accessor<I - 1>::get(t.tail); }
+};
+template <> struct tuple_accessor<0> {
+    template <typename Tuple> static constexpr auto& get(Tuple& t) { return t.head; }
+};
+}  // namespace detail
+
+template <size_t I, typename... Ts> constexpr tuple_element_t<I, tuple<Ts...>>& get(tuple<Ts...>& t) {
+    return detail::tuple_accessor<I>::get(t);
+}
+template <size_t I, typename... Ts> constexpr const tuple_element_t<I, tuple<Ts...>>& get(const tuple<Ts...>& t) {
+    return detail::tuple_accessor<I>::get(t);
+}
+template <size_t I, typename... Ts> constexpr tuple_element_t<I, tuple<Ts...>>&& get(tuple<Ts...>&& t) {
+    return move(detail::tuple_accessor<I>::get(t));
+}
+
+// make_tuple -- decays arguments (an lvalue T& becomes a stored T).
+template <typename... Ts> constexpr tuple<decay_t<Ts>...> make_tuple(Ts&&... args) {
+    return tuple<decay_t<Ts>...>(forward<Ts>(args)...);
+}
+
+// tie -- builds a tuple of lvalue references, for unpacking into existing variables.
+template <typename... Ts> constexpr tuple<Ts&...> tie(Ts&... args) { return tuple<Ts&...>(args...); }
+
+// Equality: recurse head-then-tail; the empty tuple terminates the recursion.
+constexpr bool operator==(const tuple<>&, const tuple<>&) { return true; }
+template <typename AHead, typename... ATail, typename BHead, typename... BTail>
+constexpr bool operator==(const tuple<AHead, ATail...>& a, const tuple<BHead, BTail...>& b) {
+    return a.head == b.head && a.tail == b.tail;
+}
+template <typename... As, typename... Bs>
+constexpr bool operator!=(const tuple<As...>& a, const tuple<Bs...>& b) {
+    return !(a == b);
+}
+
+}  // namespace ktl
+
+// Structured-binding support. The compiler resolves `auto [a, b] = t;` by looking up
+// std::tuple_size / std::tuple_element (the get<I>() half is found via ADL on ktl::get). We are
+// freestanding with no real <tuple>, so we declare just enough of these std templates ourselves.
+namespace std {
+
+template <typename T> struct tuple_size;
+template <size_t I, typename T> struct tuple_element;
+
+template <typename... Ts> struct tuple_size<ktl::tuple<Ts...>> {
+    static constexpr size_t value = sizeof...(Ts);
+};
+template <size_t I, typename... Ts> struct tuple_element<I, ktl::tuple<Ts...>> {
+    using type = ktl::tuple_element_t<I, ktl::tuple<Ts...>>;
+};
+
+// cv-qualified forwarders, so `const auto& [a, b] = t;` works too.
+template <typename T> struct tuple_size<const T> : tuple_size<T> {};
+template <size_t I, typename T> struct tuple_element<I, const T> {
+    using type = const typename tuple_element<I, T>::type;
+};
+
+}  // namespace std
