@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <ktl/maybe>
+#include <ktl/span>
 
 namespace kernel::symbols {
 
@@ -32,6 +33,6 @@ ktl::maybe<symbol> lookup(uintptr_t addr);
 // `(anonymous namespace)`. Appends `()` to indicate a function. Anything more
 // exotic (templates, substitutions, operators, ctors/dtors) is rejected with
 // false so callers can fall back to the mangled string.
-bool demangle(const char* mangled, char* out, size_t out_size);
+bool demangle(const char* mangled, ktl::span<char> out);
 
 }  // namespace kernel::symbols

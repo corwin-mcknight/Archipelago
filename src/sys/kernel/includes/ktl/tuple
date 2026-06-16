@@ -82,6 +82,21 @@ template <size_t I, typename... Ts> constexpr tuple_element_t<I, tuple<Ts...>>&&
     return move(detail::tuple_accessor<I>::get(t));
 }
 
+// get<Type> -- recover the index of the first matching element type, then delegate to get<I>.
+template <typename U, typename Tup> struct tuple_type_index;
+template <typename U, typename... Tail>
+struct tuple_type_index<U, tuple<U, Tail...>> : integral_constant<size_t, 0> {};
+template <typename U, typename Head, typename... Tail>
+struct tuple_type_index<U, tuple<Head, Tail...>>
+    : integral_constant<size_t, 1 + tuple_type_index<U, tuple<Tail...>>::value> {};
+
+template <typename U, typename... Ts> constexpr auto& get(tuple<Ts...>& t) {
+    return get<tuple_type_index<U, tuple<Ts...>>::value>(t);
+}
+template <typename U, typename... Ts> constexpr const auto& get(const tuple<Ts...>& t) {
+    return get<tuple_type_index<U, tuple<Ts...>>::value>(t);
+}
+
 // make_tuple -- decays arguments (an lvalue T& becomes a stored T).
 template <typename... Ts> constexpr tuple<decay_t<Ts>...> make_tuple(Ts&&... args) {
     return tuple<decay_t<Ts>...>(forward<Ts>(args)...);

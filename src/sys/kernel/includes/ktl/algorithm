@@ -46,6 +46,8 @@ template <typename It, typename V> auto find(It first, It last, const V& value) 
     return find_if(first, last, [&](const auto& element) { return element == value; });
 }
 
+
+
 /// Returns the position of the first element satisfying the predicate, or nothing.
 /// The index type is size_t, but spelled dependently (decltype(sizeof(*first))) so this definition
 /// only instantiates the forward-declared maybe at call sites, where it is complete.

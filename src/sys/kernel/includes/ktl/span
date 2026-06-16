@@ -1,0 +1,94 @@
+#pragma once
+
+#include <stddef.h>
+
+#include <ktl/type_traits>
+#include <ktl/algorithm>
+
+namespace ktl {
+
+template <typename T>
+class span {
+public:
+    static constexpr size_t npos = size_t(-1);
+
+    using value_type    = remove_cv_t<T>;
+    using pointer       = T*;
+    using const_pointer = const T*;
+    using reference     = T&;
+    using const_reference = const T&;
+    using size_type     = size_t;
+    using iterator      = pointer;
+    using const_iterator = const_pointer;
+
+    // default — owns nothing
+    constexpr span() noexcept : m_data(nullptr), m_size(0) {}
+
+    // pointer + count
+    constexpr span(pointer ptr, size_type count) noexcept : m_data(ptr), m_size(count) {}
+
+    // C-array — deduce length from the array type
+    template <size_t N>
+    constexpr span(T (&arr)[N]) noexcept : m_data(arr), m_size(N) {}
+
+    // Container — detected via void_t of .data() and .size()
+    template <typename C,
+              typename = void_t<decltype(declval<C&>().data()),
+                                decltype(declval<C&>().size())>>
+    constexpr span(C& c)
+        : m_data(c.data()), m_size(c.size()) {}
+
+    // Copy / move — trivial
+    constexpr span(const span&)            = default;
+    constexpr span(span&&)                 = default;
+    constexpr span& operator=(const span&) = default;
+    constexpr span& operator=(span&&)      = default;
+
+    // Observers
+    constexpr pointer data() const noexcept { return m_data; }
+    constexpr size_type size() const noexcept { return m_size; }
+    constexpr bool empty() const noexcept { return m_size == 0; }
+
+    // Iterators
+    constexpr iterator begin() const noexcept { return m_data; }
+    constexpr iterator end() const noexcept { return m_data + m_size; }
+
+    // Element access
+    constexpr T& operator[](size_type i) { return m_data[i]; }
+    constexpr const T& operator[](size_type i) const { return m_data[i]; }
+    constexpr T& front() { return *m_data; }
+    constexpr const T& front() const { return *m_data; }
+    constexpr T& back() { return m_data[m_size - 1]; }
+    constexpr const T& back() const { return m_data[m_size - 1]; }
+
+    // Slicing — forgiving: clamp to actual size (matching static_array style)
+    constexpr span first(size_type count) const noexcept {
+        count = ktl::min(count, m_size);
+        return span{m_data, count};
+    }
+
+    constexpr span last(size_type count) const noexcept {
+        if (count >= m_size) { return *this; }
+        return span{m_data + (m_size - count), count};
+    }
+
+    constexpr span subspan(size_type offset, size_type count = npos) const noexcept {
+        if (offset >= m_size) { return span{}; }
+        if (count == npos) { count = m_size - offset; }
+        else { count = ktl::min(count, m_size - offset); }
+        return span{m_data + offset, count};
+    }
+
+private:
+    T* m_data;
+    size_t m_size;
+};
+
+// Deduction guides for CTAD
+template <typename C>
+span(C& c) -> span<typename C::value_type>;
+
+template <typename T, size_t N>
+span(T (&)[N]) -> span<T>;
+
+}  // namespace ktl

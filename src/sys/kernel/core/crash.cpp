@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 #include <ktl/fmt>
+#include <ktl/ranges>
+#include <ktl/span>
 
 #include "kernel/drivers/uart.h"
 #include "kernel/json_escape.h"
@@ -127,32 +129,32 @@ void emit_registers_prose(register_frame_t* regs, const uint64_t cr[4]) {
 
 const char* display_name(const char* mangled, char* scratch, size_t scratch_size) {
     if (mangled == nullptr) { return nullptr; }
-    if (kernel::symbols::demangle(mangled, scratch, scratch_size)) { return scratch; }
+    if (kernel::symbols::demangle(mangled, ktl::span(scratch, scratch_size))) { return scratch; }
     return mangled;
 }
 
 void emit_backtrace(const arch::fp_walk_result& bt, bool harness) {
     char name_buf[256];
     if (harness) {
-        for (size_t i = 0; i < bt.depth; i++) {
-            auto sym = kernel::symbols::lookup(bt.frames[i]);
+        for (auto [i, frame] : ktl::views::enumerate(ktl::span(bt.frames, bt.depth))) {
+            auto sym = kernel::symbols::lookup(frame);
             if (sym) {
                 const char* pretty = display_name(sym->name, name_buf, sizeof(name_buf));
                 crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\",\"sym\":\"{2}\",\"off\":{3}}}\n", i,
-                           bt.frames[i], pretty, sym->offset);
+                           frame, pretty, sym->offset);
             } else {
-                crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\"}}\n", i, bt.frames[i]);
+                crash_emit("@@CRASH_FRAME {{\"i\":{0},\"addr\":\"0x{1:016p}\"}}\n", i, frame);
             }
         }
     } else {
         crash_emit("Backtrace ({0} frames, frame-pointer walk):\n", bt.depth);
-        for (size_t i = 0; i < bt.depth; i++) {
-            auto sym = kernel::symbols::lookup(bt.frames[i]);
+        for (auto [i, frame] : ktl::views::enumerate(ktl::span(bt.frames, bt.depth))) {
+            auto sym = kernel::symbols::lookup(frame);
             if (sym) {
                 const char* pretty = display_name(sym->name, name_buf, sizeof(name_buf));
-                crash_emit("  [{0}] 0x{1:016p}  {2} +0x{3:x}\n", i, bt.frames[i], pretty, sym->offset);
+                crash_emit("  [{0}] 0x{1:016p}  {2} +0x{3:x}\n", i, frame, pretty, sym->offset);
             } else {
-                crash_emit("  [{0}] 0x{1:016p}\n", i, bt.frames[i]);
+                crash_emit("  [{0}] 0x{1:016p}\n", i, frame);
             }
         }
         if (bt.depth == 0) { crash_write("  (no frames -- rbp invalid or no frame pointer chain)\n"); }
@@ -252,7 +254,7 @@ void crash_write(const char* s) {
 }
 
 void crash_write_n(const char* s, size_t n) {
-    for (size_t i = 0; i < n; i++) { uart.write_byte(s[i]); }
+    for (char c : ktl::span(s, n)) { uart.write_byte(c); }
 }
 
 [[noreturn]] void dispatch(trigger_kind kind, register_frame_t* regs, const char* message, const char* file, int line) {

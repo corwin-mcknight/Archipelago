@@ -1,0 +1,269 @@
+#pragma once
+
+#include <stddef.h>
+
+#include <ktl/type_traits>
+#include <ktl/utility>
+
+namespace ktl {
+
+// ---- adaptor closure base ----
+// `range | closure` evaluates to `closure(range)`. The friend is found via ADL on the closure type
+// (the right operand). Chains are left-associative, so the left operand is always a concrete range,
+// and closure-vs-closure composition never arises.
+template <typename Derived> struct range_adaptor_closure {
+    template <typename R> friend constexpr auto operator|(R&& r, const Derived& closure) {
+        return closure(static_cast<R&&>(r));
+    }
+};
+
+// ---- for_each: zero-overhead internal iteration ----
+// External `begin()/end()` iteration of a filter/transform chain leaves the lazy adaptors' skip/advance
+// logic duplicated across `begin()` and `operator++`, which the optimizer will not always merge (notably
+// at the kernel's `-Og`). `for_each` pushes the body *down* through the chain instead: each adaptor that
+// does not short-circuit forwards an augmented body to its source range's `for_each`, bottoming out in a
+// single plain range-for over the concrete range. The whole chain then collapses to one flat loop -- the
+// same code a hand-written `for (... ) { if (pred) ... }` would produce. Prefer this on hot paths; the
+// `for (x : range | adaptor)` form stays available for cold/readable code.
+namespace detail {
+template <typename R, typename Fn, typename = void> struct has_member_for_each : false_type {};
+template <typename R, typename Fn>
+struct has_member_for_each<R, Fn, void_t<decltype(declval<R&>().for_each(declval<Fn&>()))>> : true_type {};
+}  // namespace detail
+
+template <typename R, typename Fn> constexpr void for_each(R&& r, Fn fn) {
+    if constexpr (detail::has_member_for_each<remove_reference_t<R>, Fn>::value) {
+        r.for_each(fn);
+    } else {
+        for (auto&& e : r) { fn(static_cast<decltype(e)>(e)); }
+    }
+}
+
+// ============================ enumerate ============================
+template <typename R> class enumerate_view {
+   public:
+    constexpr explicit enumerate_view(R range) : m_range(ktl::move(range)) {}
+
+    class iterator {
+       public:
+        using inner = decltype(declval<R&>().begin());
+
+        constexpr iterator(inner it, size_t index) : m_it(it), m_index(index) {}
+        constexpr auto operator*() const { return pair<size_t, decltype(*m_it)>(m_index, *m_it); }
+        constexpr iterator& operator++() {
+            ++m_it;
+            ++m_index;
+            return *this;
+        }
+        constexpr bool operator!=(const iterator& o) const { return m_it != o.m_it; }
+        constexpr bool operator==(const iterator& o) const { return m_it == o.m_it; }
+
+       private:
+        inner m_it;
+        size_t m_index;
+    };
+
+    constexpr iterator begin() { return iterator(m_range.begin(), 0); }
+    constexpr iterator end() { return iterator(m_range.end(), 0); }
+
+    template <typename Fn> constexpr void for_each(Fn fn) {
+        size_t i = 0;
+        ktl::for_each(m_range, [&](auto&& e) { fn(pair<size_t, decltype(e)>(i++, static_cast<decltype(e)>(e))); });
+    }
+
+   private:
+    R m_range;
+};
+
+// ============================ filter ============================
+template <typename R, typename Pred> class filter_view {
+   public:
+    constexpr filter_view(R range, Pred pred) : m_range(ktl::move(range)), m_pred(ktl::move(pred)) {}
+
+    class iterator {
+       public:
+        using inner = decltype(declval<R&>().begin());
+
+        constexpr iterator(inner it, inner end, const Pred* pred) : m_it(it), m_end(end), m_pred(pred) {
+            satisfy();
+        }
+        constexpr decltype(*declval<inner&>()) operator*() const { return *m_it; }
+        constexpr iterator& operator++() {
+            ++m_it;
+            satisfy();
+            return *this;
+        }
+        constexpr bool operator!=(const iterator& o) const { return m_it != o.m_it; }
+        constexpr bool operator==(const iterator& o) const { return m_it == o.m_it; }
+
+       private:
+        constexpr void satisfy() {
+            while (m_it != m_end && !(*m_pred)(*m_it)) { ++m_it; }
+        }
+        inner m_it;
+        inner m_end;
+        const Pred* m_pred;
+    };
+
+    constexpr iterator begin() { return iterator(m_range.begin(), m_range.end(), &m_pred); }
+    constexpr iterator end() { return iterator(m_range.end(), m_range.end(), &m_pred); }
+
+    template <typename Fn> constexpr void for_each(Fn fn) {
+        ktl::for_each(m_range, [&](auto&& e) {
+            if (m_pred(e)) { fn(static_cast<decltype(e)>(e)); }
+        });
+    }
+
+   private:
+    R m_range;
+    Pred m_pred;
+};
+
+// ============================ transform ============================
+template <typename R, typename F> class transform_view {
+   public:
+    constexpr transform_view(R range, F fn) : m_range(ktl::move(range)), m_fn(ktl::move(fn)) {}
+
+    class iterator {
+       public:
+        using inner = decltype(declval<R&>().begin());
+
+        constexpr iterator(inner it, const F* fn) : m_it(it), m_fn(fn) {}
+        constexpr auto operator*() const { return (*m_fn)(*m_it); }
+        constexpr iterator& operator++() {
+            ++m_it;
+            return *this;
+        }
+        constexpr bool operator!=(const iterator& o) const { return m_it != o.m_it; }
+        constexpr bool operator==(const iterator& o) const { return m_it == o.m_it; }
+
+       private:
+        inner m_it;
+        const F* m_fn;
+    };
+
+    constexpr iterator begin() { return iterator(m_range.begin(), &m_fn); }
+    constexpr iterator end() { return iterator(m_range.end(), &m_fn); }
+
+    template <typename Fn> constexpr void for_each(Fn fn) {
+        ktl::for_each(m_range, [&](auto&& e) { fn(m_fn(e)); });
+    }
+
+   private:
+    R m_range;
+    F m_fn;
+};
+
+// ============================ take ============================
+// take intentionally provides NO `for_each`: it must stop early, which a push-based body cannot signal.
+// Consuming a chain ending in `take` therefore falls back to external iteration (still correct).
+template <typename R> class take_view {
+   public:
+    constexpr take_view(R range, size_t count) : m_range(ktl::move(range)), m_count(count) {}
+
+    class iterator {
+       public:
+        using inner = decltype(declval<R&>().begin());
+
+        constexpr iterator(inner it, size_t remaining) : m_it(it), m_remaining(remaining) {}
+        constexpr decltype(*declval<inner&>()) operator*() const { return *m_it; }
+        constexpr iterator& operator++() {
+            ++m_it;
+            --m_remaining;
+            return *this;
+        }
+        // Stop when the budget is exhausted OR the underlying end is hit (o is the end iterator).
+        constexpr bool operator!=(const iterator& o) const { return m_remaining != 0 && m_it != o.m_it; }
+        constexpr bool operator==(const iterator& o) const { return !(*this != o); }
+
+       private:
+        inner m_it;
+        size_t m_remaining;
+    };
+
+    constexpr iterator begin() { return iterator(m_range.begin(), m_count); }
+    constexpr iterator end() { return iterator(m_range.end(), 0); }
+
+   private:
+    R m_range;
+    size_t m_count;
+};
+
+// ============================ drop ============================
+// drop performs no element transformation, so it exposes the underlying iterator directly.
+template <typename R> class drop_view {
+   public:
+    constexpr drop_view(R range, size_t count) : m_range(ktl::move(range)), m_count(count) {}
+
+    constexpr auto begin() {
+        auto it       = m_range.begin();
+        const auto e  = m_range.end();
+        for (size_t i = 0; i < m_count && it != e; ++i) { ++it; }
+        return it;
+    }
+    constexpr auto end() { return m_range.end(); }
+
+    template <typename Fn> constexpr void for_each(Fn fn) {
+        size_t skipped = 0;
+        ktl::for_each(m_range, [&](auto&& e) {
+            if (skipped < m_count) {
+                ++skipped;
+                return;
+            }
+            fn(static_cast<decltype(e)>(e));
+        });
+    }
+
+   private:
+    R m_range;
+    size_t m_count;
+};
+
+// ============================ closures (ktl::views) ============================
+namespace views {
+
+struct enumerate_fn : range_adaptor_closure<enumerate_fn> {
+    template <typename R> constexpr auto operator()(R&& r) const {
+        return enumerate_view<decay_t<R>>(static_cast<R&&>(r));
+    }
+};
+inline constexpr enumerate_fn enumerate{};
+
+template <typename Pred> struct filter_closure : range_adaptor_closure<filter_closure<Pred>> {
+    Pred pred;
+    constexpr explicit filter_closure(Pred p) : pred(ktl::move(p)) {}
+    template <typename R> constexpr auto operator()(R&& r) const {
+        return filter_view<decay_t<R>, Pred>(static_cast<R&&>(r), pred);
+    }
+};
+template <typename Pred> constexpr auto filter(Pred pred) { return filter_closure<Pred>(ktl::move(pred)); }
+
+template <typename F> struct transform_closure : range_adaptor_closure<transform_closure<F>> {
+    F fn;
+    constexpr explicit transform_closure(F f) : fn(ktl::move(f)) {}
+    template <typename R> constexpr auto operator()(R&& r) const {
+        return transform_view<decay_t<R>, F>(static_cast<R&&>(r), fn);
+    }
+};
+template <typename F> constexpr auto transform(F fn) { return transform_closure<F>(ktl::move(fn)); }
+
+struct take_closure : range_adaptor_closure<take_closure> {
+    size_t count;
+    constexpr explicit take_closure(size_t n) : count(n) {}
+    template <typename R> constexpr auto operator()(R&& r) const {
+        return take_view<decay_t<R>>(static_cast<R&&>(r), count);
+    }
+};
+constexpr auto take(size_t n) { return take_closure(n); }
+
+struct drop_closure : range_adaptor_closure<drop_closure> {
+    size_t count;
+    constexpr explicit drop_closure(size_t n) : count(n) {}
+    template <typename R> constexpr auto operator()(R&& r) const {
+        return drop_view<decay_t<R>>(static_cast<R&&>(r), count);
+    }
+};
+constexpr auto drop(size_t n) { return drop_closure(n); }
+
+}  // namespace views
+}  // namespace ktl

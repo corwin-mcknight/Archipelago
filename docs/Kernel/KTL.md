@@ -53,3 +53,17 @@ Printf-style formatting. Custom types specialize `kfmt_printer<T>`. Used through
 ### Type Support
 `ktl::type_traits`, `ktl::algorithm`, `ktl::utility` provide metaprogramming and algorithm foundations
 (`move`, `forward`, `swap`, `min`, `max`, etc.).
+
+## Views & Non-owning Types
+### `ktl::span<T>`
+Non-owning `{ptr, size}` view over contiguous memory. Constructed from raw pointers, C-arrays, or any container
+with `.data()` and `.size()`. Supports slicing via `first(n)`, `last(n)`, `subspan(offset, count)`, all of which
+clamp to the actual span size (forgiving style).
+
+### Lazy ranges (`ktl::views`)
+CRTP-based closure framework for zero-cost lazy view pipelines:
+- **`enumerate`** — yields `pair<size_t, Elem&>` (index + write-through reference)
+- **`filter(Pred)`** — lazy predicate filtering; iterator skips non-matching elements
+- **`transform(F)`** — lazy element transformation via a callable
+- **`take(n)`** — stops after n elements (clamped by underlying range end)
+- **`drop(n)`** — advances begin past n elements (clamped by underlying range end)

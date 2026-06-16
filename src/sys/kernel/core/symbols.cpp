@@ -5,6 +5,8 @@
 
 #include <ktl/algorithm>
 #include <ktl/maybe>
+#include <ktl/ranges>
+#include <ktl/span>
 #include <ktl/string_view>
 
 namespace kernel::symbols {
@@ -140,13 +142,12 @@ maybe<const func_entry&> find_entry(uintptr_t addr) {
 // is full, and `finish()` reports whether the whole name fit. This collapses the
 // repeated `if (!put(...)) return false;` checks into a single trailing test.
 struct sym_writer {
-    char* out;
-    size_t cap;
+    ktl::span<char> out;
     size_t pos = 0;
     bool ok    = true;
 
     void put(char c) {
-        if (pos + 1 >= cap) {
+        if (pos + 1 >= out.size()) {
             ok = false;
             return;
         }
@@ -154,7 +155,7 @@ struct sym_writer {
     }
 
     void put(string_view s) {
-        for (size_t i = 0; i < s.size(); i++) { put(s[i]); }
+        for (char c : s) { put(c); }
     }
 
     bool finish() {
@@ -234,12 +235,15 @@ void init(const void* elf_data, size_t elf_size) {
     auto tables = locate_symbol_tables(elf_data, elf_size);
     if (!tables) { return; }
 
-    const char* strtab_end = tables->strtab + tables->strtab_size;
-    for (size_t i = 0; i < tables->count && g_entry_count < kMaxSymbols; i++) {
-        const Elf64_Sym& s = tables->syms[i];
-        if ((s.st_info & 0xf) != kSttFunc) { continue; }
-        if (s.st_size == 0) { continue; }
-        if (s.st_name >= tables->strtab_size) { continue; }
+    const char* strtab_end  = tables->strtab + tables->strtab_size;
+
+    // A usable function symbol: function-typed, non-empty extent, in-bounds name.
+    auto is_function_symbol = [&](const Elf64_Sym& s) {
+        return (s.st_info & 0xf) == kSttFunc && s.st_size != 0 && s.st_name < tables->strtab_size;
+    };
+
+    for (const Elf64_Sym& s : ktl::span(tables->syms, tables->count) | ktl::views::filter(is_function_symbol)) {
+        if (g_entry_count >= kMaxSymbols) { break; }
 
         string_view name = bounded_view(tables->strtab + s.st_name, strtab_end);
         if (name.empty()) { continue; }
@@ -260,12 +264,12 @@ void init(const void* elf_data, size_t elf_size) {
 
 bool available() { return g_initialized; }
 
-bool demangle(const char* mangled, char* out, size_t out_size) {
-    if (mangled == nullptr || out == nullptr || out_size < 4) { return false; }
+bool demangle(const char* mangled, ktl::span<char> out) {
+    if (mangled == nullptr || out.data() == nullptr || out.size() < 4) { return false; }
     if (!string_view(mangled).starts_with("_Z")) { return false; }
 
     const char* p = mangled + 2;
-    sym_writer w{out, out_size};
+    sym_writer w{out};
 
     bool nested = (*p == 'N');
     if (nested) { p++; }
