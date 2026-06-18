@@ -1,0 +1,97 @@
+#pragma once
+
+#include <stddef.h>
+
+#include <ktl/type_traits>
+
+// Freestanding subset of <bit> plus the alignment helpers the kernel reaches for most. Bit-counting
+// operations wrap the compiler builtins and are constexpr. All functions are constrained to unsigned
+// integral types so the width arithmetic below is well defined.
+
+namespace ktl {
+
+namespace detail {
+template <typename T> constexpr int bit_digits = static_cast<int>(sizeof(T) * 8);
+}
+
+/// Number of 1 bits in the value.
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, int> popcount(T x) {
+    return __builtin_popcountll(static_cast<unsigned long long>(x));
+}
+
+/// Number of consecutive 0 bits starting from the most significant bit.
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, int> countl_zero(T x) {
+    if (x == 0) { return detail::bit_digits<T>; }
+    return __builtin_clzll(static_cast<unsigned long long>(x)) - (64 - detail::bit_digits<T>);
+}
+
+/// Number of consecutive 0 bits starting from the least significant bit.
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, int> countr_zero(T x) {
+    if (x == 0) { return detail::bit_digits<T>; }
+    return __builtin_ctzll(static_cast<unsigned long long>(x));
+}
+
+/// Smallest number of bits needed to represent the value (0 for x == 0).
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, int> bit_width(T x) {
+    return detail::bit_digits<T> - countl_zero(x);
+}
+
+/// True iff exactly one bit is set, i.e. the value is a power of two.
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, bool> has_single_bit(T x) {
+    return x != 0 && (x & (x - 1)) == 0;
+}
+
+/// Alias for has_single_bit, spelled the way the kernel's allocators ask the question.
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, bool> is_power_of_two(T x) {
+    return has_single_bit(x);
+}
+
+/// Largest power of two not greater than the value (0 for x == 0).
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, T> bit_floor(T x) {
+    if (x == 0) { return 0; }
+    return static_cast<T>(T{1} << (bit_width(x) - 1));
+}
+
+/// Smallest power of two not less than the value (1 for x <= 1).
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, T> bit_ceil(T x) {
+    if (x <= 1) { return 1; }
+    return static_cast<T>(T{1} << bit_width(static_cast<T>(x - 1)));
+}
+
+/// Rotate left by s bits (negative s rotates right).
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, T> rotl(T x, int s) {
+    constexpr int n = detail::bit_digits<T>;
+    int r           = s % n;
+    if (r == 0) { return x; }
+    if (r > 0) { return static_cast<T>((x << r) | (x >> (n - r))); }
+    r = -r;
+    return static_cast<T>((x >> r) | (x << (n - r)));
+}
+
+/// Rotate right by s bits (negative s rotates left).
+template <typename T> constexpr enable_if_t<is_unsigned_v<T>, T> rotr(T x, int s) {
+    return rotl(x, -s);
+}
+
+// Alignment helpers -- not part of std <bit>, but the most common reason kernel code does bit math.
+// alignment must be a power of two; alignment <= 1 leaves the value unchanged.
+
+/// Round value up to the next multiple of alignment.
+template <typename T> constexpr enable_if_t<is_integral_v<T>, T> align_up(T value, size_t alignment) {
+    if (alignment <= 1) { return value; }
+    return static_cast<T>((value + alignment - 1) & ~static_cast<T>(alignment - 1));
+}
+
+/// Round value down to the previous multiple of alignment.
+template <typename T> constexpr enable_if_t<is_integral_v<T>, T> align_down(T value, size_t alignment) {
+    if (alignment <= 1) { return value; }
+    return static_cast<T>(value & ~static_cast<T>(alignment - 1));
+}
+
+/// True iff value is a multiple of alignment (a power of two).
+template <typename T> constexpr enable_if_t<is_integral_v<T>, bool> is_aligned(T value, size_t alignment) {
+    if (alignment <= 1) { return true; }
+    return (value & static_cast<T>(alignment - 1)) == 0;
+}
+
+}  // namespace ktl

@@ -44,6 +44,10 @@ __attribute__((used,
                section(".limine_requests"))) volatile struct limine_executable_file_request executable_file_request = {
     .id = LIMINE_EXECUTABLE_FILE_REQUEST, .revision = 0, .response = nullptr};
 
+__attribute__((
+    used, section(".limine_requests"))) volatile struct limine_executable_cmdline_request executable_cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST, .revision = 0, .response = nullptr};
+
 uintptr_t g_hhdm_offset = 0;
 
 // Bring a single CPU online. core_index is a dense logical index in [0, CONFIG_MAX_CORES) used to
@@ -93,6 +97,41 @@ static ktl::maybe<uint32_t> find_bsp_index(const limine_mp_response& mp) {
         .map([](size_t i) { return (uint32_t)i; });
 }
 
+// Returns true if the space-delimited Limine command line contains an exact-match token.
+static bool cmdline_has_token(ktl::string_view cmdline, ktl::string_view token) {
+    size_t start = 0;
+    while (start <= cmdline.size()) {
+        size_t space = cmdline.find(' ', start);
+        size_t end   = (space == ktl::string_view::npos) ? cmdline.size() : space;
+        if (cmdline.substr(start, end - start) == token) { return true; }
+        if (space == ktl::string_view::npos) { break; }
+        start = space + 1;
+    }
+    return false;
+}
+
+// Boot mode is a compile-time default that the Limine command line can override at runtime: the
+// "shell" token forces the interactive shell, "noshell" forces a normal boot. The shell can only
+// be entered when it was compiled in (CONFIG_KERNEL_SHELL), so the runtime override only narrows or
+// confirms within that capability.
+static bool resolve_shell_boot() {
+    bool shell_boot = CONFIG_KERNEL_SHELL;
+    if (executable_cmdline_request.response == nullptr || executable_cmdline_request.response->cmdline == nullptr) {
+        g_log.info("boot: no Limine command line; using compile-time boot mode");
+        return shell_boot;
+    }
+    ktl::string_view cmdline(executable_cmdline_request.response->cmdline);
+    g_log.info("boot: Limine command line: \"{0}\"", cmdline);
+    if (cmdline_has_token(cmdline, "noshell")) {
+        g_log.info("boot: command line requested normal boot (noshell)");
+        shell_boot = false;
+    } else if (cmdline_has_token(cmdline, "shell")) {
+        g_log.info("boot: command line requested kernel shell boot (shell)");
+        shell_boot = true;
+    }
+    return shell_boot;
+}
+
 extern "C" [[noreturn]] void _start(void) {
     g_early_heap.on_boot((uintptr_t)&_initial_heap_start, (uintptr_t)&_initial_heap_end);
 
@@ -124,22 +163,43 @@ extern "C" [[noreturn]] void _start(void) {
 
     if (hhdm_request.response == nullptr) { panic("Limine HHDM request failed"); }
     g_hhdm_offset = hhdm_request.response->offset;
+    if (g_hhdm_offset == 0) { panic("Limine HHDM offset is zero -- higher-half direct map unavailable"); }
 
     if (memmap_request.response == nullptr) { panic("Limine memmap request failed"); }
+    if (memmap_request.response->entry_count == 0) { panic("Limine memmap is empty -- no memory regions reported"); }
+
+    uint64_t total_usable_pages = 0;
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
-        auto* entry  = memmap_request.response->entries[i];
+        auto* entry = memmap_request.response->entries[i];
+
+        // A malformed entry must not corrupt the PMM: a misaligned base or non-page-multiple length
+        // would hand the allocator a partial frame. Skip such regions with a warning rather than
+        // truncating silently.
+        if ((entry->base & 0xFFF) != 0 || (entry->length & 0xFFF) != 0) {
+            g_log.warn("pmm: skipping misaligned region base=0x{0:p} length=0x{1:p} type={2}", entry->base,
+                       entry->length, entry->type);
+            continue;
+        }
         size_t pages = entry->length / 0x1000;
+
         if (entry->type == LIMINE_MEMMAP_USABLE || entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE) {
+            if (pages == 0) {
+                g_log.warn("pmm: skipping empty usable region base=0x{0:p}", entry->base);
+                continue;
+            }
             g_log.info("pmm: adding region base=0x{0:p} pages={1} type={2}", entry->base, pages, entry->type);
             kernel::mm::g_page_frame_allocator.add_region({.start = entry->base, .count = pages});
-        } else if (entry->type == 6) {  // LIMINE_MEMMAP_KERNEL_AND_MODULES
+            total_usable_pages += pages;
+        } else if (entry->type == 6) {  // LIMINE_MEMMAP_KERNEL_AND_MODULES / EXECUTABLE_AND_MODULES
             g_log.info("pmm: reserved region base=0x{0:p} pages={1} (kernel)", entry->base, pages);
             kernel::mm::g_page_frame_allocator.add_reserved(pages);
         }
     }
-    g_log.info("Memory subsystem initialized");
+    if (total_usable_pages == 0) { panic("Limine memmap reported no usable memory"); }
+    g_log.info("Memory subsystem initialized ({0} usable pages)", total_usable_pages);
 
     if (mp_request.response == nullptr) { panic("Limine MP request failed"); }
+    if (mp_request.response->cpu_count == 0) { panic("Limine MP response reports zero CPUs"); }
 
     g_log.info("Booting on cpu{0}. CPU has {1} cores", mp_request.response->bsp_lapic_id,
                mp_request.response->cpu_count);
@@ -162,8 +222,17 @@ extern "C" [[noreturn]] void _start(void) {
             .unwrap();
     kernel::obj::g_handle_table.get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
+    bool shell_boot = resolve_shell_boot();
 #if CONFIG_KERNEL_SHELL
-    kernel::shell::shell_main();
+    if (shell_boot) {
+        g_log.info("boot: kernel shell boot -- handing control to interactive shell");
+        kernel::shell::shell_main();
+    } else {
+        g_log.info("boot: normal boot -- initialization complete");
+    }
+#else
+    if (shell_boot) { g_log.warn("boot: shell requested but not compiled in (CONFIG_KERNEL_SHELL=0)"); }
+    g_log.info("boot: normal boot -- initialization complete");
 #endif
 
     panic("Boot processor exited early");

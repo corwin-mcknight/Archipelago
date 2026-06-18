@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/bit>
+
 #include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/panic.h"
@@ -16,17 +18,14 @@ struct early_heap_block {
     uintptr_t payload_base;  // Pointer returned to the caller when allocated
 };
 
-static_assert((alignof(early_heap_block) & (alignof(early_heap_block) - 1)) == 0,
+static_assert(ktl::is_power_of_two(size_t{alignof(early_heap_block)}),
               "early_heap_block alignment must be a power of two");
 
 namespace {
 
 constexpr size_t heap_alignment_fallback = alignof(max_align_t);
 
-constexpr uintptr_t align_up(uintptr_t value, size_t alignment) {
-    if (alignment <= 1) { return value; }
-    return (value + alignment - 1) & ~(alignment - 1);
-}
+using ktl::align_up;
 
 constexpr size_t kMinimumSplitSize = sizeof(early_heap_block) + heap_alignment_fallback;
 
@@ -36,7 +35,7 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     if (start >= end) { panic("Invalid early heap range"); }
 
     uintptr_t aligned_start = align_up(start, alignof(early_heap_block));
-    uintptr_t aligned_end   = end & ~(uintptr_t)(alignof(early_heap_block) - 1);
+    uintptr_t aligned_end   = ktl::align_down(end, alignof(early_heap_block));
 
     if (aligned_end <= aligned_start + sizeof(early_heap_block)) { panic("Early heap region too small"); }
 
@@ -78,7 +77,7 @@ void early_heap::debug_print_state() {
 void* early_heap::alloc(size_t size, size_t alignment) {
     if (size == 0) { return nullptr; }
 
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+    if (!ktl::is_power_of_two(alignment)) {
         g_log.error("Alignment must be a power of two");
         panic("Early heap allocation alignment error");
         return nullptr;
