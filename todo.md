@@ -78,6 +78,7 @@
 - Add watchdogs, assertion escalation policies, and structured fault isolation reporting.
 
 ## Testing & QA
+- Two-tier (host + QEMU) test system. Steps 1-3 landed 2026-06-19: host-tier fork-per-test runner under ASan/UBSan (`make host-test`), expression-capturing EXPECT/REQUIRE with the legacy KTEST_* macros aliased over it, minimal `registry.h` cross-tier ABI, shared `@@HARNESS` aggregator. Full migration complete -- routing is directory-based (no migrated-test list to keep in sync): `tests/*.cpp` = host-tier (built by the runner), `tests/freestanding/` = kernel env (built only by the kernel), `tests/runner/` = host harness. Split: 187 on host + 72 in QEMU = 259, each test on one tier. `std_string` + `symbols` reclassified to freestanding (their C-linkage string funcs resolve to libc on host = vacuous; symbols needs the embedded symbol table + crash path). obj_* migrated via compiling the object-system sources in + no-op interrupt stubs for the spinlock. Remaining: (4) QEMU brute-isolation reboot-per-test + shard onto the shared aggregator, (5) diagnostics MVP+ (coverage gate, peak-RSS, JUnit), (6) staged fuzz/TSan lanes (extracting a pure demangler out of crash.cpp would let `symbols` be host-fuzzed).
 - Grow unit, integration, and stress suites covering kernel core, drivers, and IPC subsystems.
 - Automate QEMU smoke tests, add CI integration, and track coverage metrics.
 - Provide fuzzing or chaos harness hooks for scheduler, memory, and syscall interfaces.

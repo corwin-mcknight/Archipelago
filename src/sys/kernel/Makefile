@@ -19,7 +19,12 @@ CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp -not -path '*/tests/*')
 MM_SRCS := $(shell find $(SRC_DIRS)/mm -name *.cpp -not -path '*/tests/*')
 SHELL_SRCS := $(shell find $(SRC_DIRS)/shell -name *.cpp -not -path '*/tests/*')
-TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/*.cpp')
+# Kernel-side tests are the freestanding ones: those under tests/freestanding/ plus the arch tests
+# under x86_64/tests/. Hosted tests (tests/*.cpp) are host-tier only -- run by the host runner
+# (kernel-testrunner), never built into the kernel image -- and tests/runner/ is the host harness.
+# The directory is the routing: a test changes tiers by moving directory, with no list to keep in sync.
+TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/freestanding/*.cpp') \
+	$(shell find $(SRC_DIRS) -type f -path '*/x86_64/tests/*.cpp')
 SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(MM_SRCS) $(SHELL_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)

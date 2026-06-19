@@ -6,31 +6,13 @@
 
 #include <stddef.h>
 
-namespace kernel::testing {
+#include <kernel/testing/registry.h>  // ktest record, flags, abort + report_assertion hooks
 
-using test_fn = void (*)();
-
-enum : unsigned {
-    KTEST_FLAG_NONE               = 0u,
-    KTEST_FLAG_REQUIRES_CLEAN_ENV = 1u << 0,
-    KTEST_FLAG_EXPECTS_CRASH      = 1u << 1,
-};
-
-struct alignas(alignof(void*)) ktest {
-    const char* name;
-    const char* submodule;
-    unsigned flags;
-    test_fn init_fn;
-    test_fn fn;
-};
-
-[[noreturn]]
-void abort(unsigned char exit_code = 1);
-
-}  // namespace kernel::testing
-
+// The registry is walked as a packed array between __start__ktests/__stop__ktests, so the entries
+// must stay contiguous. no_sanitize("address") keeps AddressSanitizer (host tier) from inserting
+// redzones between them, which would break the iteration; it is a harmless no-op in the kernel build.
 #if defined(__GNUC__)
-#define KTEST_SEC __attribute__((section(".ktests"), used))
+#define KTEST_SEC __attribute__((section(".ktests"), used, no_sanitize("address")))
 #else
 #define KTEST_SEC
 #endif
@@ -72,42 +54,25 @@ void abort(unsigned char exit_code = 1);
 
 #define KTEST_NOINIT(name_sym, module_literal) KTEST(name_sym, module_literal)
 
-// Assertion helpers. EXPECT variants record the failure and allow execution to continue, while
-// REQUIRE variants abort the current test immediately after logging the failure.
-void ktest_expect(bool condition, const char* file, int line, const char* condition_str);
-void ktest_require(bool condition, const char* file, int line, const char* condition_str);
-void ktest_expect_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                        const char* expected_str);
-void ktest_require_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                         const char* expected_str);
-void ktest_expect_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                            const char* expected_str);
-void ktest_require_not_equal(int actual, int expected, const char* file, int line, const char* actual_str,
-                             const char* expected_str);
+// The expression-capturing EXPECT / REQUIRE live in <kernel/testing/expect.h> and route through
+// kernel::testing::report_assertion (declared above, defined per-backend). The legacy KTEST_* macros
+// below are thin aliases over them, so a test written in either style shares one backend and runs on
+// either tier unchanged.
+#include <kernel/testing/expect.h>
 
-// size_t overrides
-void ktest_expect_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                        const char* expected_str);
-void ktest_require_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                         const char* expected_str);
-void ktest_expect_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                            const char* expected_str);
-void ktest_require_not_equal(size_t actual, size_t expected, const char* file, int line, const char* actual_str,
-                             const char* expected_str);
-
-#define KTEST_EXPECT(condition) ktest_expect(condition, __FILE__, __LINE__, #condition)
-#define KTEST_EXPECT_EQUAL(actual, expected) \
-    ktest_expect_equal(actual, expected, __FILE__, __LINE__, #actual, #expected)
-#define KTEST_EXPECT_NOT_EQUAL(actual, expected) \
-    ktest_expect_not_equal(actual, expected, __FILE__, __LINE__, #actual, #expected)
+// Bare-condition checks wrap the whole expression in parentheses so it is taken as a single boolean
+// (unary) check. This preserves legacy behaviour and stays valid for conditions containing && / ||,
+// which the raw decomposer deliberately rejects. The _EQUAL / _NOT_EQUAL forms expose the top-level
+// comparison to the decomposer so both operand values are captured in the failure record.
+#define KTEST_EXPECT(condition) EXPECT((condition))
+#define KTEST_EXPECT_EQUAL(actual, expected) EXPECT((actual) == (expected))
+#define KTEST_EXPECT_NOT_EQUAL(actual, expected) EXPECT((actual) != (expected))
 #define KTEST_EXPECT_TRUE(condition) KTEST_EXPECT(condition)
 #define KTEST_EXPECT_FALSE(condition) KTEST_EXPECT(!(condition))
 
-#define KTEST_REQUIRE(condition) ktest_require(condition, __FILE__, __LINE__, #condition)
-#define KTEST_REQUIRE_EQUAL(actual, expected) \
-    ktest_require_equal(actual, expected, __FILE__, __LINE__, #actual, #expected)
-#define KTEST_REQUIRE_NOT_EQUAL(actual, expected) \
-    ktest_require_not_equal(actual, expected, __FILE__, __LINE__, #actual, #expected)
+#define KTEST_REQUIRE(condition) REQUIRE((condition))
+#define KTEST_REQUIRE_EQUAL(actual, expected) REQUIRE((actual) == (expected))
+#define KTEST_REQUIRE_NOT_EQUAL(actual, expected) REQUIRE((actual) != (expected))
 #define KTEST_REQUIRE_TRUE(condition) KTEST_REQUIRE(condition)
 #define KTEST_REQUIRE_FALSE(condition) KTEST_REQUIRE(!(condition))
 

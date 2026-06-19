@@ -29,3 +29,9 @@ sys/kernel-src-0.0.1:
   description: "Kernel source archive"
   supports_live_sources: true
   live_source_path: "sys/kernel"
+
+sys/kernel-testrunner-0.0.1:
+  description: "Host-tier kernel test runner"
+  is_build_tool: true
+  supports_live_sources: true
+  live_source_path: "sys/kernel"
