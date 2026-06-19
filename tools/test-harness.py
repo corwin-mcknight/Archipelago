@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -14,6 +15,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import harness_protocol  # noqa: E402 -- shared @@HARNESS result schema (one schema across both tiers)
 
 
 # Outcome priority for resolving conflicts between exit-code and event outcomes.
@@ -60,6 +64,7 @@ class AttemptLog:
     events: List[Event] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
     crash: Optional[Crash] = None
+    duration_ns: Optional[int] = None
 
 
 @dataclass
@@ -70,6 +75,7 @@ class TestResult:
     requires_clean_env: bool = False
     expects_crash: bool = False
     attempts: List[AttemptLog] = field(default_factory=list)
+    duration_ns: Optional[int] = None
 
 
 @dataclass
@@ -363,6 +369,7 @@ class KernelHarness:
             requires_clean_env=requires_clean_env,
             expects_crash=expects_crash,
             attempts=attempts,
+            duration_ns=attempts[-1].duration_ns if attempts else None,
         )
 
     def _run_single_attempt(
@@ -404,7 +411,7 @@ class KernelHarness:
         return AttemptLog(
             attempt=attempt_idx, outcome=outcome, reason=reason,
             requires_clean_env=clean_flag, events=filtered, lines=raw_lines,
-            crash=crash,
+            crash=crash, duration_ns=self._extract_duration(events),
         )
 
     @staticmethod
@@ -418,6 +425,21 @@ class KernelHarness:
         if exit_code == 0:
             return "pass", "guest exited cleanly"
         return "infra", f"unexpected kernel exit status {exit_code}"
+
+    @staticmethod
+    def _extract_duration(events: list[Event]) -> Optional[int]:
+        """Per-test duration in ns from the kernel's test_start/test_end timestamps."""
+        start_ts = end_ts = None
+        for event in events:
+            payload = event.payload or {}
+            etype = payload.get("event")
+            if etype == "test_start" and isinstance(payload.get("timestamp"), int):
+                start_ts = payload["timestamp"]
+            elif etype in ("test_end", "test_crash") and isinstance(payload.get("timestamp"), int):
+                end_ts = payload["timestamp"]
+        if start_ts is not None and end_ts is not None and end_ts >= start_ts:
+            return end_ts - start_ts
+        return None
 
     @staticmethod
     def _interpret_test_events(events: list[Event]) -> tuple[str, Optional[str], List[Event]]:
@@ -667,14 +689,143 @@ def _write_crash_artifacts(case_dir: Path, crash: Crash) -> None:
 
 
 # ----------------------------------------------------------------------
-# Scheduling
+# Shared-schema bridge -- one result schema across the host and QEMU tiers
 # ----------------------------------------------------------------------
-def reorder_tests_for_execution(tests: List[str], descriptor_map: Dict[str, TestDescriptor]) -> List[str]:
-    known = [(t, descriptor_map[t]) for t in tests if t in descriptor_map]
-    unknown = [t for t in tests if t not in descriptor_map]
-    # Normal tests first (grouped by module for locality), then clean-env tests
-    known.sort(key=lambda pair: (pair[1].requires_clean_env, pair[1].module or ""))
-    return [t for t, _ in known] + unknown
+def _to_protocol_result(result: TestResult) -> harness_protocol.TestResult:
+    """Project the rich QEMU TestResult onto the shared {id, tier, outcome, duration_ns, failures,
+    diagnostics} schema, so both tiers report through the same structure."""
+    pr = harness_protocol.TestResult(result.name, "qemu")
+    pr.outcome = "pass" if result.outcome in ("pass", "skipped") else "fail"
+    pr.duration_ns = result.duration_ns
+    final = result.attempts[-1] if result.attempts else None
+    failures: List[str] = []
+    if final:
+        for event in final.events:
+            payload = event.payload or {}
+            if payload.get("event") == "error":
+                msg = payload.get("message") or payload.get("reason")
+                if msg:
+                    failures.append(msg)
+        if not failures and pr.outcome == "fail" and final.reason:
+            failures.append(final.reason)
+    pr.failures = failures
+    # The QEMU tier carries a richer outcome and crash data than the common schema; keep them as diagnostics.
+    pr.diagnostics = {
+        "detailed_outcome": result.outcome,
+        "module": result.module,
+        "attempts": len(result.attempts),
+        "expects_crash": result.expects_crash,
+    }
+    if final and final.crash is not None:
+        pr.diagnostics["crash"] = _crash_summary(final.crash)
+    return pr
+
+
+def write_summary(base_dir: Optional[Path], proto_results: List[harness_protocol.TestResult]) -> None:
+    """Top-level summary.json in the shared schema -- mirrors the host tier's harness.json."""
+    if base_dir is None:
+        return
+    passed = sum(1 for r in proto_results if r.outcome == "pass")
+    summary = {
+        "tier": "qemu", "total": len(proto_results), "passed": passed,
+        "failed": len(proto_results) - passed,
+        "results": [r.to_dict() for r in proto_results],
+    }
+    (base_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
+# ----------------------------------------------------------------------
+# Sharded, reboot-per-test execution (brute isolation)
+# ----------------------------------------------------------------------
+def _make_harness(args: argparse.Namespace) -> KernelHarness:
+    return KernelHarness(
+        qemu=args.qemu, iso=args.iso, memory=args.memory,
+        boot_timeout=args.boot_timeout, extra_args=args.qemu_arg,
+        verbose=args.verbose, add_exit_device=not args.no_exit_device,
+    )
+
+
+def _infra_result(name: str, desc: Optional[TestDescriptor], reason: str) -> TestResult:
+    return TestResult(
+        name=name, outcome="infra",
+        module=desc.module if desc else None,
+        requires_clean_env=desc.requires_clean_env if desc else False,
+        expects_crash=desc.expects_crash if desc else False,
+        attempts=[AttemptLog(attempt=1, outcome="infra", reason=reason)],
+    )
+
+
+def _run_one_isolated(
+    harness: KernelHarness, name: str, desc: Optional[TestDescriptor],
+    args: argparse.Namespace, artifact_dir: Optional[Path],
+) -> TestResult:
+    """Brute isolation: boot a fresh kernel and run exactly one test. The whole boot+run is retried as
+    a unit on a flaky boot or serial hiccup -- a decisive pass/fail/error outcome is never retried.
+    This keeps a transient infrastructure failure (e.g. a slow boot under heavy parallelism) scoped to
+    one test instead of letting it cascade."""
+    result: Optional[TestResult] = None
+    for _ in range(1 + max(0, args.retries)):
+        try:
+            harness.restart()
+        except (HarnessError, HarnessProcessExit) as exc:
+            result = _infra_result(name, desc, f"boot failed: {exc}")
+            time.sleep(0.5)  # let transient spawn/resource contention clear before a fresh boot
+            continue
+        # The restart above is the clean boot, so run_test does a single attempt without restarting.
+        result = harness.run_test(
+            name, timeout=args.test_timeout, retries=0,
+            requires_clean_env=False,
+            expects_crash=desc.expects_crash if desc else False,
+            module=desc.module if desc else None,
+        )
+        if result.outcome not in ("infra", "timeout"):
+            break
+    assert result is not None
+    if result.attempts and result.attempts[-1].crash is not None:
+        symbolicate_crash(result.attempts[-1].crash, args.kernel_elf)
+    write_artifacts(artifact_dir, result)
+    return result
+
+
+def run_sharded(
+    tests: List[str], descriptor_map: Dict[str, TestDescriptor],
+    args: argparse.Namespace, artifact_dir: Optional[Path], jobs: int,
+) -> List[TestResult]:
+    """Each test runs in its own freshly booted kernel; `jobs` workers run independent QEMU
+    processes in parallel. A boot or serial hiccup is isolated to one test, not a cascade."""
+    work: "queue.Queue[str]" = queue.Queue()
+    for name in tests:
+        work.put(name)
+    results: Dict[str, TestResult] = {}
+    lock = threading.Lock()
+
+    def worker() -> None:
+        harness = _make_harness(args)
+        try:
+            while True:
+                try:
+                    name = work.get_nowait()
+                except queue.Empty:
+                    break
+                desc = descriptor_map.get(name)
+                try:
+                    result = _run_one_isolated(harness, name, desc, args, artifact_dir)
+                except (HarnessError, HarnessProcessExit) as exc:
+                    result = _infra_result(name, desc, str(exc))
+                    write_artifacts(artifact_dir, result)
+                with lock:
+                    results[name] = result
+        finally:
+            harness.stop()
+
+    threads = [threading.Thread(target=worker, name=f"qemu-{i}", daemon=True) for i in range(jobs)]
+    for i, th in enumerate(threads):
+        th.start()
+        if i + 1 < len(threads):
+            time.sleep(0.15)  # stagger the initial QEMU spawns to avoid a thundering-herd boot
+    for th in threads:
+        th.join()
+    return [results[name] for name in tests if name in results]
 
 
 # ----------------------------------------------------------------------
@@ -690,6 +841,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p.add_argument("--command-timeout", type=float, default=5.0, help="Timeout for list commands")
     p.add_argument("--test-timeout", type=float, default=5.0, help="Timeout for a test to finish")
     p.add_argument("--retries", type=int, default=3, help="Retries for infrastructure failures")
+    p.add_argument("--jobs", "-j", type=int, default=0, help="Parallel QEMU workers (0 = auto: min(cpus, 8))")
     p.add_argument("--list", action="store_true", help="List tests and exit")
     p.add_argument("--artifacts", type=Path, default=Path("build/test-artifacts"), help="Artifact directory")
     p.add_argument("--qemu-arg", action="append", default=[], help="Extra QEMU argument (repeatable)")
@@ -699,6 +851,16 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                    help="Unstripped kernel ELF for crash symbolication")
     p.add_argument("--verbose", action="store_true", help="Verbose harness logging")
     return p.parse_args(argv)
+
+
+def _discover(args: argparse.Namespace) -> List[TestDescriptor]:
+    """Boot once to enumerate the registered tests, then shut that kernel down."""
+    harness = _make_harness(args)
+    try:
+        harness.start()
+        return harness.list_tests(args.command_timeout)
+    finally:
+        harness.stop()
 
 
 def main(argv: Sequence[str]) -> int:
@@ -715,91 +877,73 @@ def main(argv: Sequence[str]) -> int:
                 shutil.rmtree(item) if item.is_dir() else item.unlink()
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    harness = KernelHarness(
-        qemu=args.qemu, iso=args.iso, memory=args.memory,
-        boot_timeout=args.boot_timeout, extra_args=args.qemu_arg,
-        verbose=args.verbose, add_exit_device=not args.no_exit_device,
-    )
-
-    exit_code = 0
     try:
-        harness.start()
-        descriptors = harness.list_tests(args.command_timeout)
-        descriptor_map = {d.name: d for d in descriptors}
-
-        if args.list and not args.tests:
-            for d in descriptors:
-                module = f" [{d.module}]" if d.module else ""
-                print(f"{d.name}{module}")
-            return 0
-
-        if args.tests:
-            tests_to_run = list(dict.fromkeys(args.tests))
-            for name in tests_to_run:
-                if name not in descriptor_map:
-                    print(f"[harness] warning: test '{name}' not discovered via LIST", file=sys.stderr)
-        else:
-            tests_to_run = [d.name for d in descriptors]
-            if not tests_to_run:
-                print("[harness] no tests discovered", file=sys.stderr)
-                return 1
-
-        tests_to_run = reorder_tests_for_execution(tests_to_run, descriptor_map)
-
-        results: List[TestResult] = []
-        failure_summaries: List[str] = []
-        passed_count = failed_count = 0
-
-        for test_name in tests_to_run:
-            desc = descriptor_map.get(test_name)
-            result = harness.run_test(
-                test_name, timeout=args.test_timeout, retries=args.retries,
-                requires_clean_env=desc.requires_clean_env if desc else False,
-                expects_crash=desc.expects_crash if desc else False,
-                module=desc.module if desc else None,
-            )
-            results.append(result)
-            if result.attempts and result.attempts[-1].crash is not None:
-                symbolicate_crash(result.attempts[-1].crash, args.kernel_elf)
-            write_artifacts(artifact_dir, result)
-
-            if result.outcome in ("pass", "skipped"):
-                passed_count += 1
-            else:
-                failed_count += 1
-                attempt = result.attempts[-1]
-                prefix = {"fail": "FAIL", "error": "ERROR", "timeout": "TIMEOUT", "infra": "INFRA"}.get(
-                    result.outcome, result.outcome.upper()
-                )
-                summary = f"{prefix}: {test_name} (attempts: {len(result.attempts)})"
-                error_msgs = [
-                    (e.payload.get("message") or e.payload.get("reason"))
-                    for e in attempt.events if (e.payload or {}).get("event") == "error"
-                ]
-                error_msgs = [m for m in error_msgs if m]
-                if not error_msgs and attempt.reason:
-                    error_msgs.append(attempt.reason)
-                if error_msgs:
-                    summary += "\n" + "\n".join(f"    - {msg}" for msg in error_msgs)
-                failure_summaries.append(summary)
-
-        for s in failure_summaries:
-            print(s)
-        if not failure_summaries:
-            print("No test failures.")
-        print(f"Summary: {passed_count} passed, {failed_count} failed")
-        if failed_count > 0:
-            exit_code = 1
-
+        descriptors = _discover(args)
     except (HarnessError, HarnessProcessExit) as exc:
-        print(f"[harness] error: {exc}", file=sys.stderr)
-        exit_code = 1
+        print(f"[harness] error during discovery: {exc}", file=sys.stderr)
+        return 1
+    descriptor_map = {d.name: d for d in descriptors}
+
+    if args.list and not args.tests:
+        for d in descriptors:
+            module = f" [{d.module}]" if d.module else ""
+            print(f"{d.name}{module}")
+        return 0
+
+    if args.tests:
+        tests_to_run = list(dict.fromkeys(args.tests))
+        for name in tests_to_run:
+            if name not in descriptor_map:
+                print(f"[harness] warning: test '{name}' not discovered via LIST", file=sys.stderr)
+    else:
+        tests_to_run = [d.name for d in descriptors]
+        if not tests_to_run:
+            print("[harness] no tests discovered", file=sys.stderr)
+            return 1
+
+    jobs = args.jobs if args.jobs > 0 else min(os.cpu_count() or 1, 8)
+    jobs = max(1, min(jobs, len(tests_to_run)))
+    print(f"[harness] {len(tests_to_run)} test(s), reboot-per-test isolation, {jobs} parallel worker(s)\n")
+
+    try:
+        results = run_sharded(tests_to_run, descriptor_map, args, artifact_dir, jobs)
     except KeyboardInterrupt:
         print("[harness] interrupted", file=sys.stderr)
-        exit_code = 130
-    finally:
-        harness.stop()
-    return exit_code
+        return 130
+
+    write_summary(artifact_dir, [_to_protocol_result(r) for r in results])
+
+    failure_summaries: List[str] = []
+    passed_count = failed_count = 0
+    for result in results:
+        if result.outcome in ("pass", "skipped"):
+            passed_count += 1
+            continue
+        failed_count += 1
+        attempt = result.attempts[-1] if result.attempts else None
+        prefix = {"fail": "FAIL", "error": "ERROR", "timeout": "TIMEOUT", "infra": "INFRA"}.get(
+            result.outcome, result.outcome.upper()
+        )
+        summary = f"{prefix}: {result.name} (attempts: {len(result.attempts)})"
+        error_msgs: List[str] = []
+        if attempt:
+            error_msgs = [
+                (e.payload.get("message") or e.payload.get("reason"))
+                for e in attempt.events if (e.payload or {}).get("event") == "error"
+            ]
+            error_msgs = [m for m in error_msgs if m]
+            if not error_msgs and attempt.reason:
+                error_msgs.append(attempt.reason)
+        if error_msgs:
+            summary += "\n" + "\n".join(f"    - {msg}" for msg in error_msgs)
+        failure_summaries.append(summary)
+
+    for s in failure_summaries:
+        print(s)
+    if not failure_summaries:
+        print("No test failures.")
+    print(f"Summary: {passed_count} passed, {failed_count} failed")
+    return 1 if failed_count > 0 else 0
 
 
 if __name__ == "__main__":
