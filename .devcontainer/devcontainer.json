@@ -6,6 +6,7 @@
         "source=vscode-extensions-${devcontainerId},target=/root/.vscode-server/extensions,type=volume",
         "source=vscode-server-data-${devcontainerId},target=/root/.vscode-server/data,type=volume"
     ],
+    "forwardPorts": [7878],
     "customizations": {
         "vscode": {
             "extensions": [
@@ -14,8 +15,7 @@
                 "xaver.clang-format",
                 "twxs.cmake",
                 "ms-vscode.cpptools",
-                "ms-vscode.makefile-tools",
-                "GitHub.copilot"
+                "ms-vscode.makefile-tools"
             ]
         }
     }

@@ -8,6 +8,7 @@ A binary package is a .tar.xz archive containing:
 import io
 import json
 import os
+import shutil
 import tarfile
 
 from plume.config import Config
@@ -97,11 +98,7 @@ def extract_binpkg(archive_path: str, sysroot: str) -> dict:
                 src = tar.extractfile(member)
                 if src is not None:
                     with open(dst_path, "wb") as dst:
-                        while True:
-                            chunk = src.read(65536)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
+                        shutil.copyfileobj(src, dst)
                     # Preserve permissions
                     os.chmod(dst_path, member.mode)
 

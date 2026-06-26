@@ -26,7 +26,7 @@ SAN := -fsanitize=address,undefined -fno-sanitize-recover=all
 # logic depends on is identical; ABI/codegen fidelity is the QEMU tier's job.
 AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden \
-	-fstrict-aliasing -Wstrict-aliasing=2 $(SAN)
+	-fstrict-aliasing -Wstrict-aliasing=2 -Werror=unused-result -Werror=unused-value $(SAN)
 
 HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN)
 

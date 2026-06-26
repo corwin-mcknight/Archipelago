@@ -30,4 +30,13 @@ KTEST(ktl_fmt_string_view_width_padding, "ktl/fmt") {
     KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "     abc|");
 }
 
+KTEST(ktl_fmt_width_without_specifier, "ktl/fmt") {
+    // A spec ending right after the width ("{0:8}") must close at its own '}',
+    // not swallow output until the next '}'.
+    char buffer[64];
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:8}|", 42);
+
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "      42|");
+}
+
 #endif  // CONFIG_KERNEL_TESTING

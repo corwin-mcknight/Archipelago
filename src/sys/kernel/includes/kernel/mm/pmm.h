@@ -18,7 +18,7 @@ class page_frame_allocator {
     void debug_print_state();
 
     void add_region(const vm_page_region& region) {
-        m_regions.push_back(region);
+        if (!m_regions.push_back(region)) { return; }  // drop region on OOM rather than corrupt page accounting
         m_free_pages += region.count;
         m_total_pages += region.count;
     }

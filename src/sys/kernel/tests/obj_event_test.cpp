@@ -49,7 +49,7 @@ KTEST_WITH_INIT(obj_event_close_destroys, "obj/event", obj_event_init) {
     uint32_t before = g_type_registry.live_count(Event::TYPE_ID);
     KTEST_UNWRAP(id, table.emplace<Event>(RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE));
     KTEST_EXPECT_TRUE(g_type_registry.live_count(Event::TYPE_ID) == before + 1);
-    table.close(id);
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
     KTEST_EXPECT_TRUE(g_type_registry.live_count(Event::TYPE_ID) == before);
 }
 
@@ -58,9 +58,9 @@ KTEST_WITH_INIT(obj_event_duplicate_survives_close, "obj/event", obj_event_init)
     uint32_t before = g_type_registry.live_count(Event::TYPE_ID);
     KTEST_UNWRAP(id1, table.emplace<Event>(RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE));
     KTEST_UNWRAP(id2, table.duplicate(id1, RIGHTS_ALL));
-    table.close(id1);
+    KTEST_EXPECT_TRUE(table.close(id1).is_ok());
     KTEST_EXPECT_TRUE(g_type_registry.live_count(Event::TYPE_ID) == before + 1);
-    table.close(id2);
+    KTEST_EXPECT_TRUE(table.close(id2).is_ok());
     KTEST_EXPECT_TRUE(g_type_registry.live_count(Event::TYPE_ID) == before);
 }
 

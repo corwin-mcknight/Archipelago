@@ -29,7 +29,7 @@ KTEST_WITH_INIT(obj_handle_table_close_invalidates, "obj/handle_table", handle_t
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_REQUIRE_TRUE(table.is_valid(id));
-    table.close(id);
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
     KTEST_EXPECT_ALL(!table.is_valid(id), table.count() == 0);
 }
 
@@ -40,14 +40,14 @@ KTEST_WITH_INIT(obj_handle_table_close_destroys_object, "obj/handle_table", hand
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL, &destroyed));
     KTEST_EXPECT_TRUE(table.get<TestObjA>(id).is_ok());
     KTEST_EXPECT_FALSE(destroyed);
-    table.close(id);
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
     KTEST_EXPECT_TRUE(destroyed);
 }
 
 KTEST_WITH_INIT(obj_handle_table_generation_counter, "obj/handle_table", handle_table_init) {
     HandleTable table;
     KTEST_UNWRAP(id1, table.emplace<TestObjA>(RIGHTS_ALL));
-    table.close(id1);
+    KTEST_EXPECT_TRUE(table.close(id1).is_ok());
     KTEST_UNWRAP(id2, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_EXPECT_ALL(id1.index == id2.index, id1.generation != id2.generation, !table.is_valid(id1),
                      table.is_valid(id2));
@@ -110,7 +110,7 @@ KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_tabl
     size_t before = g_handle_table.count();
     KTEST_UNWRAP(id, g_handle_table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_EXPECT_TRUE(g_handle_table.count() == before + 1);
-    g_handle_table.close(id);
+    KTEST_EXPECT_TRUE(g_handle_table.close(id).is_ok());
     KTEST_EXPECT_TRUE(g_handle_table.count() == before);
 }
 
@@ -168,8 +168,8 @@ KTEST_WITH_INIT(obj_handle_table_destructor_closes_all, "obj/handle_table", hand
     bool d1 = false, d2 = false;
     {
         HandleTable table;
-        table.emplace<TestObjA>(RIGHTS_ALL, &d1);
-        table.emplace<TestObjA>(RIGHTS_ALL, &d2);
+        KTEST_EXPECT_TRUE(table.emplace<TestObjA>(RIGHTS_ALL, &d1).is_ok());
+        KTEST_EXPECT_TRUE(table.emplace<TestObjA>(RIGHTS_ALL, &d2).is_ok());
     }
     KTEST_EXPECT_ALL(d1, d2);
 }

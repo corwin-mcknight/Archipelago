@@ -17,7 +17,7 @@ struct nothing_t {
 
 inline constexpr nothing_t nothing{0xBADC0DE};
 
-template <typename T> class maybe {
+template <typename T> class [[nodiscard]] maybe {
    private:
     bool m_has_value;
     T m_value;
@@ -146,7 +146,7 @@ template <typename T> class maybe {
 /// Engaged implies valid -- it cannot hold a null reference -- so it replaces both the
 /// raw-pointer-as-sentinel idiom and the maybe<T*> double-optional. Unlike the primary template
 /// it places no default-constructible or copyable requirement on T and never copies the referent.
-template <typename T> class maybe<T&> {
+template <typename T> class [[nodiscard]] maybe<T&> {
    private:
     T* m_ptr;
 

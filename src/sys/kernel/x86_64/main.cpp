@@ -4,12 +4,10 @@
 
 #include <ktl/algorithm>
 #include <ktl/atomic>
-#include <ktl/circular_buffer>
 #include <ktl/fixed_string>
 #include <ktl/fmt>
 #include <ktl/maybe>
 #include <ktl/result>
-#include <ktl/static_array>
 
 #include "kernel/assert.h"
 #include "kernel/config.h"
@@ -146,7 +144,8 @@ extern "C" [[noreturn]] void _start(void) {
 
     // Snapshot the kernel ELF's symbol table before PMM reclaims bootloader memory. The bootloader
     // response pointers are optional, so they flow as maybes instead of nested null checks.
-    ktl::from_ptr(executable_file_request.response)
+    // Side-effect-only pipeline: the trailing maybe is intentionally discarded.
+    (void)ktl::from_ptr(executable_file_request.response)
         .and_then([](limine_executable_file_response& resp) { return ktl::from_ptr(resp.executable_file); })
         .inspect([](limine_file& f) {
             kernel::symbols::init(f.address, f.size);

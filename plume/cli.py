@@ -425,7 +425,6 @@ def main(argv=None):
     test_p.add_argument("--verbose", action="store_true")
     test_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     test_p.add_argument("--config", default=None)
-    test_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
     test_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
 
     sub.add_parser("status", help="Show build and install state of all packages").add_argument("--config", default=None)

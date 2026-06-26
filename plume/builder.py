@@ -112,7 +112,7 @@ def _commit_to_sysroot(package: Package, d_path: str, sysroot: str):
         conflicts = check_conflicts(manifest, sysroot, exclude_pkg=package.qualified_name)
         for path, owner in conflicts:
             print(f"  {yellow('conflict')}: {path} (owned by {owner})")
-        _copy_tree(d_path, sysroot)
+        shutil.copytree(d_path, sysroot, dirs_exist_ok=True)
         save_installed_manifest(manifest, sysroot)
     if not package.is_build_tool:
         World(sysroot).add(package.qualified_name)
@@ -204,13 +204,3 @@ def uninstall_package(config: Config, package: Package) -> bool:
     World(sysroot).remove(package.qualified_name)
 
     return True
-
-
-def _copy_tree(src: str, dst: str):
-    """Recursively copy src tree into dst, merging directories."""
-    for root, dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        dst_dir = os.path.join(dst, rel)
-        os.makedirs(dst_dir, exist_ok=True)
-        for f in files:
-            shutil.copy2(os.path.join(root, f), os.path.join(dst_dir, f))

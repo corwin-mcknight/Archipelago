@@ -56,8 +56,8 @@ KTEST_WITH_INIT(obj_counter_live_count_independent, "obj/counter", obj_counter_i
     HandleTable table;
     uint32_t evt_before = g_type_registry.live_count(Event::TYPE_ID);
     uint32_t ctr_before = g_type_registry.live_count(Counter::TYPE_ID);
-    table.emplace<Event>(RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE);
-    table.emplace<Counter>(RIGHT_READ | RIGHT_WRITE, static_cast<uint64_t>(0));
+    KTEST_EXPECT_TRUE(table.emplace<Event>(RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE).is_ok());
+    KTEST_EXPECT_TRUE(table.emplace<Counter>(RIGHT_READ | RIGHT_WRITE, static_cast<uint64_t>(0)).is_ok());
     KTEST_EXPECT_ALL(g_type_registry.live_count(Event::TYPE_ID) == evt_before + 1,
                      g_type_registry.live_count(Counter::TYPE_ID) == ctr_before + 1);
 }

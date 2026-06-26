@@ -20,7 +20,7 @@ void kernel_assert(T condition, const char* message, const char* message_text, c
                     g_log.debug("Assertion failed: {0} ({1}), {2}:{3}", message_text, message, fname, line);
                     break;
                 case assertion_action::warn:
-                    g_log.warn("Assertion failed: {0} (1}), {2}:{3}", message_text, message, fname, line);
+                    g_log.warn("Assertion failed: {0} ({1}), {2}:{3}", message_text, message, fname, line);
                     break;
                 case assertion_action::panic:
                     g_log.fatal("Assertion failed: {0} ({1}), {2}:{3}", message_text, message, fname, line);

@@ -30,7 +30,3 @@ class Config:
 
     def get_arch(self):
         return self.config.get("arch", "x86_64")
-
-    def get_arch_config(self):
-        arch = self.get_arch()
-        return self.config.get("arch_configs", {}).get(arch, {})

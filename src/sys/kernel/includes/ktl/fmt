@@ -82,8 +82,8 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
             // If there's a specifier, get it.
             if (fmt[format_index] != '}') { fmtargs.specifier = fmt[format_index]; }
 
-            // Advance until next }
-            while (++format_index < fmt.size() && fmt[format_index] != '}') {}
+            // Advance to the closing } (format_index may already be on it when no specifier was given)
+            while (format_index < fmt.size() && fmt[format_index] != '}') { ++format_index; }
         }
 
         if (argument_index < sizeof...(args)) {

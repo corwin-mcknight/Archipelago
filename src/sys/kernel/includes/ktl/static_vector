@@ -22,6 +22,13 @@ template <typename T, size_t N> class static_vector : public static_array<T, N> 
     void clear() { m_count = 0; }
     size_t size() const { return m_count; }
 
+    // Bound element access against the live count, not the static capacity (hides static_array's at/[]).
+    maybe<T> at(size_t index) {
+        if (index < m_count) { return this->m_buffer[index]; }
+        return ktl::nothing;
+    }
+    T operator[](size_t index) { return at(index).value_or(T()); }
+
     // iterator
     T* begin() { return this->m_buffer; }
     T* end() { return this->m_buffer + m_count; }

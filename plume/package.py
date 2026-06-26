@@ -63,22 +63,6 @@ class Package:
             "version": match.group(3),
         }
 
-    @staticmethod
-    def split_qualified_name(qname: str) -> dict:
-        """Split 'category/name-version~arch' into components.
-
-        Examples:
-            'sys/kernel-0.0.1~x86_64' -> {'category': 'sys', 'name': 'kernel',
-                                           'version': '0.0.1', 'arch': 'x86_64'}
-        """
-        if "~" in qname:
-            base, arch = qname.rsplit("~", 1)
-        else:
-            base, arch = qname, ""
-        info = Package.split_name(base)
-        info["arch"] = arch
-        return info
-
     def __hash__(self):
         return hash(self.full_name)
 
