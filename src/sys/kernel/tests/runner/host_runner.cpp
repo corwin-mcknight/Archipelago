@@ -9,6 +9,7 @@
 
 #include <kernel/panic.h>
 #include <kernel/testing/registry.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -111,6 +112,12 @@ void emit_test_end(const char* name, const char* status, const char* reason, uin
     emit_raw(line);
 }
 
+void emit_test_meta_rss(const char* name, long peak_rss_kb) {
+    char line[256];
+    snprintf(line, sizeof line, "{\"event\":\"test_meta\",\"name\":\"%s\",\"peak_rss_kb\":%ld}", name, peak_rss_kb);
+    emit_raw(line);
+}
+
 bool expects_crash(const kernel::testing::ktest& t) {
     return (t.flags & kernel::testing::KTEST_FLAG_EXPECTS_CRASH) != 0;
 }
@@ -199,6 +206,11 @@ uint64_t save_and_disable_interrupts() { return 0; }
 void restore_interrupts(uint64_t) {}
 }  // namespace kernel::x86
 
+// Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child
+// _exit()s, which skips the runtime's atexit writer, so we flush this child's counters explicitly.
+// Weak: in a normal (non-coverage) build the symbol is absent and the call is skipped.
+extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
+
 int main(int argc, char** argv) {
     int total = 0, passed = 0, failed = 0;
     for (auto* t = __start__ktests; t != __stop__ktests; ++t) {
@@ -209,10 +221,12 @@ int main(int argc, char** argv) {
         if (pid == 0) {
             int rc = run_test_child(*t);
             fflush(stdout);
+            if (__llvm_profile_write_file) { __llvm_profile_write_file(); }
             _exit(rc);
         }
         int status = 0;
-        waitpid(pid, &status, 0);
+        struct rusage ru;
+        wait4(pid, &status, 0, &ru);
         bool ok;
         if (WIFEXITED(status)) {
             ok = (WEXITSTATUS(status) == 0);
@@ -232,6 +246,9 @@ int main(int argc, char** argv) {
             emit_test_end(t->name, "fail", "child did not exit normally", 0);
             ok = false;
         }
+        // ru_maxrss (Linux: KB) is this child's peak RSS. Each test is a fresh fork, so it includes a
+        // constant inherited baseline -- consistent across tests, so cross-test comparison is meaningful.
+        emit_test_meta_rss(t->name, ru.ru_maxrss);
         if (ok) {
             ++passed;
         } else {

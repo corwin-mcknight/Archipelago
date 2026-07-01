@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness_protocol import Aggregator, parse_line
+from harness_protocol import Aggregator, parse_line, write_junit
 
 RUNNER = os.path.join("build", "tools", "kernel-testrunner", "host-test-runner")
 ARTIFACTS = os.path.join("build", "host-test-artifacts")
@@ -23,7 +23,7 @@ ARTIFACTS = os.path.join("build", "host-test-artifacts")
 def main(argv):
     if not os.path.exists(RUNNER):
         print(f"host-test: runner not found at {RUNNER}", file=sys.stderr)
-        print("  build it first: python3 -m plume build sys/kernel-testrunner", file=sys.stderr)
+        print("  build it first: python3 -m plume build test/kernel-testrunner", file=sys.stderr)
         return 2
 
     os.makedirs(ARTIFACTS, exist_ok=True)
@@ -71,6 +71,7 @@ def main(argv):
     }
     with open(os.path.join(ARTIFACTS, "harness.json"), "w") as f:
         json.dump(harness, f, indent=2)
+    write_junit(harness["results"], os.path.join(ARTIFACTS, "junit.xml"), "host")
 
     for r in agg.results:
         if r.outcome != "pass":

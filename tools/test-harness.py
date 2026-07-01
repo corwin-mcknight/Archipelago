@@ -732,6 +732,7 @@ def write_summary(base_dir: Optional[Path], proto_results: List[harness_protocol
         "results": [r.to_dict() for r in proto_results],
     }
     (base_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    harness_protocol.write_junit(summary["results"], str(base_dir / "junit.xml"), "qemu")
 
 
 # ----------------------------------------------------------------------

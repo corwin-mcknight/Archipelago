@@ -8,6 +8,7 @@ Result schema (per test): {id, tier, outcome, duration_ns, failures[], diagnosti
 """
 
 import json
+from xml.sax.saxutils import escape, quoteattr
 
 HARNESS_PREFIX = "@@HARNESS "
 
@@ -77,6 +78,12 @@ class Aggregator:
             if reason and r.outcome == "fail" and reason not in r.failures:
                 r.failures.append(reason)
             self._current = None
+        elif kind == "test_meta":
+            # Out-of-band per-test diagnostics emitted after the test (e.g. parent-measured peak RSS).
+            r = self._get(ev.get("name", "?"))
+            for k, v in ev.items():
+                if k not in ("event", "name"):
+                    r.diagnostics[k] = v
 
     def feed_line(self, line):
         ev = parse_line(line)
@@ -95,3 +102,28 @@ class Aggregator:
         passed = sum(1 for r in self.results if r.outcome == "pass")
         failed = sum(1 for r in self.results if r.outcome == "fail")
         return len(self.results), passed, failed
+
+
+def write_junit(result_dicts, path, suite_name):
+    """Emit JUnit XML for CI from result dicts (the shared {id,tier,outcome,duration_ns,failures,...}
+    schema). One <testsuite>; each result is a <testcase> with a <failure> child when it did not pass."""
+    failures = sum(1 for r in result_dicts if r.get("outcome") != "pass")
+    total_time = sum((r.get("duration_ns") or 0) for r in result_dicts) / 1e9
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        f'<testsuites tests="{len(result_dicts)}" failures="{failures}" time="{total_time:.6f}">',
+        f'  <testsuite name={quoteattr(suite_name)} tests="{len(result_dicts)}" '
+        f'failures="{failures}" time="{total_time:.6f}">',
+    ]
+    for r in result_dicts:
+        t = (r.get("duration_ns") or 0) / 1e9
+        name = r.get("id", "?")
+        lines.append(f'    <testcase name={quoteattr(name)} classname={quoteattr(suite_name)} time="{t:.6f}">')
+        if r.get("outcome") != "pass":
+            msg = "; ".join(r.get("failures") or []) or "test failed"
+            lines.append(f'      <failure message={quoteattr(msg[:200])}>{escape(msg)}</failure>')
+        lines.append("    </testcase>")
+    lines.append("  </testsuite>")
+    lines.append("</testsuites>")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")

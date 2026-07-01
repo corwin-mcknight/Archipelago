@@ -30,8 +30,20 @@ sys/kernel-src-0.0.1:
   supports_live_sources: true
   live_source_path: "sys/kernel"
 
-sys/kernel-testrunner-0.0.1:
+test/kernel-testrunner-0.0.1:
   description: "Host-tier kernel test runner"
+  is_build_tool: true
+  supports_live_sources: true
+  live_source_path: "sys/kernel"
+
+test/kernel-fuzz-0.0.1:
+  description: "Host fuzz lane (libFuzzer over the demangler)"
+  is_build_tool: true
+  supports_live_sources: true
+  live_source_path: "sys/kernel"
+
+test/kernel-tsan-0.0.1:
+  description: "Host TSan lane (real-thread stress over ktl::atomic)"
   is_build_tool: true
   supports_live_sources: true
   live_source_path: "sys/kernel"

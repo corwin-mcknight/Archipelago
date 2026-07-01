@@ -13,7 +13,7 @@
 .PHONY: pkg_get_source pkg_configure pkg_build pkg_install
 
 KSRC    := $(LIVE_SOURCES)
-OBJDIR  := $(BUILD_DIR)/obj/sys/kernel-testrunner
+OBJDIR  := $(BUILD_DIR)/obj/test/kernel-testrunner
 RUNNER  := $(OBJDIR)/host-test-runner
 
 INC_KERNEL := -I $(KSRC)/includes/std -I $(KSRC)/includes
@@ -21,12 +21,20 @@ INC_HOST   := -I $(KSRC)/includes
 
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=all
 
+# Host line-coverage build (opt-in via COVERAGE=1 from tools/host-coverage.py). Only the amplifier
+# group (kernel logic under test) is instrumented; the harness is not. Linked into the runner so the
+# profile runtime is present; the runner flushes each forked child's counters before _exit.
+COV_FLAGS :=
+ifdef COVERAGE
+COV_FLAGS := -fprofile-instr-generate -fcoverage-mapping
+endif
+
 # The host tier is logic-authoritative, NOT the target ABI: we deliberately do not pretend to be
 # x86_64 here (this host may be aarch64). Both are LP64 little-endian, so the integer type model the
 # logic depends on is identical; ABI/codegen fidelity is the QEMU tier's job.
 AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden \
-	-fstrict-aliasing -Wstrict-aliasing=2 -Werror=unused-result -Werror=unused-value $(SAN)
+	-fstrict-aliasing -Wstrict-aliasing=2 -Werror=unused-result -Werror=unused-value $(SAN) $(COV_FLAGS)
 
 HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN)
 
@@ -63,7 +71,7 @@ pkg_build:
 		$(CXX) $(AMP_FLAGS) $(INC_KERNEL) -c $$src -o $$obj || exit 1; \
 	done
 	$(CXX) $(HARNESS_FLAGS) $(INC_HOST) -c $(RUNNER_DIR)/host_runner.cpp -o $(OBJDIR)/host_runner.o
-	$(CXX) $(SAN) -fuse-ld=lld $(AMP_OBJS) $(OBJDIR)/host_runner.o -Wl,-T,$(FRAGMENT) -o $(RUNNER)
+	$(CXX) $(SAN) $(COV_FLAGS) -fuse-ld=lld $(AMP_OBJS) $(OBJDIR)/host_runner.o -Wl,-T,$(FRAGMENT) -o $(RUNNER)
 
 pkg_install:
 	@echo "[plume] Installing host test runner"

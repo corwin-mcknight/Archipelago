@@ -4,9 +4,8 @@
 
 #if CONFIG_KERNEL_TESTING
 
-#include <stddef.h>
-
 #include <kernel/testing/registry.h>  // ktest record, flags, abort + report_assertion hooks
+#include <stddef.h>
 
 // The registry is walked as a packed array between __start__ktests/__stop__ktests, so the entries
 // must stay contiguous. no_sanitize("address") keeps AddressSanitizer (host tier) from inserting
