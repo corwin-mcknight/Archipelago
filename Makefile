@@ -50,6 +50,7 @@ host-fuzz:
 host-tsan:
 	@$(PLUME) build test/kernel-tsan
 	@build/tools/kernel-tsan/tsan-atomic
+	@build/tools/kernel-tsan/tsan-log-ring
 
 shell: install
 	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -display none -m 128 -smp 1
