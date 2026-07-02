@@ -9,6 +9,8 @@
 #include <ktl/span>
 #include <ktl/string_view>
 
+#include "kernel/elf_symbols.h"
+
 namespace kernel::symbols {
 
 using ktl::maybe;
@@ -33,52 +35,10 @@ size_t g_entry_count = 0;
 size_t g_string_used = 0;
 bool g_initialized   = false;
 
-// Minimal ELF64 types -- avoids pulling in a vendored elf.h.
-struct Elf64_Ehdr {
-    uint8_t e_ident[16];
-    uint16_t e_type;
-    uint16_t e_machine;
-    uint32_t e_version;
-    uint64_t e_entry;
-    uint64_t e_phoff;
-    uint64_t e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize;
-    uint16_t e_phentsize;
-    uint16_t e_phnum;
-    uint16_t e_shentsize;
-    uint16_t e_shnum;
-    uint16_t e_shstrndx;
-};
-
-struct Elf64_Shdr {
-    uint32_t sh_name;
-    uint32_t sh_type;
-    uint64_t sh_flags;
-    uint64_t sh_addr;
-    uint64_t sh_offset;
-    uint64_t sh_size;
-    uint32_t sh_link;
-    uint32_t sh_info;
-    uint64_t sh_addralign;
-    uint64_t sh_entsize;
-};
-
-struct Elf64_Sym {
-    uint32_t st_name;
-    uint8_t st_info;
-    uint8_t st_other;
-    uint16_t st_shndx;
-    uint64_t st_value;
-    uint64_t st_size;
-};
-
-constexpr uint32_t kShtSymtab  = 2;
-constexpr uint8_t kSttFunc     = 2;
-
-// Magic bytes and class checked against e_ident before we trust any other field.
-constexpr uint8_t kElfMagic[4] = {0x7f, 'E', 'L', 'F'};
-constexpr uint8_t kElfClass64  = 2;
+// The ELF64 types, constants, and the pure locate_symbol_tables() parser now live in
+// <kernel/elf_symbols.h> (namespace detail) so the host fuzz lane can drive the parser directly.
+using detail::Elf64_Sym;
+using detail::symbol_tables;
 
 // True when the half-open region [offset, offset + size) lies fully inside an
 // `elf_size`-byte blob, computed without overflow.
@@ -138,17 +98,12 @@ maybe<const func_entry&> find_entry(uintptr_t addr) {
     return e;
 }
 
-// The validated symbol/string tables init() ingests, isolating the ELF parsing
-// from the ingestion loop.
-struct symbol_tables {
-    const Elf64_Sym* syms;
-    size_t count;
-    const char* strtab;
-    size_t strtab_size;
-};
+}  // namespace
 
-// Validate the ELF header, then locate .symtab and its associated string table.
-// Every malformed or out-of-bounds field short-circuits to nothing.
+// Validate the ELF header, then locate .symtab and its associated string table. Every malformed or
+// out-of-bounds field short-circuits to nothing. Declared in <kernel/elf_symbols.h>; uses the
+// file-static region_in_bounds above.
+namespace detail {
 maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size) {
     if (elf_data == nullptr || elf_size < sizeof(Elf64_Ehdr)) { return nothing; }
 
@@ -165,7 +120,11 @@ maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size)
         return nothing;
     }
 
-    const auto* sections = reinterpret_cast<const Elf64_Shdr*>(base + hdr->e_shoff);
+    // The section/symbol arrays are read as aligned Elf64 structs; a misaligned offset would bind a
+    // reference to misaligned storage (UB, and a fault on strict-alignment targets), so reject it.
+    const uint8_t* sections_bytes = base + hdr->e_shoff;
+    if (reinterpret_cast<uintptr_t>(sections_bytes) % alignof(Elf64_Shdr) != 0) { return nothing; }
+    const auto* sections = reinterpret_cast<const Elf64_Shdr*>(sections_bytes);
     auto sym_sh =
         ktl::find_if(sections, sections + hdr->e_shnum, [](const Elf64_Shdr& sh) { return sh.sh_type == kShtSymtab; });
     if (!sym_sh) { return nothing; }
@@ -173,30 +132,32 @@ maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size)
     if (!region_in_bounds(sym_sh->sh_offset, sym_sh->sh_size, elf_size)) { return nothing; }
     if (sym_sh->sh_link >= hdr->e_shnum) { return nothing; }
 
+    const uint8_t* syms_bytes = base + sym_sh->sh_offset;
+    if (reinterpret_cast<uintptr_t>(syms_bytes) % alignof(Elf64_Sym) != 0) { return nothing; }
+
     const Elf64_Shdr& str_sh = sections[sym_sh->sh_link];
     if (!region_in_bounds(str_sh.sh_offset, str_sh.sh_size, elf_size)) { return nothing; }
 
     return symbol_tables{
-        .syms        = reinterpret_cast<const Elf64_Sym*>(base + sym_sh->sh_offset),
+        .syms        = reinterpret_cast<const Elf64_Sym*>(syms_bytes),
         .count       = static_cast<size_t>(sym_sh->sh_size / sym_sh->sh_entsize),
         .strtab      = reinterpret_cast<const char*>(base + str_sh.sh_offset),
         .strtab_size = static_cast<size_t>(str_sh.sh_size),
     };
 }
-
-}  // namespace
+}  // namespace detail
 
 void init(const void* elf_data, size_t elf_size) {
     if (g_initialized) { return; }
 
-    auto tables = locate_symbol_tables(elf_data, elf_size);
+    auto tables = detail::locate_symbol_tables(elf_data, elf_size);
     if (!tables) { return; }
 
     const char* strtab_end  = tables->strtab + tables->strtab_size;
 
     // A usable function symbol: function-typed, non-empty extent, in-bounds name.
     auto is_function_symbol = [&](const Elf64_Sym& s) {
-        return (s.st_info & 0xf) == kSttFunc && s.st_size != 0 && s.st_name < tables->strtab_size;
+        return (s.st_info & 0xf) == detail::kSttFunc && s.st_size != 0 && s.st_name < tables->strtab_size;
     };
 
     for (const Elf64_Sym& s : ktl::span(tables->syms, tables->count) | ktl::views::filter(is_function_symbol)) {

@@ -11,6 +11,7 @@ FUZZ_DEMANGLE := $(OBJDIR)/fuzz-demangle
 FUZZ_FMT      := $(OBJDIR)/fuzz-fmt
 FUZZ_JSON     := $(OBJDIR)/fuzz-json
 FUZZ_ATOI     := $(OBJDIR)/fuzz-atoi
+FUZZ_ELF      := $(OBJDIR)/fuzz-elf
 
 INC_KERNEL := -I $(KSRC)/includes/std -I $(KSRC)/includes
 
@@ -50,6 +51,11 @@ pkg_build:
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/atoi_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/atoi_fuzz.cpp -o $(OBJDIR)/atoi_fuzz.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/atoi_fuzz.o $(OBJDIR)/stdlib.o -o $(FUZZ_ATOI)
+	# ELF parser lives in symbols.cpp (pure logic, no hardware deps); link it in for the parser under test.
+	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp"
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp -o $(OBJDIR)/elf_symbols_fuzz.o
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/symbols.cpp -o $(OBJDIR)/symbols.o
+	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
 
 pkg_install:
 	@echo "[plume] Installing fuzzers"
@@ -58,3 +64,4 @@ pkg_install:
 	cp $(FUZZ_FMT) $(TOOL_INSTALL)/kernel-fuzz/fuzz-fmt
 	cp $(FUZZ_JSON) $(TOOL_INSTALL)/kernel-fuzz/fuzz-json
 	cp $(FUZZ_ATOI) $(TOOL_INSTALL)/kernel-fuzz/fuzz-atoi
+	cp $(FUZZ_ELF) $(TOOL_INSTALL)/kernel-fuzz/fuzz-elf
