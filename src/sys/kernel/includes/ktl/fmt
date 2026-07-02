@@ -61,26 +61,27 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
             // Rest of numbers is the width of the text
             // All fields are optional but specifier...
 
-            // Left aligned
-            if (fmt[++format_index] == '-') {
+            // Left aligned. Every read below is guarded against fmt.size(): a spec that ends
+            // mid-field (e.g. a trailing "{...:") must stop, not walk the index past the string.
+            if (++format_index < fmt.size() && fmt[format_index] == '-') {
                 fmtargs.right_aligned = false;
                 ++format_index;
             }
 
             // Zero padded
-            if (fmt[format_index] == '0') {
+            if (format_index < fmt.size() && fmt[format_index] == '0') {
                 fmtargs.zero_padded = true;
                 ++format_index;
             }
 
             // Get width as a substing (until first non-digit character)...
-            while (fmt[format_index] >= '0' && fmt[format_index] <= '9') {
+            while (format_index < fmt.size() && fmt[format_index] >= '0' && fmt[format_index] <= '9') {
                 fmtargs.width = fmtargs.width * 10 + ((size_t)fmt[format_index] - '0');
                 ++format_index;
             }
 
             // If there's a specifier, get it.
-            if (fmt[format_index] != '}') { fmtargs.specifier = fmt[format_index]; }
+            if (format_index < fmt.size() && fmt[format_index] != '}') { fmtargs.specifier = fmt[format_index]; }
 
             // Advance to the closing } (format_index may already be on it when no specifier was given)
             while (format_index < fmt.size() && fmt[format_index] != '}') { ++format_index; }

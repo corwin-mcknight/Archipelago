@@ -41,9 +41,10 @@ host-coverage:
 # only ever flags libFuzzer's own retained corpus state.
 host-fuzz:
 	@$(PLUME) build test/kernel-fuzz
-	@mkdir -p build/host-fuzz/corpus
-	@ASAN_OPTIONS=detect_leaks=0 build/tools/kernel-fuzz/fuzz-demangle -artifact_prefix=build/host-fuzz/ \
-		-max_total_time=$(if $(FUZZ_TIME),$(FUZZ_TIME),30) build/host-fuzz/corpus
+	@mkdir -p build/host-fuzz/$(if $(FUZZ),$(FUZZ),demangle)/corpus
+	@ASAN_OPTIONS=detect_leaks=0 build/tools/kernel-fuzz/fuzz-$(if $(FUZZ),$(FUZZ),demangle) \
+		-artifact_prefix=build/host-fuzz/$(if $(FUZZ),$(FUZZ),demangle)/ \
+		-max_total_time=$(if $(FUZZ_TIME),$(FUZZ_TIME),30) build/host-fuzz/$(if $(FUZZ),$(FUZZ),demangle)/corpus
 
 # Periodic/on-demand lane: real-thread stress over lock-free KTL data structures under TSan. A TSan
 # report (data race / missing synchronization) aborts with nonzero exit.
