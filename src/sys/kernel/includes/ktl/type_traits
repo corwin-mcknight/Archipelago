@@ -37,16 +37,15 @@ template <class T> struct remove_cv {
 
 template <class T> using remove_cv_t = typename remove_cv<T>::type;
 
-template <class T> struct decay {
-   private:
-    typedef typename remove_reference<T>::type U;
-
-   public:
-    typedef typename remove_cv<U>::type type;
+template <class T> struct remove_extent {
+    typedef T type;
 };
-
-// TODO: Support arrays and functions decaying to pointers.
-template <class T> using decay_t = typename decay<T>::type;
+template <class T> struct remove_extent<T[]> {
+    typedef T type;
+};
+template <class T, __SIZE_TYPE__ N> struct remove_extent<T[N]> {
+    typedef T type;
+};
 
 template <class T, T v> struct integral_constant {
     static constexpr T value = v;
@@ -93,5 +92,18 @@ template <class T> constexpr bool is_const_v      = __is_const(T);
 
 template <bool B, class T, class F> struct conditional { using type = T; };
 template <class T, class F> struct conditional<false, T, F> { using type = F; };
+
+// std::decay semantics: array -> element pointer, function -> function pointer, else remove cv/ref.
+template <class T> struct decay {
+   private:
+    typedef typename remove_reference<T>::type U;
+
+   public:
+    typedef typename conditional<is_array_v<U>, typename remove_extent<U>::type*,
+                                 typename conditional<is_function_v<U>, U*, typename remove_cv<U>::type>::type>::type
+        type;
+};
+
+template <class T> using decay_t = typename decay<T>::type;
 
 }  // namespace ktl
