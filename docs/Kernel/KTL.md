@@ -27,9 +27,6 @@ Non-owning, `constexpr`-compatible string reference. Does not allocate.
 Fixed-capacity string that stores up to `N` characters inline.
 Used by the [[Device Drivers|logging system]] for log messages (240 bytes).
 
-### `ktl::circular_buffer<T, N>`
-Fixed-size circular buffer. Used by `system_log` to hold the last 64 log messages.
-
 ### `ktl::static_array<T, N>`
 Fixed-size array. Equivalent to `std::array`.
 
