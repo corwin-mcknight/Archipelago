@@ -101,4 +101,26 @@ KTEST(ktl_vector_range_for, "ktl/vector") {
     KTEST_EXPECT_EQUAL(static_cast<size_t>(expected), const_ref.size());
 }
 
+KTEST(ktl_vector_growth_preserves_elements, "ktl/vector") {
+    // Push far past the initial capacity so several reallocations happen mid-fill.
+    ktl::vector<int> vec;
+    for (int i = 0; i < 100; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
+
+    KTEST_REQUIRE_TRUE(vec.size() == 100);
+    for (int i = 0; i < 100; ++i) { KTEST_EXPECT_EQUAL(vec[static_cast<size_t>(i)], i); }
+}
+
+KTEST(ktl_vector_non_default_constructible, "ktl/vector") {
+    struct wrapped {
+        explicit wrapped(int v) : value(v) {}
+        int value;
+    };
+
+    ktl::vector<wrapped> vec;
+    for (int i = 0; i < 10; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(wrapped(i))); }
+
+    KTEST_REQUIRE_TRUE(vec.size() == 10);
+    KTEST_EXPECT_EQUAL(vec[9].value, 9);
+}
+
 #endif  // CONFIG_KERNEL_TESTING

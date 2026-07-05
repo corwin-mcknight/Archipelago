@@ -234,21 +234,18 @@ template <typename T, typename F> void filter(maybe<T>* arr, int count, F&& func
 };  // namespace ktl
 
 template <> struct ktl::format::kfmt_printer<ktl::nothing_t> {
-    static void print(format_args args, char* buffer, size_t& index, ktl::nothing_t value) {
-        UNUSED(args);
-        UNUSED(value);
-        ktl::string_view nothing_str("<<ktl::nothing_t>>");
-        nothing_str.copy(buffer + index, nothing_str.size());
-        index += nothing_str.size();
+    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, ktl::nothing_t) {
+        args.zero_padded = false;
+        format_args::print_string(args, buffer, buffer_max, index, "<<ktl::nothing_t>>");
     }
 };
 
 template <typename T> struct ktl::format::kfmt_printer<ktl::maybe<T>> {
-    static void print(format_args args, char* buffer, size_t& index, ktl::maybe<T>& arg) {
+    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, const ktl::maybe<T>& arg) {
         if (arg.has_value()) {
-            return kfmt_printer<T>::print(args, buffer, index, arg.value());
+            kfmt_printer<T>::print(args, buffer, buffer_max, index, arg.value());
         } else {
-            return kfmt_printer<ktl::nothing_t>::print(args, buffer, index, ktl::nothing);
+            kfmt_printer<ktl::nothing_t>::print(args, buffer, buffer_max, index, ktl::nothing);
         }
     }
 };

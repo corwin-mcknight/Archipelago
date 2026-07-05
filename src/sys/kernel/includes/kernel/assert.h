@@ -1,9 +1,12 @@
 #ifndef KERNEL_ASSERT_H
 #define KERNEL_ASSERT_H
 
-#ifndef NDEBUG
 #include "kernel/crash.h"
 #include "kernel/log.h"
+
+#ifdef NDEBUG
+constexpr bool assertions_enabled = false;
+#else
 constexpr bool assertions_enabled = true;
 #endif
 

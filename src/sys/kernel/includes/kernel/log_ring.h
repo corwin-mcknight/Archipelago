@@ -11,7 +11,6 @@ namespace kernel {
 
 /// Lock-free, multi-producer / single-consumer bounded ring.
 ///
-/// 
 /// Producers reserve a sequence lock-free (compare-exchange on the write index, with a
 /// fullness check that leaves no hole on overflow -- "fail to log"), write the payload into
 /// the reserved slot, and publish it with a release store of the slot state. A single active

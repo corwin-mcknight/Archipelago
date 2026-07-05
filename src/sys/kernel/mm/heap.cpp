@@ -1,4 +1,3 @@
-#include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "std/new.h"
 
@@ -12,10 +11,7 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept { return g_early
 void* operator new[](size_t size, const std::nothrow_t&) noexcept { return g_early_heap.alloc(size, sizeof(void*)); }
 
 void operator delete(void* ptr) noexcept {
-    if (ptr == nullptr) {
-        g_log.error("Attemped to free a nullptr");
-        return;
-    }
+    if (ptr == nullptr) { return; }  // deleting null is a well-defined no-op
     g_early_heap.free(ptr);
 }
 

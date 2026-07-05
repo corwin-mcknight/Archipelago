@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <std/new.h>
+
 #include <ktl/maybe>
 #include <ktl/type_traits>
 #include <ktl/utility>
@@ -122,7 +124,7 @@ template <typename T> class vector {
 
     vector()             = default;
 
-    ~vector() { delete[] m_data; }
+    ~vector() { destroy_and_free(); }
 
     vector(const vector&)            = delete;
     vector& operator=(const vector&) = delete;
@@ -131,7 +133,7 @@ template <typename T> class vector {
 
     vector& operator=(vector&& other) noexcept {
         if (this != &other) {
-            delete[] m_data;
+            destroy_and_free();
             move_from(ktl::move(other));
         }
         return *this;
@@ -139,7 +141,7 @@ template <typename T> class vector {
 
     bool push_back(T value) {
         if (!ensure_capacity(m_size + 1)) { return false; }
-        m_data[m_size++] = ktl::move(value);
+        new (&m_data[m_size++]) T(ktl::move(value));
         return true;
     }
 
@@ -148,7 +150,7 @@ template <typename T> class vector {
     ktl::maybe<T> pop_back() {
         if (empty()) { return ktl::nothing; }
         T value = ktl::move(m_data[m_size - 1]);
-        --m_size;
+        m_data[--m_size].~T();
         return value;
     }
 
@@ -162,7 +164,10 @@ template <typename T> class vector {
         return m_data[m_size - 1];
     }
 
-    void clear() { m_size = 0; }
+    void clear() {
+        for (size_t i = 0; i < m_size; ++i) { m_data[i].~T(); }
+        m_size = 0;
+    }
 
     size_t size() const { return m_size; }
     bool empty() const { return m_size == 0; }
@@ -219,17 +224,27 @@ template <typename T> class vector {
         return reallocate(new_capacity);
     }
 
+    // Elements live in raw storage and are constructed/destroyed explicitly, so T need not be
+    // default-constructible and growth move-constructs each element exactly once.
     bool reallocate(size_t new_capacity) {
-        T* new_data = new T[new_capacity];
+        if (new_capacity > SIZE_MAX / sizeof(T)) { return false; }
+        T* new_data = static_cast<T*>(operator new[](new_capacity * sizeof(T), std::nothrow));
         if (new_data == nullptr) { return false; }
 
-        for (size_t i = 0; i < m_size; ++i) { new_data[i] = ktl::move(m_data[i]); }
-
-        delete[] m_data;
+        for (size_t i = 0; i < m_size; ++i) {
+            new (&new_data[i]) T(ktl::move(m_data[i]));
+            m_data[i].~T();
+        }
+        operator delete[](static_cast<void*>(m_data));
 
         m_data     = new_data;
         m_capacity = new_capacity;
         return true;
+    }
+
+    void destroy_and_free() {
+        clear();
+        operator delete[](static_cast<void*>(m_data));
     }
 
     T* m_data         = nullptr;

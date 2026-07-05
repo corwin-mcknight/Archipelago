@@ -16,6 +16,7 @@ namespace format {
 
 template <typename... Args>
 constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string_view fmt, Args... args) {
+    if (buffer_max == 0) { return; }  // buffer_max - 1 below would wrap and unbound every write
     size_t buffer_index = 0;
 
     for (size_t format_index = 0; format_index < fmt.size(); ++format_index) {

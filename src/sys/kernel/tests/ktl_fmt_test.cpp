@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_TESTING
 
 #include <ktl/fmt>
+#include <ktl/maybe>
 #include <ktl/string_view>
 
 using namespace kernel::testing;
@@ -37,6 +38,29 @@ KTEST(ktl_fmt_width_without_specifier, "ktl/fmt") {
     ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:8}|", 42);
 
     KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "      42|");
+}
+
+KTEST(ktl_fmt_maybe_argument, "ktl/fmt") {
+    char buffer[64];
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0}", ktl::maybe<int>(42));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "42");
+
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0}", ktl::maybe<int>(ktl::nothing));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "<<ktl::nothing_t>>");
+}
+
+KTEST(ktl_fmt_maybe_truncates_at_buffer_end, "ktl/fmt") {
+    // An empty maybe renders "<<ktl::nothing_t>>"; a small buffer must clip it, not overrun.
+    char buffer[8];
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0}", ktl::maybe<int>(ktl::nothing));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "<<ktl::");
+}
+
+KTEST(ktl_fmt_zero_sized_buffer, "ktl/fmt") {
+    // buffer_max == 0 must be a no-op, not a wrapped bound.
+    char canary = 'x';
+    ktl::format::format_to_buffer_raw(&canary, 0, "{0}", 42);
+    KTEST_EXPECT_EQUAL(canary, 'x');
 }
 
 #endif  // CONFIG_KERNEL_TESTING
