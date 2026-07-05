@@ -1,7 +1,7 @@
 #pragma once
 
 #define ARCH_X86 1
-#define PRODUCT_DEBUG 0
+
 
 #define CONFIG_CPU_CACHE_LINE_SIZE 64
 #define KERNEL_MINIMUM_PAGE_SIZE 0x1000
@@ -19,6 +19,10 @@
 #define CONFIG_MAX_OBJECT_TYPES 64
 
 // Testing overrides
+#ifndef PRODUCT_DEBUG
+#define PRODUCT_DEBUG 0
+#endif
+
 
 #if CONFIG_KERNEL_TESTING && !CONFIG_KERNEL_SHELL
 #error "CONFIG_KERNEL_TESTING requires CONFIG_KERNEL_SHELL"

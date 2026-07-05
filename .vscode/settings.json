@@ -49,5 +49,5 @@
         "fmt_types": "cpp",
         "maybe": "cpp"
     },
-    "mesonbuild.configureOnOpen": false
+    "clangd.path": "/usr/bin/clangd"
 }
