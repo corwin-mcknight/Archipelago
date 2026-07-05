@@ -6,10 +6,20 @@
 
 ## Kernel Core
 - Add severity filtering to the log pipeline (compile-time and/or runtime min-level threshold); buffered sinks and crash dump emission are already done.
+- Log renderer reaches into fixed_string internals (m_buffer) to format the timestamp/color prefix, and the 32-byte prefix buffer is sized by eyeball -- format through the type's interface and static_assert the worst case.
+
+## Code Hygiene
+- Unify naming: types mix CamelCase (HandleTable), snake_case (page_frame_allocator), and I-prefix (IInterruptHandler); constants mix kMaxSymbols, PAGE_SIZE, and IM_MAX_HANDLERS. Convention per docs is CamelCase types / UPPER_SNAKE constants -- sweep the outliers.
+- x86_64/main.cpp hardcodes memmap `type == 6` two lines below a symbolic LIMINE_MEMMAP_USABLE check -- use the named constant.
+- Register struct fields userrsp/eflags are legacy 32-bit names for what are rsp/rflags on x86_64.
+- interrupts.cpp handler entry union: clear_handler writes the function arm regardless of which arm is active (works only because both are pointers) -- clear by discriminant or memset.
 
 ## KTL & Error Handling
-- Monadic-style audit: result<void>/KTRY/errc landed 2026-06-12 and closed the findings they gated; recount the remainder (still open: register_interrupt, symbols::init, and static_vector::push_back return void).
-- Container accessor maybe<T&> overloads (M040) -- last KTL addition proposed by the audit.
+- Monadic-style audit follow-ups: result<void>/KTRY/errc landed 2026-06-12 and closed the findings they gated; recount the remainder (still open: register_interrupt, symbols::init, and static_vector::push_back return void).
+- Container accessor maybe<T&> overloads (M040) -- last KTL addition proposed by the audit; vector at/front/back currently return maybe<T> by copy.
+- maybe<T> stores an inline default-constructed T, so an empty maybe holds a live value and non-default-constructible types won't compile -- rework to raw storage with explicit construct/destroy (vector already works this way).
+- vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
+- Result/maybe monadic combinators (map/and_then/or_else) are const-only and operate on copies -- add rvalue-qualified overloads that move.
 
 ## Memory Management
 - Background page-zeroing worker thread (gated on scheduler).
@@ -72,6 +82,7 @@
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler/syscall fuzz targets once those subsystems exist.
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
+- KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/drivers/pit.cpp`, and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience
