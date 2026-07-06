@@ -33,7 +33,7 @@
     - First-fit virtual address search for VMO bindings (map takes an explicit vaddr today).
     - Binding splitting for partial unmap/protect (whole-slot ranges only).
     - Region handle exposure + detached-state machine (task/IPC milestone).
-    - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone/fork).
+    - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone).
     - Fault resolution consults only the kernel aspace until tasks own address spaces.
     - Page-table frames sit in descriptor state ACTIVE, not WIRED; revisit when eviction lands.
     - PAT programming for true write-combining (degrades to uncached today).

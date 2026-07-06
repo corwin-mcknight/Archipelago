@@ -18,23 +18,17 @@ class pager {
     virtual ~pager()                                    = default;
 
     // Produce the frame backing the given page offset within the VMO.
+    // Writeback joins this interface when the userspace pager protocol lands;
+    // nothing pages out until then.
     virtual ktl::result<vm_paddr_t> fill(uint64_t page) = 0;
-
-    // Persist a frame's contents back to the store. Unused this milestone --
-    // present so the userspace pager slots in later.
-    virtual ktl::result<void> writeback(uint64_t page, vm_paddr_t frame) {
-        (void)page;
-        (void)frame;
-        return ktl::result<void>::ok();
-    }
 
     // Whether frames produced by fill() belong to the PMM (freed on
     // decommit/destroy). Device windows return false: their frames are
     // never PMM-owned and never evictable.
-    virtual bool owns_frames() const = 0;
+    virtual bool owns_frames() const                    = 0;
 
     // Whether the owning VMO may be resized. Device windows are fixed.
-    virtual bool resizable() const   = 0;
+    virtual bool resizable() const                      = 0;
 
     // Cache mode for mappings of this pager's frames.
     virtual vm_cache_mode cache_mode() const { return vm_cache_mode::CACHED; }

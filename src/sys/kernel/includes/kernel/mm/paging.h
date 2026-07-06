@@ -82,7 +82,6 @@ class address_space {
     // Load this space's page tables into the CPU (writes CR3) and record it as
     // the active space. Single-CPU scoped; cross-CPU shootdown is out of scope.
     void activate();
-    static const address_space* active();
 
     // Exclusive end of the low (non-kernel) virtual address half. The value is
     // arch-specific (canonical-form on x86_64, Sv39/Sv48 on riscv64); portable

@@ -265,7 +265,6 @@ KTEST_INTEGRATION(paging_activate_and_touch, "mm/paging") {
     write_cr3(boot_cr3);
 
     KTEST_EXPECT_EQUAL(seen, magic);
-    KTEST_EXPECT_TRUE(address_space::active() == &space);
 
     KTEST_REQUIRE_TRUE(space.unmap_page(mid_vaddr).has_value());
     kernel::mm::g_page_frame_allocator.free(frame);

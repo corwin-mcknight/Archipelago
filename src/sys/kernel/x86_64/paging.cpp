@@ -267,8 +267,6 @@ void address_space::adopt_active() {
     g_active_space = this;
 }
 
-const address_space* address_space::active() { return g_active_space; }
-
 // End of the canonical low half: bit 47 sign-extension boundary.
 uintptr_t address_space::low_limit() { return 0x0000800000000000ull; }
 
