@@ -21,8 +21,9 @@ constexpr uint64_t ADDR_MASK     = 0x000FFFFFFFFFF000ull;
 }  // namespace pte
 
 // The one currently active address space on this CPU. A plain global until
-// per-CPU storage exists; single-CPU scoped.
-const vm_aspace* g_active_space = nullptr;
+// per-CPU storage exists; single-CPU scoped. The fault handler resolves
+// against it.
+vm_aspace* g_active_space = nullptr;
 
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
@@ -287,6 +288,8 @@ void vm_aspace::activate() {
     asm volatile("mov %0, %%cr3" ::"r"(m_arch.pml4_phys) : "memory");
     g_active_space = this;
 }
+
+vm_aspace* vm_aspace::active() { return g_active_space; }
 
 bool vm_aspace::arch_init_kernel() {
     if (m_arch.pml4_phys != 0) { return false; }

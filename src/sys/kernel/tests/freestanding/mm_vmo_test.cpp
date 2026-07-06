@@ -126,6 +126,49 @@ KTEST_INTEGRATION(vmo_mapping_backrefs_track_bindings, "mm/vmo") {
     KTEST_EXPECT_TRUE(aspace.root().map(MAP_BASE, 0x2000, v, (PAGES - 1) * 0x1000, RW).is_err());
 }
 
+// One VMO mapped into two aspaces: decommit and shrink walk the mapping
+// back-refs and zap the translation in every space, not just one.
+KTEST_INTEGRATION(vmo_backrefs_zap_every_aspace, "mm/vmo") {
+    vm_aspace a, b;
+    KTEST_REQUIRE_TRUE(a.init());
+    KTEST_REQUIRE_TRUE(b.init());
+    auto v = create_anonymous_vmo(PAGES);
+    KTEST_REQUIRE_TRUE(v.get() != nullptr);
+
+    constexpr uintptr_t B_BASE = MAP_BASE + 0x40000000;  // different vaddr in b
+    KTEST_REQUIRE_TRUE(a.root().map(MAP_BASE, PAGES * 0x1000, v, 0, RW).is_ok());
+    KTEST_REQUIRE_TRUE(b.root().map(B_BASE, PAGES * 0x1000, v, 0, RW).is_ok());
+    KTEST_EXPECT_EQUAL(v->mapping_count(), 2u);
+
+    // Simulate fault fills of page 0 in both spaces.
+    KTEST_REQUIRE_TRUE(v->commit(0, 1).is_ok());
+    auto frame = v->resident_frame(0);
+    KTEST_REQUIRE_TRUE(frame.has_value());
+    KTEST_REQUIRE_TRUE(a.map_page(MAP_BASE, frame.value(), RW));
+    KTEST_REQUIRE_TRUE(b.map_page(B_BASE, frame.value(), RW));
+
+    KTEST_REQUIRE_TRUE(v->decommit(0, 1).is_ok());
+    KTEST_EXPECT_FALSE(a.walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(b.walk(B_BASE).has_value());
+
+    // Shrink zaps the tail in every aspace and frees the frame.
+    KTEST_REQUIRE_TRUE(v->commit(PAGES - 1, 1).is_ok());
+    auto tail = v->resident_frame(PAGES - 1);
+    KTEST_REQUIRE_TRUE(tail.has_value());
+    uintptr_t a_tail = MAP_BASE + (PAGES - 1) * 0x1000;
+    uintptr_t b_tail = B_BASE + (PAGES - 1) * 0x1000;
+    KTEST_REQUIRE_TRUE(a.map_page(a_tail, tail.value(), RW));
+    KTEST_REQUIRE_TRUE(b.map_page(b_tail, tail.value(), RW));
+    KTEST_REQUIRE_TRUE(v->set_size(1).is_ok());
+    KTEST_EXPECT_FALSE(a.walk(a_tail).has_value());
+    KTEST_EXPECT_FALSE(b.walk(b_tail).has_value());
+    KTEST_EXPECT_EQUAL(v->resident_pages(), 0u);
+
+    KTEST_REQUIRE_TRUE(a.root().unmap(MAP_BASE, PAGES * 0x1000).is_ok());
+    KTEST_REQUIRE_TRUE(b.root().unmap(B_BASE, PAGES * 0x1000).is_ok());
+    KTEST_EXPECT_EQUAL(v->mapping_count(), 0u);
+}
+
 KTEST_INTEGRATION(vmo_resize_grow_and_shrink, "mm/vmo") {
     // Growth: mapped in the kernel aspace so real faults fill the new pages.
     // Above 4 GiB -- the boot identity map covers lower addresses.

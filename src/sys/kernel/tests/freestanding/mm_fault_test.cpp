@@ -103,6 +103,31 @@ KTEST_INTEGRATION(fault_write_to_unpopulated_page_skips_zero_page, "mm/fault") {
     KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());
 }
 
+// Demand paging works in a non-kernel aspace: the handler resolves against
+// whichever space is active, using its own region tree.
+KTEST_INTEGRATION(fault_resolves_in_activated_scratch_aspace, "mm/fault") {
+    vm_aspace scratch;
+    KTEST_REQUIRE_TRUE(scratch.init());
+    auto v = create_anonymous_vmo(PAGES);
+    KTEST_REQUIRE_TRUE(v.get() != nullptr);
+    KTEST_REQUIRE_TRUE(scratch.root().map(MAP_BASE, PAGES * PAGE, v, 0, RW).is_ok());
+
+    uint64_t faults_before = scratch.fault_count();
+
+    scratch.activate();
+    *reinterpret_cast<volatile uint64_t*>(MAP_BASE) = 0xD15EA5Eull;  // faults in the scratch space
+    uint64_t seen                                   = *reinterpret_cast<volatile uint64_t*>(MAP_BASE);
+    kernel_aspace().activate();
+
+    KTEST_EXPECT_EQUAL(seen, 0xD15EA5Eull);
+    KTEST_EXPECT_EQUAL(v->resident_pages(), 1u);
+    KTEST_EXPECT_TRUE(scratch.fault_count() >= faults_before + 1);
+
+    // The translation lives in the scratch space only.
+    KTEST_EXPECT_TRUE(scratch.walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(kernel_aspace().walk(MAP_BASE).has_value());
+}
+
 // A fault outside any binding must keep crash-dumping exactly as before the
 // resolver existed (the harness inverts the outcome: crash = pass).
 KTEST_CRASH_TEST(fault_outside_binding_still_crashes, "mm/fault") {

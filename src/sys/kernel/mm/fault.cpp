@@ -29,9 +29,11 @@ bool resolve_cow(vm_aspace& aspace, region_child& binding, vmo& obj, uint64_t pa
 }  // namespace
 
 bool vmm_handle_fault(const vm_fault& fault) {
-    // Only the kernel aspace exists until tasks arrive.
-    vm_aspace& aspace = kernel_aspace();
-    if (!aspace.has_root()) { return false; }
+    // Resolve against whichever space is live on this CPU -- the kernel
+    // aspace normally, a scratch/task space when one is activated.
+    vm_aspace* active = vm_aspace::active();
+    if (active == nullptr || !active->has_root()) { return false; }
+    vm_aspace& aspace = *active;
 
     kernel::synchronization::lock_guard guard(g_vmm_lock);
     aspace.count_fault();

@@ -34,7 +34,6 @@
     - Binding splitting for partial unmap/protect (whole-slot ranges only).
     - Region handle exposure + detached-state machine (task/IPC milestone).
     - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone).
-    - Fault resolution consults only the kernel aspace until tasks own address spaces.
     - Page-table frames sit in descriptor state ACTIVE, not WIRED; revisit when eviction lands.
     - PAT programming for true write-combining (degrades to uncached today).
     - Clock replacement deferred to user-pager milestone (only pager-backed pages evictable); anonymous swap ruled out permanently. OOM = allocation failure via Result.
@@ -81,6 +80,7 @@
 
 ## Testing & QA
 - Continue growing driver/core unit and stress coverage where gaps remain; add IPC suites once the IPC subsystem exists.
+- VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands), OOM paths in the fault/commit paths (needs PMM fault injection), and the shell `vm` command output (no automated harness coverage).
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler/syscall fuzz targets once those subsystems exist.
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.

@@ -68,6 +68,9 @@ class vm_aspace {
     // Load this space's page tables into the CPU and record it as the active
     // space. Single-CPU scoped; cross-CPU shootdown is out of scope.
     void activate();
+    // The space activate() last recorded on this CPU; the fault handler
+    // resolves against it. Null only before vmm_init.
+    static vm_aspace* active();
 
     // Exclusive end of the low (non-kernel) virtual address half. The value is
     // arch-specific (canonical-form on x86_64, Sv39/Sv48 on riscv64); portable
