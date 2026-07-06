@@ -29,14 +29,23 @@ constexpr uintptr_t ROOT_BASE = 0x1000;
 constexpr vm_prot_t ROOT_PROT = vm_prot::READ | vm_prot::WRITE | vm_prot::EXECUTE | vm_prot::USER;
 
 ktl::ref<Region> make_root(vm_aspace& aspace) {
-    return ktl::make_ref<Region>(aspace, ROOT_BASE, address_space::low_limit() - ROOT_BASE, ROOT_PROT);
+    return ktl::make_ref<Region>(aspace, ROOT_BASE, vm_aspace::low_limit() - ROOT_BASE, ROOT_PROT);
 }
 }  // namespace
 
+vm_aspace::~vm_aspace() { destroy(); }
+
 bool vm_aspace::init() {
-    if (!m_arch.init()) { return false; }
+    if (!arch_init()) { return false; }
     m_root = make_root(*this);
     return m_root.get() != nullptr;
+}
+
+void vm_aspace::destroy() {
+    // Regions first: their teardown zaps translations through the arch
+    // tables, which must still be alive.
+    m_root = ktl::ref<Region>{};
+    arch_destroy();
 }
 
 void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_region* wired, size_t wired_count) {
@@ -48,7 +57,7 @@ void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_r
     }
     // The kernel aspace wraps the live boot page tables rather than cloning a
     // fresh space -- every mapping made since boot stays valid.
-    g_kernel_aspace.m_arch.adopt_active();
+    g_kernel_aspace.arch_adopt_active();
     g_kernel_aspace.m_root = make_root(g_kernel_aspace);
     if (g_kernel_aspace.m_root.get() == nullptr) { panic("vmm: kernel root region allocation failed"); }
 

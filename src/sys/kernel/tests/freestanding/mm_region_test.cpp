@@ -87,18 +87,18 @@ KTEST_INTEGRATION(region_unmap_zaps_translations, "mm/region") {
     // Simulate a fault fill: install a live translation inside the binding.
     auto frame = kernel::mm::g_page_frame_allocator.alloc();
     KTEST_REQUIRE_TRUE(frame.has_value());
-    KTEST_REQUIRE_TRUE(aspace.arch().map_page(MAP_BASE, frame.value(), RW));
-    KTEST_REQUIRE_TRUE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame.value(), RW));
+    KTEST_REQUIRE_TRUE(aspace.walk(MAP_BASE).has_value());
 
     // Partial unmap cutting through the binding is rejected untouched.
     auto partial = aspace.root().unmap(MAP_BASE, 0x1000);
     KTEST_REQUIRE_TRUE(partial.is_err());
     KTEST_EXPECT_TRUE(partial.unwrap_err() == ktl::errc::invalid_operation);
-    KTEST_EXPECT_TRUE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_TRUE(aspace.walk(MAP_BASE).has_value());
 
     // Whole-slot unmap removes the binding and its translations.
     KTEST_REQUIRE_TRUE(aspace.root().unmap(MAP_BASE, MAP_SIZE).is_ok());
-    KTEST_EXPECT_FALSE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
     KTEST_EXPECT_TRUE(aspace.root().find_binding(MAP_BASE) == nullptr);
 
     kernel::mm::g_page_frame_allocator.free(frame.value());
@@ -111,12 +111,12 @@ KTEST_INTEGRATION(region_protect_narrows_only, "mm/region") {
 
     auto frame = kernel::mm::g_page_frame_allocator.alloc();
     KTEST_REQUIRE_TRUE(frame.has_value());
-    KTEST_REQUIRE_TRUE(aspace.arch().map_page(MAP_BASE, frame.value(), RW));
+    KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame.value(), RW));
 
     // Narrowing succeeds, updates the binding, and zaps translations so the
     // fault path refills them with the new protection.
     KTEST_REQUIRE_TRUE(aspace.root().protect(MAP_BASE, MAP_SIZE, vm_prot::READ).is_ok());
-    KTEST_EXPECT_FALSE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
     region_child* hit = aspace.root().find_binding(MAP_BASE);
     KTEST_REQUIRE_TRUE(hit != nullptr);
     KTEST_EXPECT_EQUAL(hit->prot, vm_prot::READ);
@@ -139,12 +139,12 @@ KTEST_INTEGRATION(region_teardown_leaves_space_clean, "mm/region") {
 
     auto frame = kernel::mm::g_page_frame_allocator.alloc();
     KTEST_REQUIRE_TRUE(frame.has_value());
-    KTEST_REQUIRE_TRUE(aspace.arch().map_page(MAP_BASE, frame.value(), RW));
+    KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame.value(), RW));
 
     // Unmapping the whole child region tears down its descendants: the nested
     // binding's translation must be gone from the arch space.
     KTEST_REQUIRE_TRUE(aspace.root().unmap(A_BASE, A_SIZE).is_ok());
-    KTEST_EXPECT_FALSE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
 
     kernel::mm::g_page_frame_allocator.free(frame.value());
 }

@@ -69,7 +69,7 @@ void Region::remove_slot(region_child& slot) {
 
 void Region::zap_range(uintptr_t base, size_t size) {
     for (uintptr_t vaddr = base; vaddr < base + size; vaddr += PAGE_SIZE) {
-        (void)m_aspace.arch().unmap_page(vaddr);  // absent pages are fine
+        (void)m_aspace.unmap_page(vaddr);  // absent pages are fine
     }
 }
 

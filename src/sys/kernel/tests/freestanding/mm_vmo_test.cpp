@@ -114,9 +114,9 @@ KTEST_INTEGRATION(vmo_mapping_backrefs_track_bindings, "mm/vmo") {
     KTEST_REQUIRE_TRUE(v->commit(0, 1).is_ok());
     auto frame = v->resident_frame(0);
     KTEST_REQUIRE_TRUE(frame.has_value());
-    KTEST_REQUIRE_TRUE(aspace.arch().map_page(MAP_BASE, frame.value(), RW));
+    KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame.value(), RW));
     KTEST_REQUIRE_TRUE(v->decommit(0, 1).is_ok());
-    KTEST_EXPECT_FALSE(aspace.arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
 
     KTEST_REQUIRE_TRUE(aspace.root().unmap(MAP_BASE, PAGES * 0x1000).is_ok());
     KTEST_EXPECT_EQUAL(v->mapping_count(), 0u);
@@ -145,7 +145,7 @@ KTEST_INTEGRATION(vmo_resize_grow_and_shrink, "mm/vmo") {
     size_t free_before = kernel::mm::g_page_frame_allocator.free_pages();
     KTEST_REQUIRE_TRUE(v->set_size(2).is_ok());
     KTEST_EXPECT_EQUAL(v->resident_pages(), 0u);
-    KTEST_EXPECT_FALSE(kernel_aspace().arch().walk(FAULT_BASE + (PAGES - 1) * 0x1000).has_value());
+    KTEST_EXPECT_FALSE(kernel_aspace().walk(FAULT_BASE + (PAGES - 1) * 0x1000).has_value());
     KTEST_EXPECT_EQUAL(kernel::mm::g_page_frame_allocator.free_pages(), free_before + 1);
 
     KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(FAULT_BASE, PAGES * 0x1000).is_ok());

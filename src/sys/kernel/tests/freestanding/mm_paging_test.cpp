@@ -4,6 +4,7 @@
 
 #include <kernel/mm/paging.h>
 #include <kernel/mm/pmm.h>
+#include <kernel/mm/vm_aspace.h>
 
 // HHDM base, set during boot from the Limine response. Its virtual range is a
 // kernel-half mapping the bootloader installs (huge pages on QEMU), so it lets
@@ -12,7 +13,7 @@ extern uintptr_t g_hhdm_offset;
 
 namespace {
 
-using kernel::mm::address_space;
+using kernel::mm::vm_aspace;
 using kernel::mm::vm_cache_mode;
 using kernel::mm::vm_paddr_t;
 using kernel::mm::vm_prot_t;
@@ -33,24 +34,24 @@ inline void write_cr3(vm_paddr_t cr3) { asm volatile("mov %0, %%cr3" ::"r"(cr3) 
 }  // namespace
 
 KTEST(paging_init_destroy_roundtrip, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_EXPECT_TRUE(space.is_valid());
-    KTEST_EXPECT_NOT_EQUAL(space.pml4_phys(), static_cast<size_t>(0));
+    KTEST_EXPECT_TRUE(space.has_root());
 
     space.destroy();
     KTEST_EXPECT_FALSE(space.is_valid());
-    KTEST_EXPECT_EQUAL(space.pml4_phys(), static_cast<size_t>(0));
+    KTEST_EXPECT_FALSE(space.has_root());
 }
 
 KTEST(paging_double_init_fails, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_EXPECT_FALSE(space.init());
 }
 
 KTEST(paging_walk_unmapped_returns_nothing, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_EXPECT_FALSE(space.walk(low_vaddr).has_value());
     KTEST_EXPECT_FALSE(space.walk_ext(low_vaddr).has_value());
@@ -72,7 +73,7 @@ KTEST(paging_prot_combinations_roundtrip, "mm/paging") {
     };
 
     for (vm_prot_t prot : combos) {
-        address_space space;
+        vm_aspace space;
         KTEST_REQUIRE_TRUE(space.init());
         KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -96,7 +97,7 @@ KTEST(paging_prot_combinations_roundtrip, "mm/paging") {
 // EXECUTE, one with EXECUTE reports it. Proves the old NO_EXECUTE rejection is
 // gone and EFER.NXE is honored.
 KTEST(paging_nx_is_honored, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -117,7 +118,7 @@ KTEST(paging_nx_is_honored, "mm/paging") {
 
 // DEVICE degrades to uncached; walk_ext must report a non-cached attribute.
 KTEST(paging_device_cache_mode_reported, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -131,7 +132,7 @@ KTEST(paging_device_cache_mode_reported, "mm/paging") {
 }
 
 KTEST(paging_walk_returns_paddr_with_offset, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -143,7 +144,7 @@ KTEST(paging_walk_returns_paddr_with_offset, "mm/paging") {
 }
 
 KTEST(paging_double_map_fails, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -155,7 +156,7 @@ KTEST(paging_double_map_fails, "mm/paging") {
 }
 
 KTEST(paging_map_unaligned_fails, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -166,7 +167,7 @@ KTEST(paging_map_unaligned_fails, "mm/paging") {
 }
 
 KTEST(paging_independent_mappings_across_levels, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
 
     KTEST_REQUIRE_VALUE(p1, kernel::mm::g_page_frame_allocator.alloc());
@@ -189,7 +190,7 @@ KTEST(paging_independent_mappings_across_levels, "mm/paging") {
 // A non-canonical address (bit 47 set but sign-extension broken) is rejected by
 // every entry point. The bit-47 reasoning stays inside the arch layer.
 KTEST(paging_non_canonical_rejected, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -206,7 +207,7 @@ KTEST(paging_non_canonical_rejected, "mm/paging") {
 // resolve a known kernel-half address (an HHDM offset) without any mapping of
 // its own.
 KTEST(paging_init_clones_kernel_half, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
 
     uintptr_t kaddr = g_hhdm_offset + 0x1000;  // HHDM maps physical 0x1000 here
@@ -217,7 +218,7 @@ KTEST(paging_init_clones_kernel_half, "mm/paging") {
 // by huge pages, so this exercises the huge-intermediate collision path; if the
 // bootloader used 4K pages instead it still fails as an already-present leaf.
 KTEST(paging_map_over_kernel_mapping_fails, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 
@@ -230,7 +231,7 @@ KTEST(paging_map_over_kernel_mapping_fails, "mm/paging") {
 // A low mapping in one space is invisible to another space: the user half is
 // per-space, proving isolation.
 KTEST(paging_user_half_is_isolated, "mm/paging") {
-    address_space a, b;
+    vm_aspace a, b;
     KTEST_REQUIRE_TRUE(a.init());
     KTEST_REQUIRE_TRUE(b.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
@@ -247,7 +248,7 @@ KTEST(paging_user_half_is_isolated, "mm/paging") {
 // touch the mapping through its virtual address, then restore the original CR3.
 // Requires a clean VM because it switches the live address space.
 KTEST_INTEGRATION(paging_activate_and_touch, "mm/paging") {
-    address_space space;
+    vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
 

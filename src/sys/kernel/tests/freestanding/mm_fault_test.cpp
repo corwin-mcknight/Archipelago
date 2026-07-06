@@ -41,8 +41,8 @@ KTEST_INTEGRATION(fault_read_maps_shared_zero_page, "mm/fault") {
     KTEST_EXPECT_TRUE(kernel_aspace().fault_count() >= faults_before + 2);
 
     // Both pages share the one wired zero frame, mapped without WRITE.
-    auto t0 = kernel_aspace().arch().walk_ext(MAP_BASE);
-    auto t1 = kernel_aspace().arch().walk_ext(MAP_BASE + PAGE);
+    auto t0 = kernel_aspace().walk_ext(MAP_BASE);
+    auto t1 = kernel_aspace().walk_ext(MAP_BASE + PAGE);
     KTEST_REQUIRE_TRUE(t0.has_value() && t1.has_value());
     KTEST_EXPECT_EQUAL(t0.value().paddr, vmm_zero_page());
     KTEST_EXPECT_EQUAL(t1.value().paddr, vmm_zero_page());
@@ -65,7 +65,7 @@ KTEST_INTEGRATION(fault_write_breaks_cow_to_private_copy, "mm/fault") {
     // The write landed in a private frame, not the zero page.
     KTEST_EXPECT_EQUAL(*word, 0x5EED'F00D'CAFE'D00Dull);
     KTEST_EXPECT_EQUAL(v->resident_pages(), 1u);
-    auto t = kernel_aspace().arch().walk_ext(MAP_BASE);
+    auto t = kernel_aspace().walk_ext(MAP_BASE);
     KTEST_REQUIRE_TRUE(t.has_value());
     KTEST_EXPECT_NOT_EQUAL(t.value().paddr, vmm_zero_page());
     KTEST_EXPECT_TRUE((t.value().prot & vm_prot::WRITE) != 0);
@@ -79,7 +79,7 @@ KTEST_INTEGRATION(fault_write_breaks_cow_to_private_copy, "mm/fault") {
     page_descriptor* desc = g_page_descriptors.lookup(t.value().paddr & ~(PAGE - 1));
     KTEST_REQUIRE_TRUE(desc != nullptr);
     KTEST_EXPECT_TRUE(desc->owner == v.get());
-    KTEST_REQUIRE_TRUE(kernel_aspace().arch().unmap_page(MAP_BASE).has_value());
+    KTEST_REQUIRE_TRUE(kernel_aspace().unmap_page(MAP_BASE).has_value());
     KTEST_EXPECT_EQUAL(*word, 0x5EED'F00D'CAFE'D00Dull);
 
     KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());

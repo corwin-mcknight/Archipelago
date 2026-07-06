@@ -3,8 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/maybe>
 #include <ktl/ref>
 
+#include "kernel/mm/arch_aspace.h"
 #include "kernel/mm/page.h"
 #include "kernel/mm/paging.h"
 #include "kernel/mm/region.h"
@@ -21,22 +23,28 @@ namespace kernel::mm {
 // contention is measured.
 extern kernel::synchronization::spinlock g_vmm_lock;
 
-// Arch-neutral address space: the arch page tables plus the portable state
-// that hangs off them. Not a kernel Object and has no handle -- aspaces are
-// infrastructure, not capabilities.
+// An address space: one class, completed by each architecture. The portable
+// half (region tree, fault accounting, lifecycle) is implemented in
+// mm/vm_aspace.cpp; the paging half (map/walk/unmap/activate) is implemented
+// by the architecture (x86_64/paging.cpp), which also supplies the shape of
+// the embedded arch_aspace state. Portable code never touches that state.
+// Not a kernel Object and has no handle -- aspaces are infrastructure, not
+// capabilities.
 class vm_aspace {
    public:
-    vm_aspace()                            = default;
+    vm_aspace() = default;
+    ~vm_aspace();
 
     vm_aspace(const vm_aspace&)            = delete;
     vm_aspace& operator=(const vm_aspace&) = delete;
 
-    // Fresh space with the kernel half cloned in and a root region spanning
-    // the low canonical half (minus the null page).
-    bool init();
+    // ---- portable half (mm/vm_aspace.cpp) ----
 
-    address_space& arch() { return m_arch; }
-    const address_space& arch() const { return m_arch; }
+    // Fresh space: arch tables with the kernel half cloned in, plus a root
+    // region spanning the low half (minus the null page).
+    bool init();
+    // Tear down regions (zapping their translations), then the arch tables.
+    void destroy();
 
     // Root of this space's region tree; valid after init()/vmm_init().
     Region& root() { return *m_root; }
@@ -46,12 +54,36 @@ class vm_aspace {
     void count_fault() { ++m_faults; }
     uint64_t fault_count() const { return m_faults; }
 
-    // Root region ref lands with the region-tree phase.
+    // ---- arch-completed half (x86_64/paging.cpp) ----
+
+    bool is_valid() const;
+    // Install a 4K translation with the given protection and cache mode.
+    bool map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache = vm_cache_mode::CACHED);
+    // Resolve a virtual address to its physical address (offset preserved).
+    ktl::maybe<vm_paddr_t> walk(uintptr_t vaddr) const;
+    // Resolve and report the mapping's protection and cache mode as well.
+    ktl::maybe<vm_translation> walk_ext(uintptr_t vaddr) const;
+    ktl::maybe<vm_paddr_t> unmap_page(uintptr_t vaddr);
+
+    // Load this space's page tables into the CPU and record it as the active
+    // space. Single-CPU scoped; cross-CPU shootdown is out of scope.
+    void activate();
+
+    // Exclusive end of the low (non-kernel) virtual address half. The value is
+    // arch-specific (canonical-form on x86_64, Sv39/Sv48 on riscv64); portable
+    // code treats it as an opaque limit.
+    static uintptr_t low_limit();
 
    private:
     friend void vmm_init(const vm_page_region*, size_t, const vm_page_region*, size_t);
 
-    address_space m_arch;
+    // Arch internals: allocate-and-clone, free the arch tables, or wrap the
+    // live boot tables (kernel aspace only, never destroyed).
+    bool arch_init();
+    void arch_destroy();
+    void arch_adopt_active();
+
+    arch_aspace m_arch;  // shape differs per architecture
     ktl::ref<Region> m_root;
     uint64_t m_faults = 0;
 };

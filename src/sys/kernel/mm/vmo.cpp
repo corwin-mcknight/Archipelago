@@ -103,7 +103,7 @@ void vmo::zap_page_mappings(uint64_t page) {
         uint64_t page_span  = m.binding->size / PAGE_SIZE;
         if (page < first_page || page >= first_page + page_span) { continue; }
         uintptr_t vaddr = m.binding->base + (page - first_page) * PAGE_SIZE;
-        (void)m.aspace->arch().unmap_page(vaddr);
+        (void)m.aspace->unmap_page(vaddr);
     }
 }
 

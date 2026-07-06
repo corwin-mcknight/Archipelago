@@ -56,8 +56,8 @@ KTEST_INTEGRATION(device_vmo_maps_window_uncached, "mm/device") {
 
     // Translations point straight into the window and carry the uncached
     // attribute end-to-end.
-    auto t0 = kernel_aspace().arch().walk_ext(MAP_BASE);
-    auto t1 = kernel_aspace().arch().walk_ext(MAP_BASE + PAGE);
+    auto t0 = kernel_aspace().walk_ext(MAP_BASE);
+    auto t1 = kernel_aspace().walk_ext(MAP_BASE + PAGE);
     KTEST_REQUIRE_TRUE(t0.has_value() && t1.has_value());
     KTEST_EXPECT_EQUAL(t0.value().paddr, phys);
     KTEST_EXPECT_EQUAL(t1.value().paddr, phys + PAGE);
@@ -70,7 +70,7 @@ KTEST_INTEGRATION(device_vmo_maps_window_uncached, "mm/device") {
 
     // Teardown: the binding unmaps; window frames stay wired and intact.
     KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());
-    KTEST_EXPECT_FALSE(kernel_aspace().arch().walk(MAP_BASE).has_value());
+    KTEST_EXPECT_FALSE(kernel_aspace().walk(MAP_BASE).has_value());
     v = ktl::ref<vmo>{};
     KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
     KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
@@ -86,7 +86,7 @@ KTEST_INTEGRATION(device_binding_degrades_cache_mode, "mm/device") {
     // Caller asked for CACHED; the pager's DEVICE mode wins (stricter-only).
     KTEST_REQUIRE_TRUE(kernel_aspace().root().map(MAP_BASE, PAGE, v, 0, RW, vm_cache_mode::CACHED).is_ok());
     *reinterpret_cast<volatile uint32_t*>(MAP_BASE) = 1;
-    auto t                                          = kernel_aspace().arch().walk_ext(MAP_BASE);
+    auto t                                          = kernel_aspace().walk_ext(MAP_BASE);
     KTEST_REQUIRE_TRUE(t.has_value());
     KTEST_EXPECT_TRUE(t.value().cache == vm_cache_mode::DEVICE);
 

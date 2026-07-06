@@ -1,6 +1,5 @@
-#include "kernel/mm/paging.h"
-
 #include "kernel/mm/pmm.h"
+#include "kernel/mm/vm_aspace.h"
 
 extern uintptr_t g_hhdm_offset;
 
@@ -23,7 +22,7 @@ constexpr uint64_t ADDR_MASK     = 0x000FFFFFFFFFF000ull;
 
 // The one currently active address space on this CPU. A plain global until
 // per-CPU storage exists; single-CPU scoped.
-const address_space* g_active_space = nullptr;
+const vm_aspace* g_active_space = nullptr;
 
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
@@ -172,36 +171,38 @@ ktl::maybe<terminal_pte> resolve(vm_paddr_t pml4_phys, uintptr_t vaddr) {
 
 }  // namespace
 
-bool address_space::init() {
-    if (m_pml4_phys != 0) { return false; }
+bool vm_aspace::is_valid() const { return m_arch.pml4_phys != 0; }
+
+bool vm_aspace::arch_init() {
+    if (m_arch.pml4_phys != 0) { return false; }
     auto pml4 = alloc_table();
     if (!pml4.has_value()) { return false; }
-    m_pml4_phys   = pml4.value();
+    m_arch.pml4_phys = pml4.value();
 
     // Clone the kernel half (upper 256 PML4 entries) from the active space so
     // the kernel is mapped in every address space. The lower 256 (user half)
     // stay empty. The intermediate tables are shared, not copied -- acceptable
     // because kernel mappings are not created through map_page this milestone.
-    uint64_t* dst = table_at(m_pml4_phys);
-    uint64_t* src = table_at(current_cr3());
+    uint64_t* dst    = table_at(m_arch.pml4_phys);
+    uint64_t* src    = table_at(current_cr3());
     for (size_t i = 256; i < 512; ++i) { dst[i] = src[i]; }
     return true;
 }
 
-void address_space::destroy() {
-    if (m_pml4_phys == 0) { return; }
+void vm_aspace::arch_destroy() {
+    if (m_arch.pml4_phys == 0) { return; }
     // Only free the user half. The kernel half was cloned from the boot tables
     // and its subtrees are shared with every other space -- freeing them would
     // corrupt the kernel mapping.
-    uint64_t* pml4 = table_at(m_pml4_phys);
+    uint64_t* pml4 = table_at(m_arch.pml4_phys);
     for (size_t i = 0; i < 256; ++i) { free_subtree(pml4[i], 4); }
-    g_page_frame_allocator.free(m_pml4_phys);
-    m_pml4_phys = 0;
+    g_page_frame_allocator.free(m_arch.pml4_phys);
+    m_arch.pml4_phys = 0;
     if (g_active_space == this) { g_active_space = nullptr; }
 }
 
-bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache) {
-    if (m_pml4_phys == 0) { return false; }
+bool vm_aspace::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache) {
+    if (m_arch.pml4_phys == 0) { return false; }
     if (!is_canonical(vaddr)) { return false; }
     if ((vaddr & 0xFFF) != 0) { return false; }
     if ((paddr & 0xFFF) != 0) { return false; }
@@ -209,7 +210,7 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, 
     uint64_t flags        = leaf_flags(prot, cache);
     uint64_t intermediate = pte::WRITABLE | (flags & pte::USER);
 
-    uint64_t* leaf        = ensure_pt_slot(m_pml4_phys, vaddr, intermediate);
+    uint64_t* leaf        = ensure_pt_slot(m_arch.pml4_phys, vaddr, intermediate);
     if (leaf == nullptr) { return false; }
 
     // Present leaves are rejected rather than replaced, so no TLB flush is
@@ -220,54 +221,54 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, 
     return true;
 }
 
-ktl::maybe<vm_paddr_t> address_space::walk(uintptr_t vaddr) const {
-    if (m_pml4_phys == 0) { return ktl::nothing; }
+ktl::maybe<vm_paddr_t> vm_aspace::walk(uintptr_t vaddr) const {
+    if (m_arch.pml4_phys == 0) { return ktl::nothing; }
     if (!is_canonical(vaddr)) { return ktl::nothing; }
-    auto term = resolve(m_pml4_phys, vaddr);
+    auto term = resolve(m_arch.pml4_phys, vaddr);
     if (!term.has_value()) { return ktl::nothing; }
     vm_paddr_t base = term.value().entry & pte::ADDR_MASK & ~term.value().offset_mask;
     return base | (vaddr & term.value().offset_mask);
 }
 
-ktl::maybe<vm_translation> address_space::walk_ext(uintptr_t vaddr) const {
-    if (m_pml4_phys == 0) { return ktl::nothing; }
+ktl::maybe<vm_translation> vm_aspace::walk_ext(uintptr_t vaddr) const {
+    if (m_arch.pml4_phys == 0) { return ktl::nothing; }
     if (!is_canonical(vaddr)) { return ktl::nothing; }
-    auto term = resolve(m_pml4_phys, vaddr);
+    auto term = resolve(m_arch.pml4_phys, vaddr);
     if (!term.has_value()) { return ktl::nothing; }
     vm_paddr_t base  = term.value().entry & pte::ADDR_MASK & ~term.value().offset_mask;
     vm_paddr_t paddr = base | (vaddr & term.value().offset_mask);
     return attrs_from_pte(term.value().entry, paddr);
 }
 
-ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
-    if (m_pml4_phys == 0) { return ktl::nothing; }
+ktl::maybe<vm_paddr_t> vm_aspace::unmap_page(uintptr_t vaddr) {
+    if (m_arch.pml4_phys == 0) { return ktl::nothing; }
     if (!is_canonical(vaddr)) { return ktl::nothing; }
     if ((vaddr & 0xFFF) != 0) { return ktl::nothing; }
 
     // 4K only: huge mappings are bootloader-owned kernel mappings and are never
     // torn down through this path.
-    uint64_t* leaf = find_pt_slot(m_pml4_phys, vaddr);
+    uint64_t* leaf = find_pt_slot(m_arch.pml4_phys, vaddr);
     if (leaf == nullptr) { return ktl::nothing; }
     if (!(*leaf & pte::PRESENT)) { return ktl::nothing; }
 
     vm_paddr_t paddr = *leaf & pte::ADDR_MASK;
     *leaf            = 0;
-    flush_tlb_page(m_pml4_phys, vaddr);
+    flush_tlb_page(m_arch.pml4_phys, vaddr);
     return paddr;
 }
 
-void address_space::activate() {
-    asm volatile("mov %0, %%cr3" ::"r"(m_pml4_phys) : "memory");
+void vm_aspace::activate() {
+    asm volatile("mov %0, %%cr3" ::"r"(m_arch.pml4_phys) : "memory");
     g_active_space = this;
 }
 
-void address_space::adopt_active() {
-    destroy();
-    m_pml4_phys    = current_cr3();
-    g_active_space = this;
+void vm_aspace::arch_adopt_active() {
+    arch_destroy();
+    m_arch.pml4_phys = current_cr3();
+    g_active_space   = this;
 }
 
 // End of the canonical low half: bit 47 sign-extension boundary.
-uintptr_t address_space::low_limit() { return 0x0000800000000000ull; }
+uintptr_t vm_aspace::low_limit() { return 0x0000800000000000ull; }
 
 }  // namespace kernel::mm

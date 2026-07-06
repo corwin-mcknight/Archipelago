@@ -15,7 +15,7 @@ constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE;
 // that can be CoW-shared, so no contents need copying -- a fresh anonymous
 // frame is already zeroed. Frame-copying CoW arrives with VMO clone.
 bool resolve_cow(vm_aspace& aspace, region_child& binding, vmo& obj, uint64_t page, uintptr_t page_vaddr) {
-    auto old_walk = aspace.arch().walk(page_vaddr);
+    auto old_walk = aspace.walk(page_vaddr);
     if (!old_walk.has_value()) { return false; }
     assert((old_walk.value() & ~(PAGE_SIZE - 1)) == vmm_zero_page(),
            "CoW write on a non-zero-page frame before VMO clone exists");
@@ -23,8 +23,8 @@ bool resolve_cow(vm_aspace& aspace, region_child& binding, vmo& obj, uint64_t pa
     auto fill = obj.get_or_fill_page(page);
     if (fill.is_err()) { return false; }  // OOM: unresolvable, fall to crash path
 
-    (void)aspace.arch().unmap_page(page_vaddr);  // also flushes the stale TLB entry
-    return aspace.arch().map_page(page_vaddr, fill.unwrap(), binding.prot, binding.cache);
+    (void)aspace.unmap_page(page_vaddr);  // also flushes the stale TLB entry
+    return aspace.map_page(page_vaddr, fill.unwrap(), binding.prot, binding.cache);
 }
 }  // namespace
 
@@ -67,13 +67,13 @@ bool vmm_handle_fault(const vm_fault& fault) {
     // No translation. A read of an unpopulated anonymous page shares the
     // global zero page read-only; the first write lands in resolve_cow.
     if (!fault.write && !obj.resident_frame(page).has_value() && obj.backing_pager().owns_frames()) {
-        return aspace.arch().map_page(page_vaddr, vmm_zero_page(), binding->prot & ~vm_prot::WRITE, binding->cache);
+        return aspace.map_page(page_vaddr, vmm_zero_page(), binding->prot & ~vm_prot::WRITE, binding->cache);
     }
 
     // Write, or a page the pager already backs: install the real frame.
     auto fill = obj.get_or_fill_page(page);
     if (fill.is_err()) { return false; }
-    return aspace.arch().map_page(page_vaddr, fill.unwrap(), binding->prot, binding->cache);
+    return aspace.map_page(page_vaddr, fill.unwrap(), binding->prot, binding->cache);
 }
 
 }  // namespace kernel::mm

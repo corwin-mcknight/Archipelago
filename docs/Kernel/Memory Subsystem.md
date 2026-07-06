@@ -36,8 +36,9 @@ Task-owned address spaces, region handles, and the userspace pager protocol arri
 
 The VMM is organized around five core objects: address spaces, regions, virtual memory objects (VMOs), pages, and pagers.
 
-**Architecture boundary**: exactly one class is architecture-specific -- the page-table manipulator that maps, unmaps, walks, and activates translations.
-Its interface speaks arch-neutral permissions (read, write, execute, user) and cache modes; each architecture translates these to its own page-table entry format internally.
+**Architecture boundary**: the address space is one class completed by each architecture.
+Its portable half (region tree, fault accounting, lifecycle) is common code; its paging half (map, unmap, walk, activate) and the shape of its embedded arch state are supplied by the architecture.
+The paging interface speaks arch-neutral permissions (read, write, execute, user) and cache modes; each architecture translates these to its own page-table entry format internally.
 Everything above it -- regions, VMOs, pagers, and page descriptors -- is portable code shared by all targets (x86_64 and riscv64).
 Page-table entries carry no software-defined state: they are a cache of VMO and region truth, and the fault handler derives intent (such as copy-on-write) from the owning structures, not from spare PTE bits.
 

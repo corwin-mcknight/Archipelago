@@ -27,9 +27,9 @@ KTEST_INTEGRATION(descriptor_kernel_image_is_wired, "mm/descriptor") {
     // Resolve this test's own code through the kernel aspace; the backing
     // frame lives in the Limine kernel range and must be pinned.
     auto& aspace = kernel_aspace();
-    KTEST_REQUIRE_TRUE(aspace.arch().is_valid());
+    KTEST_REQUIRE_TRUE(aspace.is_valid());
 
-    auto paddr = aspace.arch().walk(reinterpret_cast<uintptr_t>(&kernel_aspace));
+    auto paddr = aspace.walk(reinterpret_cast<uintptr_t>(&kernel_aspace));
     KTEST_REQUIRE_TRUE(paddr.has_value());
 
     const page_descriptor* desc = g_page_descriptors.lookup(paddr.value());
@@ -62,7 +62,7 @@ KTEST_INTEGRATION(kernel_aspace_walks_hhdm, "mm/descriptor") {
     auto probe = g_page_frame_allocator.alloc();
     KTEST_REQUIRE_TRUE(probe.has_value());
 
-    auto paddr = kernel_aspace().arch().walk(g_hhdm_offset + probe.value() + 0x123);
+    auto paddr = kernel_aspace().walk(g_hhdm_offset + probe.value() + 0x123);
     KTEST_REQUIRE_TRUE(paddr.has_value());
     KTEST_EXPECT_EQUAL(paddr.value(), probe.value() + 0x123);
 
