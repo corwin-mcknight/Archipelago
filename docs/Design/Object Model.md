@@ -18,6 +18,9 @@ Kernel-defined types include:
   See [[Scheduling]].
 - **VMO** -- virtual memory object backed by a pager.
   See [[Memory Subsystem#Virtual Memory Manager]].
+- **Region** -- a delegable interval of a task's address space holding mappings and child regions.
+  Kernel objects from the start; handle exposure arrives with the task and IPC milestone.
+  See [[Memory Subsystem#Virtual Memory Manager]].
 - **Channel** -- bidirectional point-to-point IPC.
   See [[IPC Primitives#Channels]].
 - **Port** -- multi-producer single-consumer event queue.

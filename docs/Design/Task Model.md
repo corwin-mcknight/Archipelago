@@ -16,8 +16,10 @@ A task contains three things:
 
 The virtual address space is part of the task, not a separate kernel object.
 There is no address space handle.
-A task can only map [[Memory Subsystem#Virtual Memory Manager|VMOs]] into its own address space -- there is no mechanism to map into another task's memory.
+A task can only map [[Memory Subsystem#Virtual Memory Manager|VMOs]] into its own address space -- there is no ambient mechanism to map into another task's memory.
 If task A wants task B to access shared memory, it sends a VMO handle through a [[IPC Primitives#Channels|channel]] and task B maps it itself.
+The one planned exception is region delegation: a task may hand out a handle to a region of its own address space, granting the holder the right to map into that interval.
+That is deliberate delegation through a capability, not ambient authority; it is how a loader populates a new task's address space, and region handles arrive with the task and IPC milestone.
 
 ## Tasks as Kernel Objects
 Tasks are [[Object Model|kernel objects]] like any other.

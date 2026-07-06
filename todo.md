@@ -20,12 +20,13 @@
 - maybe<T> stores an inline default-constructed T, so an empty maybe holds a live value and non-default-constructible types won't compile -- rework to raw storage with explicit construct/destroy (vector already works this way).
 - vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
 - Result/maybe monadic combinators (map/and_then/or_else) are const-only and operate on copies -- add rvalue-qualified overloads that move.
+- Intrusive balanced tree (ktl::rb_tree, embedded node hooks, no allocation on insert/erase) -- needed for VMM region trees. Host-tier tests + fuzz target.
 
 ## Memory Management
 - Background page-zeroing worker thread (gated on scheduler).
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Wired page tracking belongs to the VMM; boot code passes kernel physical ranges to VMM init separately from PMM.
-- Global page descriptor array -- deferred until VMM/VMO design is settled.
+- Global page descriptor array (design settled 2026-07-06): flat PFN-indexed array allocated at VMM init covering usable RAM; holds lifecycle state, CoW share count, owner back-ref.
 - Implement NUMA awareness and reserved region handling.
 - PMM usable pool includes Limine bootloader-reclaimable regions that contain the live boot stack -- draining the PMM to exhaustion zeroes the active stack page (found 2026-06-10 while testing rollback). Defer reclaiming those regions until execution moves off them.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
@@ -33,7 +34,15 @@
     - CR3 activation and kernel-mapping cloning for new address spaces.
     - TLB maintenance before CR3 activation goes live -- cross-CPU shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits.
     - EFER.NXE enablement so NO_EXECUTE mappings can stop being rejected.
-    - Region tree, VMO, and pager objects.
+    - Refactor address_space API to arch-neutral flags (R/W/X/USER + cache mode: cached/device/write-combining, degrade stricter only); pte:: bits become private to x86_64/paging.cpp. Canonical-address check moves behind the arch boundary too (riscv64 Sv39 differs).
+    - Region tree, VMO, and pager objects (design settled 2026-07-06, see docs/Kernel/Memory Subsystem.md):
+        - vm_aspace wrapper (arch address_space + root region + fault counters); global kernel aspace at VMM init.
+        - Regions as ref-counted kernel Objects, children in intrusive rb_tree; handle exposure + detached-state machine deferred to task/IPC milestone.
+        - VMOs resizable with mapping back-refs; shrink zaps tails in all aspaces, stale access faults to error. Residency index: chunked, page-sized chunks straight from PMM (pre-zeroed = all-absent).
+        - Pagers: anonymous + device only; file-backed becomes a userspace pager protocol at the IPC milestone.
+        - Demand paging with global wired zero page + CoW on write; CoW derived from region/VMO state, no PTE software bits.
+        - Single global irq-safe VMM spinlock; split per-aspace/per-VMO when contention is measurable.
+        - Clock replacement deferred to user-pager milestone (only pager-backed pages evictable); anonymous swap ruled out permanently. OOM = allocation failure via Result.
 - Deliver slab allocators and the unified heap backed by the Archipelago Unified Memory Interface.
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
@@ -76,7 +85,6 @@
 - Add watchdog firing (the crash trigger enum slot is already reserved) and structured fault isolation reporting; assertion escalation policy already exists.
 
 ## Testing & QA
-- Two-tier host+QEMU test system complete, steps 1-6; fuzz (5 targets) and TSan (2 targets) lanes are periodic-CI, not inner loop. No new fuzz targets queued.
 - Continue growing driver/core unit and stress coverage where gaps remain; add IPC suites once the IPC subsystem exists.
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler/syscall fuzz targets once those subsystems exist.

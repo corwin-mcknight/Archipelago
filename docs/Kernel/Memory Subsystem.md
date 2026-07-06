@@ -29,36 +29,59 @@ Tracking specific kernel-occupied ranges belongs to the VMM, which receives them
 
 ## Planned Architecture
 ### Virtual Memory Manager
-The VMM is designed but not yet implemented.
+The VMM design is settled but not yet implemented; the arch page-table layer exists today.
 
 **Priorities**: isolation > simplicity > latency > throughput.
 
 The VMM is organized around five core objects: address spaces, regions, virtual memory objects (VMOs), pages, and pagers.
 
+**Architecture boundary**: exactly one class is architecture-specific -- the page-table manipulator that maps, unmaps, walks, and activates translations.
+Its interface speaks arch-neutral permissions (read, write, execute, user) and cache modes; each architecture translates these to its own page-table entry format internally.
+Everything above it -- regions, VMOs, pagers, and page descriptors -- is portable code shared by all targets (x86_64 and riscv64).
+Page-table entries carry no software-defined state: they are a cache of VMO and region truth, and the fault handler derives intent (such as copy-on-write) from the owning structures, not from spare PTE bits.
+
+**Cache modes**: cached (normal memory), device (MMIO), and write-combining (framebuffers).
+Modes are requests, not guarantees: an architecture may degrade a mapping toward stricter caching (write-combining to uncached) but never looser.
+This accommodates riscv hardware without page-based memory types, where attributes come from fixed physical memory ranges.
+
 An address space is part of a [[Task Model|task]], not a separate kernel object.
 There is no address space handle -- a task can only map VMOs into its own address space.
+The one planned exception is region delegation, described below.
 If task A wants task B to access shared memory, it sends a VMO handle through a [[IPC Primitives#Channels|channel]] and task B maps it itself.
 The kernel provides no coherence guarantees on shared VMOs beyond what the hardware gives (cache coherence on x86_64).
 Synchronization of shared memory is entirely the responsibility of userspace.
 
-An address space represents a task's page table and contains a tree of regions that define its virtual memory layout.
+An address space pairs the arch page-table object with a tree of regions that define its virtual memory layout, plus fault counters.
+A kernel address space exists from VMM initialization and receives the kernel's wired physical ranges at init, separate from the PMM's free-page accounting.
+
 Regions are nestable containers that own a virtual address interval.
-They hold child regions and VMO bindings.
+They hold child regions and VMO bindings; children are kept in a balanced tree ordered by base address.
 Child regions cannot overlap siblings or exceed parent permissions.
+Regions are reference-counted kernel objects from the start, shaped for eventual handle exposure: handing out a region handle will let the holder map into that interval of the owning task's address space.
+Handle exposure, the detached-region state machine, and delegation semantics arrive with the task and IPC milestone; until then regions are reachable only from kernel code.
 
-A VMO is a region of memory backed by a pager source.
-It tracks resident pages, size, and statistics.
+A VMO is a range of memory backed by a pager source.
+It tracks resident pages, size, statistics, and back-references to every mapping of it.
+VMOs are resizable: growth extends the residency index lazily, and shrinking wins over mappings -- the tail is unmapped from every address space through the mapping back-references, its frames are freed, and later access past the new size faults to an error.
+Residency is tracked in a chunked index whose chunks are whole page frames allocated directly from the PMM, arriving pre-zeroed from the zeroed pool.
+
 Pages are physical frames with lifecycle states ranging from wired through active, inactive, free, and zeroed.
+Per-frame state -- lifecycle, share count for copy-on-write, owner back-reference -- lives in a global page descriptor array indexed by frame number, allocated at VMM initialization to cover usable RAM.
 
-Pagers are kernel-only policy objects that load or flush pages.
-Three types are planned: anonymous (zero-fill), file-backed, and device (MMIO with cache attributes).
+Pagers are kernel policy objects that load or flush pages.
+Two kernel pagers ship first: anonymous (zero-fill) and device (MMIO ranges with cache attributes, never evictable).
+File-backed memory is not a kernel pager: filesystems are userspace servers, so file backing arrives later as a userspace pager protocol over channels, slotting in behind the same per-page fill and writeback interface.
 
-**Page replacement** uses a clock algorithm.
-Reclaim pulls from inactive pages -- clean pages go to free, dirty file-backed pages write back first.
+**Page replacement** applies only to pager-backed evictable pages and arrives with the userspace pager milestone, using a clock algorithm over active and inactive pages -- clean pages go to free, dirty pages write back through their pager first.
+Anonymous memory is never swapped: it is RAM-resident by design, so secrets never reach disk.
+Until evictable pages exist, memory exhaustion surfaces as an allocation failure returned to the caller.
 A background zeroing worker maintains a zeroed watermark.
 
 **Fault handling** follows the sequence: trap, region lookup, authorization, resident check, pager fill, install PTE.
-Clean unread pages map to a global read-only zero page; the first write triggers copy-on-write allocation.
+Clean unread pages map to a global read-only zero page -- a single wired frame allocated at VMM initialization -- and the first write triggers copy-on-write allocation.
+
+**Locking** starts as a single kernel-wide VMM lock covering region trees, residency, and descriptors, taken by the fault handler as well.
+Splitting into per-address-space and per-VMO locks is deferred until scheduler-era contention is measurable.
 
 **Security**: W^X enforcement, SMEP/SMAP.
 Kernel mappings are never visible to user mode.
