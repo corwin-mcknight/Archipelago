@@ -1,7 +1,12 @@
 #pragma once
 
-#define ARCH_X86 1
+// Arch identity comes from the build system (-D ARCH_X86_64 / -D ARCH_RISCV64), never from this
+// header. At most one may be defined; host-tier builds define none (logic-authoritative, arch-free).
+#if defined(ARCH_X86_64) && defined(ARCH_RISCV64)
+#error "config: multiple architectures defined"
+#endif
 
+// 64 bytes on both supported targets (x86_64, riscv64).
 #define CONFIG_CPU_CACHE_LINE_SIZE 64
 #define KERNEL_MINIMUM_PAGE_SIZE 0x1000
 

@@ -1,5 +1,15 @@
 # TODO
 
+## Second Architecture (riscv64)
+- riscv64 implementations of the kernel/arch.h primitives and hcf(); harness exit is the sifive_test finisher MMIO device on `virt` (not port I/O), and the harness must swap `-device isa-debug-exit` per arch.
+- riscv64 sides of the arch dispatch headers: includes/kernel/registers.h, includes/kernel/mm/arch_aspace.h.
+- Crash/backtrace walks x86 frame records; riscv64 fp points above the {fp, ra} pair -- adjust the walker and feed symbolication riscv64 register names. Crash dump register rendering in core/crash.cpp is also x86-shaped via register_frame_t field names.
+- Top-level Makefile `shell`/`run`/`debug` targets hardcode qemu-system-x86_64.
+- plume/image.py hardcodes the BIOS+UEFI hybrid ISO layout and limine bios-install; riscv64 needs a UEFI-only ISO with no BIOS install step.
+- boot/limine package installs BIOS boot files unconditionally; make artifact installation per-arch.
+- Fetch the EDK2 RiscVVirt firmware as a host tool (not packaged in Alpine; config.yaml points at build/tools/edk2/).
+- The riscv64 kernel port itself: boot glue, linker script, MMIO UART, trap/CLINT/PLIC layer, Sv48 paging, SBI timer, arch tests.
+
 ## Boot & Platform
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
 - Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.
@@ -15,7 +25,7 @@
 - interrupts.cpp handler entry union: clear_handler writes the function arm regardless of which arm is active (works only because both are pointers) -- clear by discriminant or memset.
 
 ## KTL & Error Handling
-- Monadic-style audit follow-ups: result<void>/KTRY/errc landed 2026-06-12 and closed the findings they gated; recount the remainder (still open: register_interrupt, symbols::init, and static_vector::push_back return void).
+- Monadic-style audit remainder: register_interrupt, symbols::init, and static_vector::push_back still return void instead of a result.
 - Container accessor maybe<T&> overloads (M040) -- last KTL addition proposed by the audit; vector at/front/back currently return maybe<T> by copy.
 - maybe<T> stores an inline default-constructed T, so an empty maybe holds a live value and non-default-constructible types won't compile -- rework to raw storage with explicit construct/destroy (vector already works this way).
 - vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
@@ -70,7 +80,7 @@
 ## Device Drivers
 - Expand x86_64 bring-up with APIC/IOAPIC, HPET, and interrupt controller configuration.
 - Add keyboard (PS/2) and framebuffer/console drivers; wire the Limine framebuffer request (UART hardening already landed).
-- UART follow-ups from the 2026-06-10 fixes: writes before init are now dropped by the health gate (pre-init panics lose output); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
+- UART: pre-init panics lose their output (writes before init are dropped by the health gate); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
 - Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers.
 
 ## Security & Reliability

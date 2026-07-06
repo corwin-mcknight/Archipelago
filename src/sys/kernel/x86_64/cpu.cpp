@@ -7,7 +7,10 @@
 
 #include "kernel/config.h"
 #include "kernel/log.h"
+#include "kernel/x86/cpu.h"
 #include "vendor/limine.h"
+
+kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
 extern volatile struct limine_mp_request mp_request;
 extern "C" void ap_startup(struct limine_mp_info* info);

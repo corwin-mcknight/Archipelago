@@ -23,14 +23,6 @@ constexpr uintptr_t low_vaddr  = 0x100000;       // 1 MiB -- user half, empty in
 constexpr uintptr_t mid_vaddr  = 0x40000000;     // 1 GiB -- different PDPT entry
 constexpr uintptr_t high_vaddr = 0x10000000000;  // 1 TiB -- different PML4 entry
 
-inline vm_paddr_t read_cr3() {
-    uintptr_t cr3;
-    asm volatile("mov %%cr3, %0" : "=r"(cr3));
-    return cr3;
-}
-
-inline void write_cr3(vm_paddr_t cr3) { asm volatile("mov %0, %%cr3" ::"r"(cr3) : "memory"); }
-
 }  // namespace
 
 KTEST(paging_init_destroy_roundtrip, "mm/paging") {
@@ -244,8 +236,8 @@ KTEST(paging_user_half_is_isolated, "mm/paging") {
     kernel::mm::g_page_frame_allocator.free(frame);
 }
 
-// Full activation round-trip: create a second space, map into it, load its CR3,
-// touch the mapping through its virtual address, then restore the original CR3.
+// Full activation round-trip: create a second space, map into it, activate it,
+// touch the mapping through its virtual address, then reactivate the kernel space.
 // Requires a clean VM because it switches the live address space.
 KTEST_INTEGRATION(paging_activate_and_touch, "mm/paging") {
     vm_aspace space;
@@ -256,14 +248,13 @@ KTEST_INTEGRATION(paging_activate_and_touch, "mm/paging") {
     KTEST_REQUIRE_TRUE(space.map_page(mid_vaddr, frame, vm_prot::READ | vm_prot::WRITE));
 
     constexpr uint64_t magic = 0xA5A5C0FFEE00B00Dull;
-    vm_paddr_t boot_cr3      = read_cr3();
 
-    // Danger window: no aborting checks between activate() and the CR3 restore.
+    // Danger window: no aborting checks between activate() and the kernel-space restore.
     space.activate();
     auto* p       = reinterpret_cast<volatile uint64_t*>(mid_vaddr);
     *p            = magic;
     uint64_t seen = *p;
-    write_cr3(boot_cr3);
+    kernel::mm::kernel_aspace().activate();
 
     KTEST_EXPECT_EQUAL(seen, magic);
 

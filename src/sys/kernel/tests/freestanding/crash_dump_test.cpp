@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include "kernel/arch.h"
 #include "kernel/panic.h"
 #include "kernel/testing/testing.h"
 
@@ -21,7 +22,7 @@ KTEST_CRASH_TEST(crash_dump_pagefault, "crash") {
     *p              = 0;
 }
 
-KTEST_CRASH_TEST(crash_dump_invalid_opcode, "crash") { asm volatile("ud2"); }
+KTEST_CRASH_TEST(crash_dump_invalid_opcode, "crash") { kernel::arch::trigger_invalid_opcode(); }
 
 #pragma clang diagnostic pop
 

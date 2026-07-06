@@ -58,23 +58,6 @@ void kernel::x86::init_gdt(int corenum) {
     kernel_x86_install_gdt((uintptr_t)&gdts[corenum].pointer);
 }
 
-void kernel::x86::disable_interrupts() { asm volatile("cli"); }
-void kernel::x86::enable_interrupts() { asm volatile("sti"); }
-
-uint64_t kernel::x86::save_and_disable_interrupts() {
-    uint64_t flags;
-    asm volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
-    return flags;
-}
-
-void kernel::x86::restore_interrupts(uint64_t flags) { asm volatile("push %0; popfq" : : "r"(flags) : "memory", "cc"); }
-
-bool kernel::x86::interrupts_enabled() {
-    uint64_t flags;
-    asm volatile("pushfq; pop %0" : "=r"(flags) : : "memory");
-    return (flags & (1ULL << 9)) != 0;  // IF = RFLAGS bit 9
-}
-
 void kernel::x86::idt_set_gate(unsigned char num, uintptr_t base, unsigned short sel, unsigned char flags) {
     idt[num].base_lo   = base & 0xFFFF;
     idt[num].base_mid  = (base >> 16) & 0xFFFF;

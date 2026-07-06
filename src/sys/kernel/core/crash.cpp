@@ -7,11 +7,12 @@
 #include <ktl/ranges>
 #include <ktl/span>
 
+#include "kernel/arch.h"
 #include "kernel/drivers/uart.h"
 #include "kernel/json_escape.h"
 #include "kernel/log.h"
+#include "kernel/panic.h"
 #include "kernel/symbols.h"
-#include "kernel/x86/ioport.h"
 
 extern kernel::driver::uart uart;
 
@@ -238,10 +239,8 @@ void emit_log_drain(bool harness) {
 }
 
 [[noreturn]] void terminate(trigger_kind kind) {
-    unsigned char code = static_cast<unsigned char>(kind);
-    if (g_harness_enabled) { outw(0x604, static_cast<uint16_t>(code) | 0x2000); }
-    asm volatile("cli");
-    for (;;) { asm volatile("hlt"); }
+    if (g_harness_enabled) { kernel::arch::harness_exit(static_cast<uint8_t>(kind)); }
+    hcf();
 }
 
 }  // namespace
@@ -268,8 +267,7 @@ void crash_write_n(const char* s, size_t n) {
             crash_emit("@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n", static_cast<unsigned>(kind));
             terminate(kind);
         }
-        asm volatile("cli");
-        for (;;) { asm volatile("hlt"); }
+        hcf();
     }
     g_in_dump    = true;
 

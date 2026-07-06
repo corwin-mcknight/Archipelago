@@ -2,11 +2,12 @@
 
 #if CONFIG_KERNEL_SHELL && CONFIG_KERNEL_TESTING
 
+#include <kernel/arch.h>
 #include <kernel/crash.h>
+#include <kernel/panic.h>
 #include <kernel/shell/shell.h>
 #include <kernel/testing/testing.h>
 #include <kernel/time.h>
-#include <kernel/x86/ioport.h>
 
 #include <ktl/algorithm>
 #include <ktl/fixed_string>
@@ -176,8 +177,8 @@ void kernel::testing::abort(unsigned char exit_code) {
     }
 
     emit_harness_event(output, "@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n", static_cast<unsigned>(exit_code));
-    outw(0x604, static_cast<uint16_t>(exit_code | 0x2000));
-    while (true) { asm volatile("hlt"); }
+    kernel::arch::harness_exit(static_cast<uint8_t>(exit_code));
+    hcf();
 }
 
 // Assertion backend.

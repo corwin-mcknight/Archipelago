@@ -9,22 +9,39 @@ BUILD_DIR ?= ./
 OBJ_DIR   ?= $(BUILD_DIR)/obj/sys/kernel
 SRC_DIRS  ?= ./
 
-ARCH := x86_64
+# Plume exports ARCH from repo/config.yaml; default covers standalone invocation.
+ARCH ?= x86_64
+
+ifeq ($(ARCH),x86_64)
+ARCH_DEFINES  := -D ARCH_X86 -D ARCH_X86_64 -D__x86_64__
+ARCH_CXXFLAGS := -m64 --target=x86_64-unknown-none \
+    -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel
+LD_EMULATION  := elf_x86_64
+else ifeq ($(ARCH),riscv64)
+ARCH_DEFINES  := -D ARCH_RISCV64
+# No hard float in-kernel (lp64 ABI, no f/d extensions); medany so the higher-half kernel links.
+ARCH_CXXFLAGS := --target=riscv64-unknown-none -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
+LD_EMULATION  := elf64lriscv
+else
+$(error unsupported ARCH '$(ARCH)')
+endif
 
 # Glob all CPP files in src
 ARCH_CPP_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp -not -path '*/tests/*')
-ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s)
+# .s is NASM (x86_64 only); .S is GNU syntax assembled by the C compiler's integrated assembler.
+ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s) \
+	$(shell find $(SRC_DIRS)/$(ARCH)/ -name *.S)
 ARCH_SRCS := $(ARCH_CPP_SRCS) $(ARCH_ASM_SRCS)
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp -not -path '*/tests/*')
 MM_SRCS := $(shell find $(SRC_DIRS)/mm -name *.cpp -not -path '*/tests/*')
 SHELL_SRCS := $(shell find $(SRC_DIRS)/shell -name *.cpp -not -path '*/tests/*')
 # Kernel-side tests are the freestanding ones: those under tests/freestanding/ plus the arch tests
-# under x86_64/tests/. Hosted tests (tests/*.cpp) are host-tier only -- run by the host runner
+# under $(ARCH)/tests/. Hosted tests (tests/*.cpp) are host-tier only -- run by the host runner
 # (kernel-testrunner), never built into the kernel image -- and tests/runner/ is the host harness.
 # The directory is the routing: a test changes tiers by moving directory, with no list to keep in sync.
 TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/freestanding/*.cpp') \
-	$(shell find $(SRC_DIRS) -type f -path '*/x86_64/tests/*.cpp')
+	$(shell find $(SRC_DIRS) -type f -path '*/$(ARCH)/tests/*.cpp')
 SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(MM_SRCS) $(SHELL_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
@@ -32,7 +49,7 @@ DEPS := $(OBJS:.o=.d)
 
 override ASFLAGS += -g -f elf64
 
-override CFLAGS += -g -DLIMINE_API_REVISION=3  -D__x86_64__
+override CFLAGS += -g -DLIMINE_API_REVISION=3 $(ARCH_DEFINES)
 
 
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
@@ -80,25 +97,16 @@ override CXXFLAGS += \
 	-fno-rtti \
     -fno-PIE \
     -fno-PIC \
-    -m64 \
-    --target=x86_64-unknown-none \
-    -mno-80387 \
-    -mno-mmx \
-    -mno-sse \
-    -mno-sse2 \
-    -mno-red-zone \
-    -mcmodel=kernel \
+    $(ARCH_CXXFLAGS) \
+    $(ARCH_DEFINES) \
 	-D PRODUCT_DEBUG \
-	-D ARCH_X86 \
-	-D ARCH_X86_64 \
 	-DLIMINE_API_REVISION=3 \
-	-D__x86_64__ \
 	-I $(CURDIR)/includes/std \
 	-I $(CURDIR)/includes
 
 LDFLAGS := -nostdlib \
     -static \
-    -m elf_x86_64 \
+    -m $(LD_EMULATION) \
     -z max-page-size=0x1000 \
 	-no-pie \
     -T $(ARCH)/linker.ld
@@ -108,11 +116,17 @@ $(OBJ_DIR)/$(TARGET_EXEC): $(OBJS)
 	@echo "Linking $(TARGET_EXEC)..."
 	@$(LD) $(OBJS) $(LDFLAGS) -o $@ 
 
-# assembly
+# assembly (NASM syntax, x86_64 only)
 $(OBJ_DIR)/%.s.o: %.s
 	@echo -n "A"
 	@$(MKDIR_P) $(dir $@)
 	@$(AS) $(ASFLAGS) $< -o $@
+
+# assembly (GNU syntax, via the C compiler's integrated assembler)
+$(OBJ_DIR)/%.S.o: %.S
+	@echo -n "A"
+	@$(MKDIR_P) $(dir $@)
+	@$(CC) $(ARCH_CXXFLAGS) $(ARCH_DEFINES) -g -c $< -o $@
 
 # c source
 $(OBJ_DIR)/%.c.o: %.c

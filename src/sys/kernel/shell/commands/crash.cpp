@@ -6,6 +6,7 @@
 
 #include <ktl/string_view>
 
+#include "kernel/arch.h"
 #include "kernel/assert.h"
 #include "kernel/panic.h"
 #include "kernel/shell/shell.h"
@@ -15,17 +16,7 @@ namespace {
 [[noreturn]] void trigger_pagefault() {
     volatile int* p = reinterpret_cast<int*>(0xdeadbeef);
     *p              = 0;
-    for (;;) { asm volatile("hlt"); }
-}
-
-[[noreturn]] void trigger_invalid_opcode() {
-    asm volatile("ud2");
-    for (;;) { asm volatile("hlt"); }
-}
-
-[[noreturn]] void trigger_breakpoint() {
-    asm volatile("int $3");
-    for (;;) { asm volatile("hlt"); }
+    hcf();  // the fault handler never returns; this only satisfies [[noreturn]]
 }
 
 void crash_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
@@ -41,9 +32,9 @@ void crash_handler(int argc, const ktl::string_view argv[], kernel::shell::Shell
     } else if (argv[1] == "pagefault") {
         trigger_pagefault();
     } else if (argv[1] == "invop") {
-        trigger_invalid_opcode();
+        kernel::arch::trigger_invalid_opcode();
     } else if (argv[1] == "int3") {
-        trigger_breakpoint();
+        kernel::arch::trigger_breakpoint();
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);
     }

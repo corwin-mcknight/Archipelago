@@ -1,7 +1,7 @@
 #pragma once
 
+#include <kernel/arch.h>
 #include <kernel/config.h>
-#include <kernel/x86/descriptor_tables.h>
 #include <stdint.h>
 
 namespace kernel::synchronization {
@@ -39,12 +39,12 @@ class spinlock {
 class lock_guard {
    public:
     explicit lock_guard(spinlock& lock) : m_lock(lock) {
-        m_flags = kernel::x86::save_and_disable_interrupts();
+        m_flags = kernel::arch::save_and_disable_interrupts();
         m_lock.lock();
     }
     ~lock_guard() {
         m_lock.unlock();
-        kernel::x86::restore_interrupts(m_flags);
+        kernel::arch::restore_interrupts(m_flags);
     }
     lock_guard(const lock_guard&)            = delete;
     lock_guard& operator=(const lock_guard&) = delete;

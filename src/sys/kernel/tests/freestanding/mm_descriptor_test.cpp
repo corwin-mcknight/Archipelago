@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/arch.h"
 #include "kernel/mm/page_descriptor.h"
 #include "kernel/mm/paging.h"
 #include "kernel/mm/pmm.h"
@@ -60,9 +61,8 @@ KTEST_INTEGRATION(kernel_owns_its_page_tables, "mm/descriptor") {
     // The live root table must be a PMM-allocated frame (descriptor ACTIVE),
     // not a bootloader table squatting in reclaimable memory the PMM could
     // hand out as free.
-    uintptr_t cr3;
-    asm volatile("mov %%cr3, %0" : "=r"(cr3));
-    const page_descriptor* desc = g_page_descriptors.lookup(cr3 & ~static_cast<uintptr_t>(0xFFF));
+    uintptr_t root              = kernel::arch::active_translation_root();
+    const page_descriptor* desc = g_page_descriptors.lookup(root & ~static_cast<uintptr_t>(0xFFF));
     KTEST_REQUIRE_TRUE(desc != nullptr);
     KTEST_EXPECT_TRUE(desc->state == page_state::ACTIVE);
 

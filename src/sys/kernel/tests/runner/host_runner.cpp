@@ -198,13 +198,13 @@ void panic(const char* s) {
 
 void hcf() { longjmp(g_test_jmp, 1); }
 
-// Kernel synchronization (Spinlock, used by e.g. HandleTable) reaches for the x86 interrupt-state ops.
+// Kernel synchronization (Spinlock, used by e.g. HandleTable) reaches for the arch interrupt-state ops.
 // The host runner is single-threaded per forked test, so the lock is a no-op -- these stubs just
 // satisfy the linker. Real lock/interrupt behaviour is exercised on the freestanding (QEMU) tier.
-namespace kernel::x86 {
+namespace kernel::arch {
 uint64_t save_and_disable_interrupts() { return 0; }
 void restore_interrupts(uint64_t) {}
-}  // namespace kernel::x86
+}  // namespace kernel::arch
 
 // Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child
 // _exit()s, which skips the runtime's atexit writer, so we flush this child's counters explicitly.

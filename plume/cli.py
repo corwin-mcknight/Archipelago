@@ -279,6 +279,9 @@ def cmd_test(args):
 
     print("\n\nRunning tests...\n")
     harness_args = [sys.executable, "tools/test-harness.py"]
+    arch_config = (config.get("arch_configs") or {}).get(config.get_arch()) or {}
+    if arch_config.get("qemu"):
+        harness_args.extend(["--qemu", arch_config["qemu"]])
     if args.verbose:
         harness_args.append("--verbose")
     harness_args.extend(args.tests)

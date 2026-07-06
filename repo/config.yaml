@@ -17,3 +17,8 @@ config:
     x86_64:
       qemu: qemu-system-x86_64
       target_triple: x86_64-unknown-none
+    riscv64:
+      qemu: qemu-system-riscv64
+      target_triple: riscv64-unknown-none
+      # EDK2 RiscVVirt UEFI firmware -- a host-side test dependency, never a sysroot package.
+      firmware: ./build/tools/edk2/RISCV_VIRT_CODE.fd

@@ -1,6 +1,7 @@
 #include <kernel/config.h>
 #include <kernel/cpu.h>
 #include <kernel/testing/testing.h>
+#include <kernel/x86/cpu.h>
 #include <vendor/limine.h>
 
 #if CONFIG_KERNEL_TESTING

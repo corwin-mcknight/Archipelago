@@ -5,6 +5,8 @@
 
 #include <ktl/atomic>
 
+#include "kernel/config.h"
+
 namespace kernel {
 
 struct cpu_core {
@@ -23,3 +25,5 @@ size_t current_core_index();
 }  // namespace x86
 
 }  // namespace kernel
+
+extern kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];

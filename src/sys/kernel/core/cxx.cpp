@@ -21,8 +21,7 @@ extern "C" [[noreturn]] void __cxa_pure_virtual() {
     // Log the call
     g_log.error("Pure virtual function called");
     // Halt the system
-    asm("cli");
-    while (1) {}
+    hcf();
 }
 
 extern "C" void* __cxa_begin_catch(void*) {

@@ -9,6 +9,7 @@
 #include <ktl/maybe>
 #include <ktl/result>
 
+#include "kernel/arch.h"
 #include "kernel/assert.h"
 #include "kernel/config.h"
 #include "kernel/cpu.h"
@@ -21,6 +22,7 @@
 #include "kernel/obj/event.h"
 #include "kernel/panic.h"
 #include "kernel/symbols.h"
+#include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
 #include "vendor/limine.h"
@@ -76,7 +78,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
 
     if (is_boot_processor) { g_interrupt_manager.initialize(); }
 
-    kernel::x86::enable_interrupts();
+    kernel::arch::enable_interrupts();
     g_log.debug("cpu{0}: Interrupts Enabled", core_index);
 
     // Boot Processor is responsible for initializing the time
