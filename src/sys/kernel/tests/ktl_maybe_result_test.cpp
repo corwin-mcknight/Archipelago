@@ -366,4 +366,18 @@ KTEST(ktl_result_errc_alias, "ktl/result") {
     KTEST_EXPECT_EQUAL(static_cast<int>(ktl::errc::registry_full), -9);
 }
 
+KTEST(ktl_result_copy_and_move_construction, "ktl/result") {
+    auto ok = ktl::result<int>::ok(41);
+    ktl::result<int> ok_copy(ok);
+    KTEST_EXPECT_ALL(ok_copy.is_ok(), ok_copy.unwrap() == 41);
+    ktl::result<int> ok_moved(ktl::move(ok_copy));
+    KTEST_EXPECT_TRUE(ok_moved.is_ok());
+
+    auto err = ktl::result<int>::err(ktl::errc::oom);
+    ktl::result<int> err_copy(err);
+    KTEST_EXPECT_ALL(err_copy.is_err(), err_copy.unwrap_err() == ktl::errc::oom);
+    ktl::result<int> err_moved(ktl::move(err_copy));
+    KTEST_EXPECT_TRUE(err_moved.is_err());
+}
+
 #endif  // CONFIG_KERNEL_TESTING

@@ -105,4 +105,19 @@ KTEST(ktl_string_view_at_in_range, "ktl/string_view") {
     static_assert(ktl::string_view("abc").at(1) == 'b');
 }
 
+KTEST(ktl_string_view_iteration_and_misses, "ktl/string_view") {
+    ktl::string_view sv("abc");
+    // begin()/end() drive range-for.
+    int n     = 0;
+    char last = 0;
+    for (char c : sv) {
+        last = c;
+        ++n;
+    }
+    KTEST_EXPECT_ALL(n == 3, last == 'c');
+
+    KTEST_EXPECT_TRUE(sv.find('z', 0) == ktl::string_view::npos);
+    KTEST_EXPECT_TRUE(sv != "abd");
+}
+
 #endif  // CONFIG_KERNEL_TESTING

@@ -258,6 +258,47 @@ KTEST(log_message_seq_level_packing, "kernel/log") {
     KTEST_EXPECT_ALL(b.sequence() == big, b.level() == log_level::error);
 }
 
+// Copy/move construction and assignment preserve the packed level/sequence
+// word and the text.
+KTEST(log_message_copy_and_move, "kernel/log") {
+    log_message src(42, log_level::info, 7, ktl::string_view("hello"));
+    log_message from_fixed(43, log_level::debug, 8, src.text);
+
+    log_message copied(src);
+    KTEST_EXPECT_ALL(copied.sequence() == 7, copied.timestamp == 42, ktl::string_view(copied.text) == "hello");
+
+    log_message moved(ktl::move(copied));
+    KTEST_EXPECT_ALL(moved.sequence() == 7, ktl::string_view(moved.text) == "hello");
+
+    log_message assigned;
+    assigned = src;
+    KTEST_EXPECT_ALL(assigned.sequence() == 7, ktl::string_view(assigned.text) == "hello");
+
+    log_message move_assigned;
+    move_assigned = ktl::move(assigned);
+    KTEST_EXPECT_ALL(move_assigned.sequence() == 7, ktl::string_view(move_assigned.text) == "hello",
+                     from_fixed.sequence() == 8);
+}
+
+// The default write_string falls back to byte-at-a-time output.
+KTEST(logging_device_write_string_default, "kernel/log") {
+    struct capture_device : kernel::driver::logging_device {
+        char buf[16] = {};
+        int n        = 0;
+        const char* name() const override { return "capture"; }
+        void init() override {}
+        void write_byte(char c) override { buf[n++] = c; }
+    } dev;
+    dev.write_string("abc");
+    KTEST_EXPECT_ALL(dev.n == 3, ktl::string_view(dev.buf) == "abc");
+}
+
+// A fresh log has dropped nothing.
+KTEST(system_log_dropped_starts_zero, "kernel/log") {
+    static kernel::system_log log;
+    KTEST_EXPECT_EQUAL(log.dropped(), static_cast<uint64_t>(0));
+}
+
 // JSON escaping covers quote, backslash, the common control chars, and \u00XX for other controls.
 KTEST(json_escape_specials, "kernel/json_escape") {
     char buf[64];

@@ -63,4 +63,49 @@ KTEST(ktl_fmt_zero_sized_buffer, "ktl/fmt") {
     KTEST_EXPECT_EQUAL(canary, 'x');
 }
 
+KTEST(ktl_fmt_integer_bases, "ktl/fmt") {
+    char buffer[64];
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:x}", 255);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "FF");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:h}", 255);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "FF");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:o}", 8);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "10");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:b}", 5);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "101");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:p}", 0x1000);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "1000");
+}
+
+KTEST(ktl_fmt_char_specifier, "ktl/fmt") {
+    char buffer[8];
+    // 'c' prints the raw character instead of the integer value.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:c}", 'A');
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "A");
+}
+
+KTEST(ktl_fmt_cstring_argument, "ktl/fmt") {
+    char buffer[16];
+    const char* s = "hi";
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "[{0}]", s);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "[hi]");
+}
+
+KTEST(ktl_fmt_escapes_flags_and_bad_index, "ktl/fmt") {
+    char buffer[32];
+    // Doubled braces emit literal braces.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{{{0}}}", 7);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "{7}");
+
+    // '-' left-aligns, '0' zero-pads.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:-4}|", 42);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "42  |");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:04}", 42);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "0042");
+
+    // An argument index past the pack renders a placeholder, not garbage.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{5}", 1);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "<invalid argument>");
+}
+
 #endif  // CONFIG_KERNEL_TESTING

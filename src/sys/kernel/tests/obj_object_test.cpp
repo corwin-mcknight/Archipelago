@@ -93,4 +93,12 @@ KTEST_WITH_INIT(obj_object_set_name, "obj/object", obj_object_init) {
     KTEST_EXPECT_TRUE(obj->name() != nullptr);
 }
 
+// Boot-time registration: obj_init installs the built-in object types.
+// Fork-per-test isolation makes the one-shot registration safe to run here.
+KTEST(obj_init_registers_builtin_types, "obj/object") {
+    kernel::obj::obj_init();
+    KTEST_EXPECT_TRUE(g_type_registry.lookup(Event::TYPE_ID).has_value());
+    KTEST_EXPECT_TRUE(g_type_registry.lookup(Counter::TYPE_ID).has_value());
+}
+
 #endif

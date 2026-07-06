@@ -1,5 +1,3 @@
-#include <kernel/mm/region.h>
-#include <kernel/mm/vmo.h>
 #include <kernel/obj/counter.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
@@ -7,11 +5,11 @@
 
 namespace kernel::obj {
 
+// VMM object types (Region, VMO) register in vmm_init -- mm code stays out of
+// the host-tier build.
 void obj_init() {
     Event::register_type(g_type_registry).expect("obj_init: Event type registration failed");
     Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
-    mm::Region::register_type(g_type_registry).expect("obj_init: Region type registration failed");
-    mm::vmo::register_type(g_type_registry).expect("obj_init: VMO type registration failed");
 }
 
 namespace { ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace

@@ -1,8 +1,11 @@
 #include "kernel/mm/vm_aspace.h"
 
+#include <kernel/obj/type_registry.h>
+
 #include "kernel/log.h"
 #include "kernel/mm/page_descriptor.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/mm/vmo.h"
 #include "kernel/panic.h"
 
 namespace kernel::mm {
@@ -37,6 +40,9 @@ bool vm_aspace::init() {
 }
 
 void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_region* wired, size_t wired_count) {
+    Region::register_type(obj::g_type_registry).expect("vmm: Region type registration failed");
+    vmo::register_type(obj::g_type_registry).expect("vmm: VMO type registration failed");
+
     if (!g_page_descriptors.init(usable, usable_count, wired, wired_count)) {
         panic("vmm: page descriptor array allocation failed");
     }

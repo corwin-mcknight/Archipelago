@@ -123,4 +123,11 @@ KTEST(ktl_vector_non_default_constructible, "ktl/vector") {
     KTEST_EXPECT_EQUAL(vec[9].value, 9);
 }
 
+KTEST(ktl_vector_const_index, "ktl/vector") {
+    ktl::vector<int> vec;
+    KTEST_REQUIRE_TRUE(vec.push_back(7));
+    const ktl::vector<int>& cref = vec;
+    KTEST_EXPECT_EQUAL(cref[0], 7);
+}
+
 #endif  // CONFIG_KERNEL_TESTING
