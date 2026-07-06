@@ -12,6 +12,8 @@ namespace type_ids {
 constexpr TypeId INVALID = 0;
 constexpr TypeId EVENT   = 1;
 constexpr TypeId COUNTER = 2;
+constexpr TypeId REGION  = 3;
+constexpr TypeId VMO     = 4;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;

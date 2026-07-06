@@ -8,6 +8,23 @@ namespace kernel::mm {
 
 namespace {
 
+// x86_64 page-table entry bits. Private to this file: portable code speaks
+// arch-neutral prot/cache and never reasons about these bit positions.
+namespace pte {
+constexpr uint64_t PRESENT       = 1ull << 0;
+constexpr uint64_t WRITABLE      = 1ull << 1;
+constexpr uint64_t USER          = 1ull << 2;
+constexpr uint64_t CACHE_DISABLE = 1ull << 4;
+constexpr uint64_t HUGE          = 1ull << 7;
+constexpr uint64_t NO_EXECUTE    = 1ull << 63;
+
+constexpr uint64_t ADDR_MASK     = 0x000FFFFFFFFFF000ull;
+}  // namespace pte
+
+// The one currently active address space on this CPU. A plain global until
+// per-CPU storage exists; single-CPU scoped.
+const address_space* g_active_space = nullptr;
+
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
 constexpr size_t pml4_index(uintptr_t vaddr) { return (vaddr >> 39) & 0x1FF; }
@@ -18,6 +35,7 @@ constexpr size_t pt_index(uintptr_t vaddr) { return (vaddr >> 12) & 0x1FF; }
 // The index helpers only consume bits 12..47. An address is canonical iff
 // sign-extending bit 47 reproduces bits 48..63, so bits 48..63 carry no extra
 // information; reject non-canonical addresses rather than silently aliasing.
+// This bit-47 reasoning is arch-specific and never leaks past this file.
 constexpr bool is_canonical(uintptr_t vaddr) {
     int64_t s = static_cast<int64_t>(vaddr) >> 47;
     return s == 0 || s == -1;
@@ -25,10 +43,29 @@ constexpr bool is_canonical(uintptr_t vaddr) {
 
 ktl::maybe<vm_paddr_t> alloc_table() { return g_page_frame_allocator.alloc(); }
 
-// Leaf permission bits callers may request. NO_EXECUTE is rejected separately
-// in map_page until EFER.NXE support exists -- with NXE clear, bit 63 of a
-// present PTE is reserved and faults.
-constexpr uint64_t LEAF_FLAG_MASK = pte::WRITABLE | pte::USER | pte::WRITE_THROUGH | pte::CACHE_DISABLE | pte::GLOBAL;
+// Translate arch-neutral leaf attributes into x86_64 PTE permission/cache bits.
+uint64_t leaf_flags(vm_prot_t prot, vm_cache_mode cache) {
+    uint64_t bits = 0;
+    if (prot & vm_prot::WRITE) { bits |= pte::WRITABLE; }
+    if (prot & vm_prot::USER) { bits |= pte::USER; }
+    // x86_64 has no read-enable bit -- a present page is always readable.
+    // Absence of EXECUTE becomes the NX bit (EFER.NXE is enabled at boot).
+    if (!(prot & vm_prot::EXECUTE)) { bits |= pte::NO_EXECUTE; }
+    // DEVICE and WRITE_COMBINING both degrade to uncached (PCD) until PAT
+    // programming exists; CACHED leaves the write-back default.
+    if (cache == vm_cache_mode::DEVICE || cache == vm_cache_mode::WRITE_COMBINING) { bits |= pte::CACHE_DISABLE; }
+    return bits;
+}
+
+// Recover arch-neutral attributes from a terminal (leaf or huge) PTE.
+vm_translation attrs_from_pte(uint64_t entry, vm_paddr_t paddr) {
+    vm_prot_t prot = vm_prot::READ;
+    if (entry & pte::WRITABLE) { prot |= vm_prot::WRITE; }
+    if (entry & pte::USER) { prot |= vm_prot::USER; }
+    if (!(entry & pte::NO_EXECUTE)) { prot |= vm_prot::EXECUTE; }
+    vm_cache_mode cache = (entry & pte::CACHE_DISABLE) ? vm_cache_mode::DEVICE : vm_cache_mode::CACHED;
+    return {paddr, prot, cache};
+}
 
 inline vm_paddr_t current_cr3() {
     uintptr_t cr3;
@@ -109,36 +146,67 @@ uint64_t* find_pt_slot(vm_paddr_t pml4_phys, uintptr_t vaddr) {
     return &table[indices[3]];
 }
 
+// Resolve vaddr to its terminal PTE, transparently handling 1G/2M huge pages
+// installed by the bootloader in the kernel half. Returns the entry and the
+// intra-page offset mask, or nothing if unmapped.
+struct terminal_pte {
+    uint64_t entry;
+    uintptr_t offset_mask;
+};
+ktl::maybe<terminal_pte> resolve(vm_paddr_t pml4_phys, uintptr_t vaddr) {
+    uint64_t* table    = table_at(pml4_phys);
+    size_t indices[4]  = {pml4_index(vaddr), pdpt_index(vaddr), pd_index(vaddr), pt_index(vaddr)};
+    // Offset masks per level a huge/leaf mapping can terminate at: 1G at the
+    // PDPT, 2M at the PD, 4K at the PT.
+    uintptr_t masks[4] = {(1ull << 39) - 1, (1ull << 30) - 1, (1ull << 21) - 1, (1ull << 12) - 1};
+
+    for (int level = 0; level < 4; ++level) {
+        uint64_t entry = table[indices[level]];
+        if (!(entry & pte::PRESENT)) { return ktl::nothing; }
+        if (level == 3) { return terminal_pte{entry, masks[3]}; }
+        if (entry & pte::HUGE) { return terminal_pte{entry, masks[level]}; }
+        table = table_at(entry & pte::ADDR_MASK);
+    }
+    return ktl::nothing;
+}
+
 }  // namespace
 
 bool address_space::init() {
     if (m_pml4_phys != 0) { return false; }
     auto pml4 = alloc_table();
     if (!pml4.has_value()) { return false; }
-    m_pml4_phys = pml4.value();
+    m_pml4_phys   = pml4.value();
+
+    // Clone the kernel half (upper 256 PML4 entries) from the active space so
+    // the kernel is mapped in every address space. The lower 256 (user half)
+    // stay empty. The intermediate tables are shared, not copied -- acceptable
+    // because kernel mappings are not created through map_page this milestone.
+    uint64_t* dst = table_at(m_pml4_phys);
+    uint64_t* src = table_at(current_cr3());
+    for (size_t i = 256; i < 512; ++i) { dst[i] = src[i]; }
     return true;
 }
 
 void address_space::destroy() {
     if (m_pml4_phys == 0) { return; }
+    // Only free the user half. The kernel half was cloned from the boot tables
+    // and its subtrees are shared with every other space -- freeing them would
+    // corrupt the kernel mapping.
     uint64_t* pml4 = table_at(m_pml4_phys);
-    for (size_t i = 0; i < 512; ++i) { free_subtree(pml4[i], 4); }
+    for (size_t i = 0; i < 256; ++i) { free_subtree(pml4[i], 4); }
     g_page_frame_allocator.free(m_pml4_phys);
     m_pml4_phys = 0;
+    if (g_active_space == this) { g_active_space = nullptr; }
 }
 
-bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) {
+bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache) {
     if (m_pml4_phys == 0) { return false; }
     if (!is_canonical(vaddr)) { return false; }
     if ((vaddr & 0xFFF) != 0) { return false; }
     if ((paddr & 0xFFF) != 0) { return false; }
 
-    // Reject NO_EXECUTE until the kernel enables EFER.NXE; with NXE clear the
-    // bit is reserved and a present PTE carrying it page-faults. Mask the rest
-    // of the caller's flags down to the supported permission bits.
-    if (flags & pte::NO_EXECUTE) { return false; }
-    flags &= LEAF_FLAG_MASK;
-
+    uint64_t flags        = leaf_flags(prot, cache);
     uint64_t intermediate = pte::WRITABLE | (flags & pte::USER);
 
     uint64_t* leaf        = ensure_pt_slot(m_pml4_phys, vaddr, intermediate);
@@ -148,17 +216,27 @@ bool address_space::map_page(uintptr_t vaddr, vm_paddr_t paddr, uint64_t flags) 
     // needed here -- map_page never changes an existing translation.
     if (*leaf & pte::PRESENT) { return false; }
 
-    *leaf = (paddr & pte::ADDR_MASK) | (flags | pte::PRESENT);
+    *leaf = (paddr & pte::ADDR_MASK) | flags | pte::PRESENT;
     return true;
 }
 
 ktl::maybe<vm_paddr_t> address_space::walk(uintptr_t vaddr) const {
     if (m_pml4_phys == 0) { return ktl::nothing; }
     if (!is_canonical(vaddr)) { return ktl::nothing; }
-    uint64_t* leaf = find_pt_slot(m_pml4_phys, vaddr);
-    if (leaf == nullptr) { return ktl::nothing; }
-    if (!(*leaf & pte::PRESENT)) { return ktl::nothing; }
-    return (*leaf & pte::ADDR_MASK) | (vaddr & 0xFFF);
+    auto term = resolve(m_pml4_phys, vaddr);
+    if (!term.has_value()) { return ktl::nothing; }
+    vm_paddr_t base = term.value().entry & pte::ADDR_MASK & ~term.value().offset_mask;
+    return base | (vaddr & term.value().offset_mask);
+}
+
+ktl::maybe<vm_translation> address_space::walk_ext(uintptr_t vaddr) const {
+    if (m_pml4_phys == 0) { return ktl::nothing; }
+    if (!is_canonical(vaddr)) { return ktl::nothing; }
+    auto term = resolve(m_pml4_phys, vaddr);
+    if (!term.has_value()) { return ktl::nothing; }
+    vm_paddr_t base  = term.value().entry & pte::ADDR_MASK & ~term.value().offset_mask;
+    vm_paddr_t paddr = base | (vaddr & term.value().offset_mask);
+    return attrs_from_pte(term.value().entry, paddr);
 }
 
 ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
@@ -166,6 +244,8 @@ ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
     if (!is_canonical(vaddr)) { return ktl::nothing; }
     if ((vaddr & 0xFFF) != 0) { return ktl::nothing; }
 
+    // 4K only: huge mappings are bootloader-owned kernel mappings and are never
+    // torn down through this path.
     uint64_t* leaf = find_pt_slot(m_pml4_phys, vaddr);
     if (leaf == nullptr) { return ktl::nothing; }
     if (!(*leaf & pte::PRESENT)) { return ktl::nothing; }
@@ -175,5 +255,21 @@ ktl::maybe<vm_paddr_t> address_space::unmap_page(uintptr_t vaddr) {
     flush_tlb_page(m_pml4_phys, vaddr);
     return paddr;
 }
+
+void address_space::activate() {
+    asm volatile("mov %0, %%cr3" ::"r"(m_pml4_phys) : "memory");
+    g_active_space = this;
+}
+
+void address_space::adopt_active() {
+    destroy();
+    m_pml4_phys    = current_cr3();
+    g_active_space = this;
+}
+
+const address_space* address_space::active() { return g_active_space; }
+
+// End of the canonical low half: bit 47 sign-extension boundary.
+uintptr_t address_space::low_limit() { return 0x0000800000000000ull; }
 
 }  // namespace kernel::mm

@@ -12,6 +12,7 @@ FUZZ_FMT      := $(OBJDIR)/fuzz-fmt
 FUZZ_JSON     := $(OBJDIR)/fuzz-json
 FUZZ_ATOI     := $(OBJDIR)/fuzz-atoi
 FUZZ_ELF      := $(OBJDIR)/fuzz-elf
+FUZZ_RBTREE   := $(OBJDIR)/fuzz-rbtree
 
 INC_KERNEL := -I $(KSRC)/includes/std -I $(KSRC)/includes
 
@@ -56,6 +57,10 @@ pkg_build:
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp -o $(OBJDIR)/elf_symbols_fuzz.o
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/symbols.cpp -o $(OBJDIR)/symbols.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
+	# rb_tree is header-only (intrusive, no allocation), so the fuzzer is self-contained.
+	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp"
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp -o $(OBJDIR)/rb_tree_fuzz.o
+	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/rb_tree_fuzz.o -o $(FUZZ_RBTREE)
 
 pkg_install:
 	@echo "[plume] Installing fuzzers"
@@ -65,3 +70,4 @@ pkg_install:
 	cp $(FUZZ_JSON) $(TOOL_INSTALL)/kernel-fuzz/fuzz-json
 	cp $(FUZZ_ATOI) $(TOOL_INSTALL)/kernel-fuzz/fuzz-atoi
 	cp $(FUZZ_ELF) $(TOOL_INSTALL)/kernel-fuzz/fuzz-elf
+	cp $(FUZZ_RBTREE) $(TOOL_INSTALL)/kernel-fuzz/fuzz-rbtree

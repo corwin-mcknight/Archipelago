@@ -17,6 +17,7 @@
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/mm/vm_aspace.h"
 #include "kernel/obj/event.h"
 #include "kernel/panic.h"
 #include "kernel/symbols.h"
@@ -28,6 +29,16 @@ kernel::driver::uart uart;
 kernel::x86::drivers::pit_timer timer;
 
 extern "C" void init_global_constructors_array(void);
+
+// Enable EFER.NXE so a present PTE may carry the no-execute bit (bit 63).
+// Must run on every CPU before any NX mapping is installed; with NXE clear that
+// bit is reserved and faults. EFER is MSR 0xC0000080, NXE is bit 11.
+static void enable_nxe() {
+    uint32_t lo, hi;
+    asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000080u));
+    lo |= (1u << 11);
+    asm volatile("wrmsr" ::"a"(lo), "d"(hi), "c"(0xC0000080u));
+}
 
 __attribute__((used, section(".limine_requests"))) volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
@@ -55,6 +66,8 @@ uintptr_t g_hhdm_offset = 0;
 void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     assert(core_index < CONFIG_MAX_CORES, "Logical core index exceeds maximum cores");
     g_cpu_cores[core_index].lapic_id = lapic_id;
+
+    enable_nxe();
 
     // Start basic hardware initialisation
     g_log.debug("cpu{0} (lapic {1}): Initializing", core_index, lapic_id);
@@ -167,6 +180,15 @@ extern "C" [[noreturn]] void _start(void) {
     if (memmap_request.response == nullptr) { panic("Limine memmap request failed"); }
     if (memmap_request.response->entry_count == 0) { panic("Limine memmap is empty -- no memory regions reported"); }
 
+    // Range lists for VMM init: usable ranges become FREE page descriptors,
+    // kernel ranges stay WIRED. Fixed capacity -- Limine memmaps are small;
+    // overflow only costs descriptor precision, so warn and drop.
+    constexpr size_t MAX_MEMMAP_RANGES = 48;
+    kernel::mm::vm_page_region usable_ranges[MAX_MEMMAP_RANGES];
+    kernel::mm::vm_page_region wired_ranges[MAX_MEMMAP_RANGES];
+    size_t usable_range_count   = 0;
+    size_t wired_range_count    = 0;
+
     uint64_t total_usable_pages = 0;
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
         auto* entry = memmap_request.response->entries[i];
@@ -189,13 +211,25 @@ extern "C" [[noreturn]] void _start(void) {
             g_log.info("pmm: adding region base=0x{0:p} pages={1} type={2}", entry->base, pages, entry->type);
             kernel::mm::g_page_frame_allocator.add_region({.start = entry->base, .count = pages});
             total_usable_pages += pages;
+            if (usable_range_count < MAX_MEMMAP_RANGES) {
+                usable_ranges[usable_range_count++] = {.start = entry->base, .count = pages};
+            } else {
+                g_log.warn("vmm: dropping usable range base=0x{0:p} from descriptor coverage", entry->base);
+            }
         } else if (entry->type == 6) {  // LIMINE_MEMMAP_KERNEL_AND_MODULES / EXECUTABLE_AND_MODULES
             g_log.info("pmm: reserved region base=0x{0:p} pages={1} (kernel)", entry->base, pages);
             kernel::mm::g_page_frame_allocator.add_reserved(pages);
+            if (wired_range_count < MAX_MEMMAP_RANGES) {
+                wired_ranges[wired_range_count++] = {.start = entry->base, .count = pages};
+            } else {
+                g_log.warn("vmm: dropping kernel range base=0x{0:p} from descriptor coverage", entry->base);
+            }
         }
     }
     if (total_usable_pages == 0) { panic("Limine memmap reported no usable memory"); }
     g_log.info("Memory subsystem initialized ({0} usable pages)", total_usable_pages);
+
+    kernel::mm::vmm_init(usable_ranges, usable_range_count, wired_ranges, wired_range_count);
 
     if (mp_request.response == nullptr) { panic("Limine MP request failed"); }
     if (mp_request.response->cpu_count == 0) { panic("Limine MP response reports zero CPUs"); }

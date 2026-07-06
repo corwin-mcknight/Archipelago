@@ -15,7 +15,13 @@ class page_frame_allocator {
    public:
     ktl::maybe<vm_paddr_t> alloc();
     void free(vm_paddr_t addr);
+    // Carve a physically contiguous, zeroed run of pages from an untouched
+    // region tail. ponytail: no free_contiguous -- the only caller (the page
+    // descriptor array) lives for the kernel's lifetime.
+    ktl::maybe<vm_paddr_t> alloc_contiguous(size_t count);
     void debug_print_state();
+
+    size_t free_pages() const { return m_free_pages; }
 
     void add_region(const vm_page_region& region) {
         if (!m_regions.push_back(region)) { return; }  // drop region on OOM rather than corrupt page accounting

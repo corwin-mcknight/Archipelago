@@ -1,6 +1,6 @@
 # Memory Subsystem
 
-This page documents the current allocators and the planned virtual memory direction.
+This page documents the kernel's allocators and virtual memory manager.
 The kernel has two memory allocators today: an early heap for boot-time allocation and a Physical Memory Manager, also known as the PMM, for page-granularity allocation.
 
 ## Early Heap
@@ -27,9 +27,10 @@ Until the scheduler exists, the inline fallback in allocation is the only path t
 The PMM only counts reserved pages -- it does not own a list of reserved physical ranges.
 Tracking specific kernel-occupied ranges belongs to the VMM, which receives them at init separately from the PMM's free-page accounting.
 
-## Planned Architecture
+## Architecture
 ### Virtual Memory Manager
-The VMM design is settled but not yet implemented; the arch page-table layer exists today.
+The VMM described here is implemented for the kernel address space: the arch paging boundary, page descriptors, region tree, VMOs with anonymous and device pagers, demand paging with zero-page copy-on-write, and VMO resize.
+Task-owned address spaces, region handles, and the userspace pager protocol arrive with the task and IPC milestones.
 
 **Priorities**: isolation > simplicity > latency > throughput.
 

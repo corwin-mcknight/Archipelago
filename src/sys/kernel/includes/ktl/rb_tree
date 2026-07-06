@@ -1,0 +1,370 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <ktl/utility>
+
+// Intrusive red-black tree.
+//
+// The node hook (ktl::rb_node) is embedded directly in the element; the tree stores no nodes of its
+// own, so insert/erase/find never allocate. The tree is parameterized on the element type, a
+// pointer-to-member locating the hook inside the element, and a key comparator.
+//
+// The comparator provides a strict-weak "less" ordering. For homogeneous work it is called with two
+// const T&; heterogeneous lookups (find/lower_bound/upper_bound by a bare key) call it with (const T&,
+// const K&) and (const K&, const T&), so a comparator that only ever compares whole elements is fine
+// as long as the caller looks up by T. Duplicate keys are rejected on insert -- region intervals are
+// unique by base, which is the only consumer.
+
+namespace ktl {
+
+struct rb_node {
+    // child[0] = left, child[1] = right. Indexing by side keeps rotation and fixup code symmetric.
+    rb_node* parent   = nullptr;
+    rb_node* child[2] = {nullptr, nullptr};
+    bool red          = false;
+};
+
+template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
+   public:
+    class iterator {
+       public:
+        iterator() = default;
+        explicit iterator(rb_node* node) : m_node(node) {}
+
+        T& operator*() const { return *element_of(m_node); }
+        T* operator->() const { return element_of(m_node); }
+
+        iterator& operator++() {
+            m_node = successor(m_node);
+            return *this;
+        }
+        iterator operator++(int) {
+            iterator prev = *this;
+            ++(*this);
+            return prev;
+        }
+
+        bool operator==(const iterator& other) const { return m_node == other.m_node; }
+        bool operator!=(const iterator& other) const { return m_node != other.m_node; }
+
+        rb_node* node() const { return m_node; }
+
+       private:
+        rb_node* m_node = nullptr;
+    };
+
+    rb_tree() = default;
+    explicit rb_tree(Compare comp) : m_comp(ktl::move(comp)) {}
+
+    rb_tree(const rb_tree&)            = delete;
+    rb_tree& operator=(const rb_tree&) = delete;
+
+    bool empty() const { return m_size == 0; }
+    size_t size() const { return m_size; }
+
+    iterator begin() const { return iterator(m_root ? leftmost(m_root) : nullptr); }
+    iterator end() const { return iterator(nullptr); }
+
+    // Inserts element into the tree. Returns false (and does nothing) if an element with an equal key
+    // is already present. The element must outlive its membership; the tree does not copy it.
+    bool insert(T& element) {
+        rb_node* node   = hook_of(element);
+        rb_node* parent = nullptr;
+        int side        = 0;
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            T& cur_elem = *element_of(cur);
+            if (m_comp(element, cur_elem)) {
+                side = 0;
+            } else if (m_comp(cur_elem, element)) {
+                side = 1;
+            } else {
+                return false;  // duplicate key
+            }
+            parent = cur;
+            cur    = cur->child[side];
+        }
+
+        node->parent   = parent;
+        node->child[0] = nullptr;
+        node->child[1] = nullptr;
+        node->red      = true;
+        if (parent == nullptr) {
+            m_root = node;
+        } else {
+            parent->child[side] = node;
+        }
+        insert_fixup(node);
+        ++m_size;
+        return true;
+    }
+
+    // Removes element from the tree. The element must currently be a member; its embedded hook holds
+    // the location, so no search is performed.
+    void erase(T& element) { erase_node(hook_of(element)); }
+    void erase(iterator it) { erase_node(it.node()); }
+
+    template <typename K> iterator find(const K& key) const {
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            T& cur_elem = *element_of(cur);
+            if (m_comp(key, cur_elem)) {
+                cur = cur->child[0];
+            } else if (m_comp(cur_elem, key)) {
+                cur = cur->child[1];
+            } else {
+                return iterator(cur);
+            }
+        }
+        return end();
+    }
+
+    // First element whose key is not less than key.
+    template <typename K> iterator lower_bound(const K& key) const {
+        rb_node* result = nullptr;
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            if (m_comp(*element_of(cur), key)) {
+                cur = cur->child[1];
+            } else {
+                result = cur;
+                cur    = cur->child[0];
+            }
+        }
+        return iterator(result);
+    }
+
+    // Last element whose key is not greater than key -- the interval-query
+    // primitive: for disjoint [base, base+size) entries keyed by base, the
+    // only candidate containing key is find_le(key).
+    template <typename K> iterator find_le(const K& key) const {
+        rb_node* result = nullptr;
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            if (m_comp(key, *element_of(cur))) {
+                cur = cur->child[0];
+            } else {
+                result = cur;
+                cur    = cur->child[1];
+            }
+        }
+        return iterator(result);
+    }
+
+    // First element whose key is greater than key.
+    template <typename K> iterator upper_bound(const K& key) const {
+        rb_node* result = nullptr;
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            if (m_comp(key, *element_of(cur))) {
+                result = cur;
+                cur    = cur->child[0];
+            } else {
+                cur = cur->child[1];
+            }
+        }
+        return iterator(result);
+    }
+
+    void clear() {
+        m_root = nullptr;
+        m_size = 0;
+    }
+
+    // Debug invariant check: root black, no red node has a red child, every root-to-leaf path has the
+    // same black height, and the in-order sequence is strictly increasing per the comparator. Returns
+    // true when all hold. O(n); intended for tests and assertions, not the hot path.
+    bool validate() const {
+        if (m_root == nullptr) { return m_size == 0; }
+        if (m_root->red) { return false; }
+        if (m_root->parent != nullptr) { return false; }
+
+        int black_height = 0;
+        size_t counted   = 0;
+        if (!validate_node(m_root, black_height, counted)) { return false; }
+        if (counted != m_size) { return false; }
+
+        // In-order keys strictly increasing (BST order, no duplicates).
+        rb_node* prev = nullptr;
+        for (rb_node* cur = leftmost(m_root); cur != nullptr; cur = successor(cur)) {
+            if (prev != nullptr && !m_comp(*element_of(prev), *element_of(cur))) { return false; }
+            prev = cur;
+        }
+        return true;
+    }
+
+   private:
+    static rb_node* hook_of(T& element) { return &(element.*Hook); }
+
+    // container_of: recover the element from its embedded hook. hook_offset is the byte offset of the
+    // hook member within T, computed once via the standard pointer-to-member trick.
+    static T* element_of(rb_node* node) {
+        return reinterpret_cast<T*>(reinterpret_cast<char*>(node) - hook_offset());
+    }
+
+    static size_t hook_offset() {
+        // Address of the hook within a zero-based T. Forms an address, never dereferences.
+        return reinterpret_cast<size_t>(&(reinterpret_cast<T*>(0)->*Hook));
+    }
+
+    static rb_node* leftmost(rb_node* node) {
+        while (node->child[0] != nullptr) { node = node->child[0]; }
+        return node;
+    }
+
+    static rb_node* successor(rb_node* node) {
+        if (node == nullptr) { return nullptr; }
+        if (node->child[1] != nullptr) { return leftmost(node->child[1]); }
+        rb_node* parent = node->parent;
+        while (parent != nullptr && node == parent->child[1]) {
+            node   = parent;
+            parent = parent->parent;
+        }
+        return parent;
+    }
+
+    static bool is_red(rb_node* node) { return node != nullptr && node->red; }
+
+    // side of node within its parent (0 = left child, 1 = right child).
+    static int child_side(rb_node* node) { return node == node->parent->child[1] ? 1 : 0; }
+
+    // Rotate around node in direction dir (0 = left rotation, 1 = right rotation). The opposite child
+    // takes node's place.
+    void rotate(rb_node* node, int dir) {
+        int opp        = 1 - dir;
+        rb_node* pivot = node->child[opp];
+        node->child[opp] = pivot->child[dir];
+        if (pivot->child[dir] != nullptr) { pivot->child[dir]->parent = node; }
+        pivot->parent = node->parent;
+        if (node->parent == nullptr) {
+            m_root = pivot;
+        } else {
+            node->parent->child[child_side(node)] = pivot;
+        }
+        pivot->child[dir] = node;
+        node->parent      = pivot;
+    }
+
+    void insert_fixup(rb_node* node) {
+        while (is_red(node->parent)) {
+            rb_node* grandparent = node->parent->parent;
+            int parent_side      = child_side(node->parent);
+            rb_node* uncle       = grandparent->child[1 - parent_side];
+            if (is_red(uncle)) {
+                node->parent->red = false;
+                uncle->red        = false;
+                grandparent->red  = true;
+                node              = grandparent;
+            } else {
+                if (child_side(node) != parent_side) {
+                    node = node->parent;
+                    rotate(node, parent_side);
+                }
+                node->parent->red = false;
+                grandparent->red  = true;
+                rotate(grandparent, 1 - parent_side);
+            }
+        }
+        m_root->red = false;
+    }
+
+    void transplant(rb_node* target, rb_node* replacement) {
+        if (target->parent == nullptr) {
+            m_root = replacement;
+        } else {
+            target->parent->child[child_side(target)] = replacement;
+        }
+        if (replacement != nullptr) { replacement->parent = target->parent; }
+    }
+
+    void erase_node(rb_node* node) {
+        rb_node* fix        = nullptr;    // node that may carry a "double black"
+        rb_node* fix_parent = nullptr;    // its parent (fix may be null, so track separately)
+        bool removed_red    = node->red;
+
+        if (node->child[0] == nullptr) {
+            fix        = node->child[1];
+            fix_parent = node->parent;
+            transplant(node, node->child[1]);
+        } else if (node->child[1] == nullptr) {
+            fix        = node->child[0];
+            fix_parent = node->parent;
+            transplant(node, node->child[0]);
+        } else {
+            rb_node* successor_node = leftmost(node->child[1]);
+            removed_red             = successor_node->red;
+            fix                     = successor_node->child[1];
+            if (successor_node->parent == node) {
+                fix_parent = successor_node;
+            } else {
+                fix_parent = successor_node->parent;
+                transplant(successor_node, successor_node->child[1]);
+                successor_node->child[1]         = node->child[1];
+                successor_node->child[1]->parent = successor_node;
+            }
+            transplant(node, successor_node);
+            successor_node->child[0]         = node->child[0];
+            successor_node->child[0]->parent = successor_node;
+            successor_node->red              = node->red;
+        }
+
+        if (!removed_red) { erase_fixup(fix, fix_parent); }
+        --m_size;
+    }
+
+    void erase_fixup(rb_node* node, rb_node* parent) {
+        while (node != m_root && !is_red(node)) {
+            int side         = (node == parent->child[1]) ? 1 : 0;
+            rb_node* sibling = parent->child[1 - side];
+            if (is_red(sibling)) {
+                sibling->red = false;
+                parent->red  = true;
+                rotate(parent, side);
+                sibling = parent->child[1 - side];
+            }
+            if (!is_red(sibling->child[0]) && !is_red(sibling->child[1])) {
+                sibling->red = true;
+                node         = parent;
+                parent       = node->parent;
+            } else {
+                if (!is_red(sibling->child[1 - side])) {
+                    if (sibling->child[side] != nullptr) { sibling->child[side]->red = false; }
+                    sibling->red = true;
+                    rotate(sibling, 1 - side);
+                    sibling = parent->child[1 - side];
+                }
+                sibling->red = parent->red;
+                parent->red  = false;
+                if (sibling->child[1 - side] != nullptr) { sibling->child[1 - side]->red = false; }
+                rotate(parent, side);
+                node = m_root;
+            }
+        }
+        if (node != nullptr) { node->red = false; }
+    }
+
+    bool validate_node(rb_node* node, int& black_height, size_t& counted) const {
+        if (node == nullptr) {
+            black_height = 1;  // null leaves are black
+            return true;
+        }
+        ++counted;
+        if (node->red && (is_red(node->child[0]) || is_red(node->child[1]))) { return false; }
+
+        int left_height  = 0;
+        int right_height = 0;
+        if (!validate_node(node->child[0], left_height, counted)) { return false; }
+        if (!validate_node(node->child[1], right_height, counted)) { return false; }
+        if (left_height != right_height) { return false; }
+
+        // Parent back-pointers must be consistent.
+        if (node->child[0] != nullptr && node->child[0]->parent != node) { return false; }
+        if (node->child[1] != nullptr && node->child[1]->parent != node) { return false; }
+
+        black_height = left_height + (node->red ? 0 : 1);
+        return true;
+    }
+
+    rb_node* m_root = nullptr;
+    size_t m_size   = 0;
+    Compare m_comp{};
+};
+
+}  // namespace ktl

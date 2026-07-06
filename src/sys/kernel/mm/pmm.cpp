@@ -5,6 +5,7 @@
 #include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/mm/page.h"
+#include "kernel/mm/page_descriptor.h"
 
 extern uintptr_t g_hhdm_offset;
 
@@ -31,15 +32,32 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
                 return p;
             });
         })
-        .inspect([this](vm_paddr_t) { --m_free_pages; });
+        .inspect([this](vm_paddr_t p) {
+            --m_free_pages;
+            g_page_descriptors.set_state(p, page_state::ACTIVE);
+        });
 }
 
 void page_frame_allocator::free(vm_paddr_t addr) {
     if (m_dirty.push(addr)) {
         ++m_free_pages;
+        g_page_descriptors.set_state(addr, page_state::FREE);
     } else {
         g_log.error("pmm: Failed to free page at 0x{0:p}", addr);
     }
+}
+
+ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {
+    for (size_t i = m_regions.size(); i-- > 0;) {
+        auto& region = m_regions[i];
+        if (region.count < count) { continue; }
+        region.count -= count;
+        vm_paddr_t base = region.start + region.count * PAGE_SIZE;
+        for (size_t p = 0; p < count; ++p) { zero_page(base + p * PAGE_SIZE); }
+        m_free_pages -= count;
+        return base;
+    }
+    return ktl::nothing;
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page() {
@@ -48,7 +66,7 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page() {
     while (!m_regions.empty()) {
         auto& region = m_regions[m_regions.size() - 1];
         if (region.count == 0) {
-            m_regions.pop_back();
+            (void)m_regions.pop_back();
             continue;
         }
         return region.start + (--region.count) * PAGE_SIZE;

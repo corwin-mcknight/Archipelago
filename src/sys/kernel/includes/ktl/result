@@ -248,8 +248,7 @@ template <typename E> struct [[nodiscard]] Result<void, E> {
 
 namespace ktl {
 
-/// Unified kernel error codes. The first nine values preserve the numeric space of the retired
-/// RESULT_* macros so logged codes stay comparable across the migration.
+/// Unified kernel error codes.
 enum class errc : intptr_t {
     unknown            = -1,
     null_argument      = -2,

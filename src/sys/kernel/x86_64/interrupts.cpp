@@ -5,7 +5,13 @@
 #include <kernel/x86/descriptor_tables.h>
 #include <kernel/x86/ioport.h>
 
+extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
+
 extern "C" void k_exception_handler(register_frame_t* regs) {
+    // Page faults get one shot at demand-paging resolution before the crash
+    // path; an unresolvable fault falls through with diagnostics intact.
+    if (regs->int_no == 14 && x86_try_resolve_page_fault(regs)) { return; }
+
     // Vectors 0..31 are real CPU exceptions. The dispatcher never returns;
     // a recursion guard handles secondary faults during the dump itself.
     if (regs->int_no < 32) { kernel::crash::dispatch(kernel::crash::trigger_kind::exception, regs); }
