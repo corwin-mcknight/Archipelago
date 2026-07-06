@@ -55,9 +55,11 @@ void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_r
     if (!g_page_descriptors.init(usable, usable_count, wired, wired_count)) {
         panic("vmm: page descriptor array allocation failed");
     }
-    // The kernel aspace wraps the live boot page tables rather than cloning a
-    // fresh space -- every mapping made since boot stays valid.
-    g_kernel_aspace.arch_adopt_active();
+    // The kernel builds its own page tables (deep copy of the boot kernel
+    // half) and switches onto them -- the bootloader's tables sit in
+    // reclaimable memory the PMM hands out, so running on them is unsafe.
+    if (!g_kernel_aspace.arch_init_kernel()) { panic("vmm: kernel page table clone failed"); }
+    g_kernel_aspace.activate();
     g_kernel_aspace.m_root = make_root(g_kernel_aspace);
     if (g_kernel_aspace.m_root.get() == nullptr) { panic("vmm: kernel root region allocation failed"); }
 
@@ -68,7 +70,7 @@ void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_r
         desc->state       = page_state::WIRED;
         desc->share_count = 1;
     }
-    g_log.info("vmm: kernel address space adopted boot page tables");
+    g_log.info("vmm: kernel running on its own page tables");
 }
 
 }  // namespace kernel::mm

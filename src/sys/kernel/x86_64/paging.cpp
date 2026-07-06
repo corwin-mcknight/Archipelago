@@ -171,6 +171,32 @@ ktl::maybe<terminal_pte> resolve(vm_paddr_t pml4_phys, uintptr_t vaddr) {
 
 }  // namespace
 
+namespace {
+// Deep-copy a page-table subtree into fresh PMM frames. Tables are copied at
+// every level; huge and 4K leaf entries are kept verbatim (they point at data
+// pages, not tables, and carry no ownership). Runs once at boot to move the
+// kernel half off the bootloader's tables; on OOM the boot is already lost,
+// so partially copied frames are not unwound (the caller panics).
+ktl::maybe<vm_paddr_t> deep_copy_table(vm_paddr_t table_phys, int level) {
+    auto copy = alloc_table();
+    if (!copy.has_value()) { return ktl::nothing; }
+    uint64_t* src = table_at(table_phys);
+    uint64_t* dst = table_at(copy.value());
+    for (size_t i = 0; i < 512; ++i) {
+        uint64_t entry = src[i];
+        // A present, non-huge entry above the PT level points at a child
+        // table; PT entries point at data pages and are kept verbatim.
+        if ((entry & pte::PRESENT) && !(entry & pte::HUGE) && level > 1) {
+            auto child = deep_copy_table(entry & pte::ADDR_MASK, level - 1);
+            if (!child.has_value()) { return ktl::nothing; }
+            entry = (entry & ~pte::ADDR_MASK) | child.value();
+        }
+        dst[i] = entry;
+    }
+    return copy;
+}
+}  // namespace
+
 bool vm_aspace::is_valid() const { return m_arch.pml4_phys != 0; }
 
 bool vm_aspace::arch_init() {
@@ -262,10 +288,28 @@ void vm_aspace::activate() {
     g_active_space = this;
 }
 
-void vm_aspace::arch_adopt_active() {
-    arch_destroy();
-    m_arch.pml4_phys = current_cr3();
-    g_active_space   = this;
+bool vm_aspace::arch_init_kernel() {
+    if (m_arch.pml4_phys != 0) { return false; }
+    // Deep-copy the kernel half out of the bootloader's tables: Limine's
+    // tables live in bootloader-reclaimable memory that the PMM treats as
+    // usable, so the kernel must own every table frame it runs on. The lower
+    // 256 entries (user half) start empty. The caller activates the space.
+    auto pml4 = alloc_table();
+    if (!pml4.has_value()) { return false; }
+    m_arch.pml4_phys = pml4.value();
+
+    uint64_t* dst    = table_at(m_arch.pml4_phys);
+    uint64_t* src    = table_at(current_cr3());
+    for (size_t i = 256; i < 512; ++i) {
+        uint64_t entry = src[i];
+        if ((entry & pte::PRESENT) && !(entry & pte::HUGE)) {
+            auto child = deep_copy_table(entry & pte::ADDR_MASK, 3);
+            if (!child.has_value()) { return false; }
+            entry = (entry & ~pte::ADDR_MASK) | child.value();
+        }
+        dst[i] = entry;
+    }
+    return true;
 }
 
 // End of the canonical low half: bit 47 sign-extension boundary.

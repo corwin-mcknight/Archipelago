@@ -26,7 +26,7 @@
 - Background page-zeroing worker thread (gated on scheduler).
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Implement NUMA awareness and reserved region handling.
-- PMM usable pool includes Limine bootloader-reclaimable regions that contain the live boot stack -- draining the PMM to exhaustion zeroes the active stack page (found 2026-06-10 while testing rollback). Defer reclaiming those regions until execution moves off them.
+- PMM usable pool includes Limine bootloader-reclaimable regions that contain the live boot stack -- draining the PMM to exhaustion zeroes the active stack page. Defer reclaiming until execution moves off the boot stack.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - VMM follow-ups:

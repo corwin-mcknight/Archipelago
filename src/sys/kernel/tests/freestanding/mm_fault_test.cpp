@@ -20,8 +20,9 @@ using namespace kernel::mm;
 
 constexpr size_t PAGES       = 4;
 constexpr size_t PAGE        = 0x1000;
-// Above 4 GiB: the boot tables identity-map the first 4 GiB (Limine base
-// revision 0), so lower addresses in the kernel aspace never fault.
+// The kernel aspace's low half is empty (the bootloader identity map is not
+// carried over), so any low-half address works; 1 TiB keeps clear of
+// anything historical.
 constexpr uintptr_t MAP_BASE = 0x10000000000;  // 1 TiB
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace

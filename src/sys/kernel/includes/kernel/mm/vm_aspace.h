@@ -77,19 +77,21 @@ class vm_aspace {
    private:
     friend void vmm_init(const vm_page_region*, size_t, const vm_page_region*, size_t);
 
-    // Arch internals: allocate-and-clone, free the arch tables, or wrap the
-    // live boot tables (kernel aspace only, never destroyed).
+    // Arch internals. arch_init shallow-clones the kernel half (tables
+    // shared with the active space); arch_init_kernel deep-copies it into
+    // owned frames -- used once at vmm_init so the kernel runs on its own
+    // tables, not the bootloader's. The kernel aspace is never destroyed.
     bool arch_init();
+    bool arch_init_kernel();
     void arch_destroy();
-    void arch_adopt_active();
 
     arch_aspace m_arch;  // shape differs per architecture
     ktl::ref<Region> m_root;
     uint64_t m_faults = 0;
 };
 
-// The global kernel address space, valid after vmm_init(). It wraps the live
-// boot page tables and is never destroyed.
+// The global kernel address space, valid after vmm_init(). It owns its page
+// tables (deep-copied off the bootloader's at init) and is never destroyed.
 vm_aspace& kernel_aspace();
 
 // The global wired zero page, allocated at vmm_init(). Unpopulated anonymous
@@ -111,9 +113,9 @@ struct vm_fault {
 bool vmm_handle_fault(const vm_fault& fault);
 
 // VMM initialization: sizes and fills the page descriptor array from the boot
-// memory map (usable ranges become FREE, kernel/wired ranges stay WIRED) and
-// adopts the live boot CR3 as the kernel aspace. Panics on failure -- the
-// kernel cannot run without its descriptor array.
+// memory map (usable ranges become FREE, kernel/wired ranges stay WIRED),
+// then builds the kernel's own page tables and switches onto them. Panics on
+// failure -- the kernel cannot run without either.
 void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_region* wired, size_t wired_count);
 
 }  // namespace kernel::mm

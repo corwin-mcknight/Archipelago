@@ -56,6 +56,21 @@ KTEST_INTEGRATION(descriptor_tracks_pmm_alloc_free, "mm/descriptor") {
     KTEST_EXPECT_TRUE(desc->state == page_state::FREE);
 }
 
+KTEST_INTEGRATION(kernel_owns_its_page_tables, "mm/descriptor") {
+    // The live root table must be a PMM-allocated frame (descriptor ACTIVE),
+    // not a bootloader table squatting in reclaimable memory the PMM could
+    // hand out as free.
+    uintptr_t cr3;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    const page_descriptor* desc = g_page_descriptors.lookup(cr3 & ~static_cast<uintptr_t>(0xFFF));
+    KTEST_REQUIRE_TRUE(desc != nullptr);
+    KTEST_EXPECT_TRUE(desc->state == page_state::ACTIVE);
+
+    // Only the kernel half was carried over: the bootloader's lower-half
+    // identity map is gone, so low addresses now fault like any other.
+    KTEST_EXPECT_FALSE(kernel_aspace().walk(0x100000).has_value());
+}
+
 KTEST_INTEGRATION(kernel_aspace_walks_hhdm, "mm/descriptor") {
     // The kernel aspace adopted the boot tables, so the HHDM mapping made by
     // the bootloader must resolve through it, offset preserved.
