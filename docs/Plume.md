@@ -17,6 +17,7 @@ These Make targets wrap `python3 -m plume` commands.
 ## Packages
 
 Packages are defined in `repo/packages.yml`. Each has a category, name, version, and optional dependencies.
+A package that only exists on some targets declares `arches:`; it is skipped everywhere else, and naming it explicitly on the wrong target is an error.
 ### Example Packages
 | Package                  | Description                               |
 | ------------------------ | ----------------------------------------- |
@@ -41,6 +42,11 @@ Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implem
 ### Live Sources
 Packages can declare `supports_live_sources: true` with a `live_source_path` pointing into the source tree. Plume stamps the build and checks source modification times -- if any source file is newer than the stamp, the package rebuilds. The kernel and limine-config packages use this.
 
+### Staleness
+Every successful build writes a stamp recording a hash of the target config's build-affecting settings (architecture, toolchain, triple, flags).
+A package is stale when its stamp is missing, when the recorded hash no longer matches the active config, or -- for live-source packages -- when a source file is newer than the stamp.
+Editing a target config therefore rebuilds everything it affects; paths and run-only settings (QEMU, memory, image layout) are excluded from the hash.
+
 ## Build Flow
 ### Dependency Resolution
 Plume resolves dependencies via topological sort. Given a set of target packages, it expands all transitive dependencies and computes a build order where dependencies build first.
@@ -62,9 +68,10 @@ Each package build receives environment variables:
 
 | Variable | Value |
 |----------|-------|
-| `ARCH` | Target architecture (`x86_64`) |
-| `SYSROOT` | `build/sysroot` |
-| `WORKDIR` | `build/tmp/<category>/<name>-<version>` |
+| `ARCH` | Target architecture (`x86_64`, `riscv64`) |
+| `TRIPLE` | Target triple from the config (e.g. `x86_64-unknown-none`) |
+| `SYSROOT` | `build/<arch>/sysroot` |
+| `WORKDIR` | `build/<arch>/tmp/<category>/<name>-<version>` |
 | `S` | Source directory (`$WORKDIR/src`) |
 | `D` | Staging install directory (`$WORKDIR/install`) |
 | `CC`, `CXX` | `clang`, `clang++` |
@@ -72,37 +79,42 @@ Each package build receives environment variables:
 | `LIVE_SOURCES` | Source tree path (for live-source packages) |
 
 ### Sysroot
-Packages install their files to a staging directory (`$D`), then Plume merges them into the shared sysroot at `build/sysroot/`. The sysroot becomes the root of the bootable ISO.
+Packages install their files to a staging directory (`$D`), then Plume merges them into the target's sysroot at `build/<arch>/sysroot/`. The sysroot becomes the root of the bootable ISO.
 
 Installed package manifests (file paths, SHA256 checksums, metadata) are stored in `sysroot/var/plume/manifests/`. A world file at `sysroot/var/plume/world` tracks what is installed.
 
 ### Binary Packages
-After a successful build, Plume caches a binary package (`.tar.xz`) in `build/packages/`. On subsequent installs, if the binary is cached and sources haven't changed, Plume extracts from the cache instead of rebuilding.
+After a successful build, Plume caches a binary package (`.tar.xz`) in `build/<arch>/packages/`. On subsequent installs, if the binary is cached and neither sources nor config have changed, Plume extracts from the cache instead of rebuilding.
 
 ### ISO Assembly
-`plume image` assembles the ISO:
+`plume image` assembles the ISO, driven by the config's `image:` stanza:
 
-1. **xorriso** creates a BIOS+UEFI bootable ISO from the sysroot
-2. **limine bios-install** writes boot code to the ISO's MBR
+1. **xorriso** creates a bootable ISO from the sysroot; `bios_boot` and `efi_boot` name the boot images
+2. **limine bios-install** writes boot code to the ISO's MBR (only when `bios_boot` is configured)
 
-The resulting image is `build/image.iso`.
+The resulting image is `build/<arch>/image.iso`.
 
 ## Build Output
+Each architecture builds in its own tree so targets never clobber each other; host tools are shared.
+
 ```
 build/
-  obj/                     Intermediate build artifacts
-  sysroot/                 Merged system root
-    boot/                  kernel.elf, limine binaries, limine.conf
-    var/plume/             Manifests and world file
-  tools/                   Host build tools (limine binary)
-  tmp/                     Per-package work directories
-  packages/                Binary package cache (.tar.xz)
-  compile_commands.json    For clangd
-  image.iso                Bootable ISO
+  <arch>/                  Per-target tree (x86_64/, riscv64/)
+    obj/                   Intermediate build artifacts
+    sysroot/               Merged system root
+      boot/                kernel.elf, limine binaries, limine.conf
+      var/plume/           Manifests and world file
+    tmp/                   Per-package work directories
+    packages/              Binary package cache (.tar.xz)
+    image.iso              Bootable ISO
+  tools/                   Host build tools (limine, EDK2 firmware, test runners)
+  compile_commands.json    For clangd (active target)
 ```
 
 ## Commands
 All commands are invoked as `python3 -m plume <command>` or through the Makefile.
+Every command accepts `--arch <arch>` (or `--config <path>`) to target an architecture for one invocation without changing the `default.yaml` selection.
+`--arch all` fans the command out over every config in `repo/config/` sequentially and ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
 
 | Command | Description |
 |---------|-------------|
@@ -118,16 +130,22 @@ All commands are invoked as `python3 -m plume <command>` or through the Makefile
 | `list` | List packages with optional dependency tree |
 | `world` | Show installed packages |
 | `clangd` | Rebuild kernel with compile_commands.json generation |
+| `set-config` | Select the active target config (symlinks `default.yaml`) |
+| `run` | Launch the built ISO interactively in QEMU |
 
 ## Configuration
-Build settings live in `repo/config.yaml`:
+Each architecture has a target config at `repo/config/<arch>.yaml`; the active one is the `default.yaml` symlink in the project root, managed with `plume set-config` (which accepts a bare arch name, e.g. `plume set-config riscv64`).
+When no selection exists, Plume falls back to `repo/config/x86_64.yaml`.
 
 | Setting | Value |
 |---------|-------|
-| `arch` | `x86_64` |
-| `sysroot` | `./build/sysroot` |
+| `arch` | `x86_64` or `riscv64` |
+| `build_dir` / `sysroot` / `tmp_path` | Per-target tree under `./build/<arch>/` |
+| `triple` | Target triple exported to package builds |
 | `cc` / `cxx` | `clang` / `clang++` |
 | `ld` / `as` | `ld.lld` / `nasm` |
-| `iso_output` | `./build/image.iso` |
-
-Architecture-specific settings (QEMU binary, target triple) are also defined here under `arch_configs`.
+| `iso_output` | `./build/<arch>/image.iso` |
+| `image` | Boot image layout (`efi_boot`, optional `bios_boot`) |
+| `qemu` | QEMU binary for this target |
+| `memory` | Guest memory for `plume run` in MiB |
+| `firmware` | UEFI firmware image (riscv64 only) |

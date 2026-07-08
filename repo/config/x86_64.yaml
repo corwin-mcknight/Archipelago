@@ -1,0 +1,21 @@
+config:
+  arch: x86_64
+  build_dir: ./build/x86_64
+  sysroot: ./build/x86_64/sysroot
+  tmp_path: ./build/x86_64/tmp
+  # Host tools are arch-independent; shared across targets so they build once.
+  tools_path: ./build/tools
+  source_dir: ./src
+  repo_path: ./repo
+  iso_output: ./build/x86_64/image.iso
+  triple: x86_64-unknown-none
+  cc: clang
+  cxx: clang++
+  ld: ld.lld
+  as: nasm
+  make: make
+  qemu: qemu-system-x86_64
+  memory: 128
+  image:
+    bios_boot: boot/limine-bios-cd.bin
+    efi_boot: boot/limine-uefi-cd.bin

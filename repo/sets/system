@@ -1,4 +1,5 @@
 boot/limine-10.0
 boot/limine-config-1.0
+boot/edk2-riscv-1.0
 sys/kernel-0.0.1
 sys/kernel-src-0.0.1

@@ -1,0 +1,22 @@
+config:
+  arch: riscv64
+  build_dir: ./build/riscv64
+  sysroot: ./build/riscv64/sysroot
+  tmp_path: ./build/riscv64/tmp
+  # Host tools are arch-independent; shared across targets so they build once.
+  tools_path: ./build/tools
+  source_dir: ./src
+  repo_path: ./repo
+  iso_output: ./build/riscv64/image.iso
+  triple: riscv64-unknown-none
+  cc: clang
+  cxx: clang++
+  ld: ld.lld
+  make: make
+  qemu: qemu-system-riscv64
+  memory: 256
+  # riscv64 has no BIOS: the ISO carries only the El Torito EFI boot image.
+  image:
+    efi_boot: boot/limine-uefi-cd.bin
+  # EDK2 RiscVVirt UEFI firmware -- a host-side test dependency, never a sysroot package.
+  firmware: ./build/tools/edk2-riscv/RISCV_VIRT_CODE.fd

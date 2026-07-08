@@ -11,9 +11,15 @@ def get_build_env(config: Config, package: Package) -> dict:
     env = dict(os.environ)
 
     arch = config.get_arch()
+    # Arch isolation comes from the per-arch build tree (tmp_path lives under
+    # build/<arch>/), so workdir names carry no ~arch suffix.
     tmp_base = os.path.join(config.get("tmp_path"), package.category, f"{package.name}-{package.version}")
 
     env["ARCH"] = arch
+    # Only exported when configured: an empty TRIPLE in the environment would
+    # defeat package Makefiles' own ?= per-arch defaults.
+    if config.get("triple"):
+        env["TRIPLE"] = config.get("triple")
     env["SYSROOT"] = config.get("sysroot")
     env["BUILD_DIR"] = config.get("build_dir")
     env["FILESDIR"] = os.path.join(config.get("repo_path"), "packages", package.category, package.name)

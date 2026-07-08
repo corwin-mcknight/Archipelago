@@ -1,14 +1,10 @@
 # TODO
 
 ## Second Architecture (riscv64)
-- riscv64 implementations of the kernel/arch.h primitives and hcf(); harness exit is the sifive_test finisher MMIO device on `virt` (not port I/O), and the harness must swap `-device isa-debug-exit` per arch.
-- riscv64 sides of the arch dispatch headers: includes/kernel/registers.h, includes/kernel/mm/arch_aspace.h.
-- Crash/backtrace walks x86 frame records; riscv64 fp points above the {fp, ra} pair -- adjust the walker and feed symbolication riscv64 register names. Crash dump register rendering in core/crash.cpp is also x86-shaped via register_frame_t field names.
-- Top-level Makefile `shell`/`run`/`debug` targets hardcode qemu-system-x86_64.
-- plume/image.py hardcodes the BIOS+UEFI hybrid ISO layout and limine bios-install; riscv64 needs a UEFI-only ISO with no BIOS install step.
-- boot/limine package installs BIOS boot files unconditionally; make artifact installation per-arch.
-- Fetch the EDK2 RiscVVirt firmware as a host tool (not packaged in Alpine; config.yaml points at build/tools/edk2/).
-- The riscv64 kernel port itself: boot glue, linker script, MMIO UART, trap/CLINT/PLIC layer, Sv48 paging, SBI timer, arch tests.
+- SBI timer driver (kernel::time is never initialized on riscv64) and CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
+- Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).
+- Grow the riscv64/tests/ suite (external interrupt claim path, more sfence/TLB behavior).
+- Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
 
 ## Boot & Platform
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
@@ -36,7 +32,7 @@
 - Background page-zeroing worker thread (gated on scheduler).
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Implement NUMA awareness and reserved region handling.
-- PMM usable pool includes Limine bootloader-reclaimable regions that contain the live boot stack -- draining the PMM to exhaustion zeroes the active stack page. Defer reclaiming until execution moves off the boot stack.
+- Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - VMM follow-ups:

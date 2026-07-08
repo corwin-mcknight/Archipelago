@@ -20,6 +20,12 @@ class Package:
     live_source_path: Optional[str] = None
     dependencies: list = field(default_factory=list)
     source: dict = field(default_factory=dict)
+    arches: list = field(default_factory=list)  # empty = all architectures
+
+    @property
+    def supported(self) -> bool:
+        """Whether this package exists for the active architecture."""
+        return not self.arches or not self.arch or self.arch in self.arches
 
     @property
     def qualified_name(self) -> str:
@@ -44,6 +50,7 @@ class Package:
             live_source_path=data.get("live_source_path"),
             dependencies=data.get("dependencies", []),
             source=data.get("source", {}),
+            arches=data.get("arches", []),
         )
 
     @staticmethod

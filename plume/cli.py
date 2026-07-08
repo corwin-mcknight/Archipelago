@@ -17,28 +17,103 @@ from plume.world import World
 from plume.validate import validate_packages, validate_package_yaml
 
 
-def _find_config(override=None):
-    """Locate config.yaml, checking override, env var, then repo/config.yaml."""
-    if override:
-        return override
-    if "PLUME_CONFIG" in os.environ:
-        return os.environ["PLUME_CONFIG"]
+def _all_arches():
+    """Arch names from repo/config/*.yaml, walking up to the project root."""
     d = os.getcwd()
     while True:
-        candidate = os.path.join(d, "repo", "config.yaml")
+        cfg_dir = os.path.join(d, "repo", "config")
+        if os.path.isdir(cfg_dir):
+            return sorted(f[:-5] for f in os.listdir(cfg_dir) if f.endswith(".yaml"))
+        parent = os.path.dirname(d)
+        if parent == d:
+            return []
+        d = parent
+
+
+def _run_matrix(args, command):
+    """Run a command once per target (--arch all), then print a summary."""
+    arches = _all_arches()
+    if not arches:
+        print(f"{red('plume: error')}: no configs found under repo/config/", file=sys.stderr)
+        return 1
+
+    results = []
+    for arch in arches:
+        print(bold(cyan(f"=== {arch} ===")))
+        args.arch = arch
+        start = time.monotonic()
+        rc = command(args)
+        results.append((arch, rc, time.monotonic() - start))
+        print()
+
+    width = max(len(a) for a, _, _ in results)
+    print(bold("Matrix summary:"))
+    for arch, rc, elapsed in results:
+        mark = green("✓") if rc == 0 else red("✗")
+        print(f"  {arch:<{width}}  {mark}  {dim(fmt_duration(elapsed))}")
+    return 0 if all(rc == 0 for _, rc, _ in results) else 1
+
+
+def _config_by_name(name):
+    """Resolve a config name like 'riscv64' to repo/config/<name>.yaml, walking
+    up from the working directory to find the project root."""
+    d = os.getcwd()
+    while True:
+        candidate = os.path.join(d, "repo", "config", f"{name}.yaml")
         if os.path.exists(candidate):
             return candidate
         parent = os.path.dirname(d)
         if parent == d:
+            return None
+        d = parent
+
+
+def _find_config(override=None, arch=None):
+    """Locate the active target config.
+
+    Precedence: the --config override, then --arch (resolved to
+    repo/config/<arch>.yaml), then PLUME_CONFIG, then the ./default.yaml
+    selection symlink (see `plume set-config`), falling back to
+    repo/config/x86_64.yaml when no selection has been made.
+    """
+    if override:
+        return override
+    if arch:
+        path = _config_by_name(arch)
+        if not path:
+            print(f"{red('plume: error')}: no config for arch '{arch}' (expected repo/config/{arch}.yaml)",
+                  file=sys.stderr)
+            sys.exit(1)
+        return path
+    if "PLUME_CONFIG" in os.environ:
+        return os.environ["PLUME_CONFIG"]
+    d = os.getcwd()
+    while True:
+        candidate = os.path.join(d, "default.yaml")
+        if os.path.lexists(candidate):
+            # A dangling selection symlink is an error, not a silent fallback
+            # to x86_64 -- the user selected something that no longer exists.
+            if not os.path.exists(candidate):
+                print(f"{red('plume: error')}: default.yaml is a dangling symlink: {candidate}", file=sys.stderr)
+                sys.exit(1)
+            return candidate
+        if os.path.isdir(os.path.join(d, "repo", "config")):
+            # Project root reached; never walk past it.
+            fallback = os.path.join(d, "repo", "config", "x86_64.yaml")
+            if os.path.exists(fallback):
+                return fallback
+            break
+        parent = os.path.dirname(d)
+        if parent == d:
             break
         d = parent
-    print(f"{red('plume: error')}: could not find repo/config.yaml", file=sys.stderr)
+    print(f"{red('plume: error')}: could not find default.yaml or repo/config/x86_64.yaml", file=sys.stderr)
     sys.exit(1)
 
 
 def _load(args):
     """Load config and packages, running validation."""
-    config_path = _find_config(getattr(args, "config", None))
+    config_path = _find_config(getattr(args, "config", None), getattr(args, "arch", None))
     config = Config(config_path)
     packages_yml = os.path.join(config.get("repo_path"), "packages.yml")
 
@@ -257,7 +332,7 @@ def cmd_image(args):
 
 def cmd_test(args):
     config, packages = _load(args)
-    ordered = resolve_build_order(packages)
+    ordered = resolve_build_order(filter_packages(packages, []))
     total_start = time.monotonic()
     timings = []
     for i, pkg in enumerate(ordered, 1):
@@ -278,10 +353,17 @@ def cmd_test(args):
         return 1
 
     print("\n\nRunning tests...\n")
-    harness_args = [sys.executable, "tools/test-harness.py"]
-    arch_config = (config.get("arch_configs") or {}).get(config.get_arch()) or {}
-    if arch_config.get("qemu"):
-        harness_args.extend(["--qemu", arch_config["qemu"]])
+    harness_args = [
+        sys.executable, "tools/test-harness.py",
+        "--arch", config.get_arch(),
+        "--iso", config.get("iso_output"),
+        "--kernel-elf", os.path.join(config.get("build_dir"), "obj", "sys", "kernel", "kernel.elf"),
+        "--artifacts", os.path.join(config.get("build_dir"), "test-artifacts"),
+    ]
+    if config.get("qemu"):
+        harness_args.extend(["--qemu", config.get("qemu")])
+    if config.get("firmware"):
+        harness_args.extend(["--firmware", config.get("firmware")])
     if args.verbose:
         harness_args.append("--verbose")
     harness_args.extend(args.tests)
@@ -305,6 +387,8 @@ def cmd_status(args):
             tags += dim("  [build-tool]")
         if pkg.supports_live_sources:
             tags += dim("  [live]")
+        if pkg.arches:
+            tags += dim(f"  [{', '.join(pkg.arches)} only]")
         print(f"  {pkg.full_name:<{name_width}}  {built:<7}  {inst}{tags}")
     return 0
 
@@ -357,7 +441,8 @@ def cmd_list(args):
     for pkg in packages:
         tool = " [build-tool]" if pkg.is_build_tool else ""
         live = " [live]" if pkg.supports_live_sources else ""
-        print(f"  {pkg.full_name:30s} {pkg.description}{tool}{live}")
+        arches = f" [{', '.join(pkg.arches)} only]" if pkg.arches else ""
+        print(f"  {pkg.full_name:30s} {pkg.description}{tool}{live}{arches}")
     return 0
 
 
@@ -379,67 +464,143 @@ def cmd_clangd(args):
         print(f"{red('plume: error')}: kernel rebuild failed", file=sys.stderr)
         return 1
 
+    # Editors expect compile_commands.json at the shared build root, not
+    # inside the per-arch tree (.vscode points at build/compile_commands.json).
     return subprocess.run(
         [sys.executable, "tools/merge-compile-commands.py",
          config.get("build_dir"),
-         os.path.join(config.get("build_dir"), "compile_commands.json")],
+         os.path.join(config.project_root, "build", "compile_commands.json")],
         cwd=config.project_root,
     ).returncode
+
+
+def cmd_set_config(args):
+    """Point the ./default.yaml selection symlink at a target config."""
+    target = os.path.abspath(args.path)
+    if not os.path.isfile(target):
+        # Bare names resolve to repo/config/<name>.yaml (e.g. `set-config riscv64`).
+        by_name = _config_by_name(args.path) if os.sep not in args.path else None
+        if not by_name:
+            print(f"{red('plume: error')}: no such config: {args.path}", file=sys.stderr)
+            return 1
+        target = os.path.abspath(by_name)
+    try:
+        cfg = Config(target)
+        arch = cfg.get_arch()
+    except Exception as exc:  # malformed yaml / missing config: block
+        print(f"{red('plume: error')}: not a loadable config: {exc}", file=sys.stderr)
+        return 1
+    # Anchor at the project root, not cwd -- a symlink dropped in a
+    # subdirectory would never be seen by builds run from the root.
+    link = os.path.join(cfg.project_root, "default.yaml")
+    rel = os.path.relpath(target, cfg.project_root)
+    if os.path.islink(link) or os.path.exists(link):
+        os.remove(link)
+    os.symlink(rel, link)
+    print(f"default.yaml -> {rel} ({bold(arch)})")
+    return 0
+
+
+def cmd_run(args):
+    """Launch the built ISO interactively in QEMU on the active target."""
+    config, _ = _load(args)
+    arch = config.get_arch()
+    qemu = config.get("qemu", f"qemu-system-{arch}")
+    iso = config.get("iso_output")
+    firmware = config.get("firmware")
+    if not os.path.exists(iso):
+        print(f"{red('plume: error')}: no ISO at {iso}; run `plume image` first", file=sys.stderr)
+        return 1
+    if firmware and not os.path.exists(firmware):
+        print(f"{red('plume: error')}: UEFI firmware missing at {firmware}; run `plume build @system`",
+              file=sys.stderr)
+        return 1
+
+    # The machine stanza lives in the test harness (single source);
+    # load it from there so the two launchers cannot drift.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "test_harness", os.path.join(config.project_root, "tools", "test-harness.py"))
+    harness = importlib.util.module_from_spec(spec)
+    sys.modules["test_harness"] = harness  # dataclasses resolve fields via sys.modules
+    spec.loader.exec_module(harness)
+
+    cmd = [qemu, "-serial", "stdio", "-no-reboot",
+           "-m", str(args.memory or config.get("memory", 128))]
+    cmd += harness.machine_args(arch, iso, firmware)
+    if args.no_display or firmware:
+        # UEFI targets are serial-only; an empty QEMU window helps nobody.
+        cmd += ["-display", "none"]
+    if args.debug:
+        cmd += ["-s", "-S"]
+
+    print(dim(" ".join(cmd)))
+    if args.dry_run:
+        return 0
+    return subprocess.run(cmd, cwd=config.project_root).returncode
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="plume", description="Plume -- the Archipelago package manager")
     sub = parser.add_subparsers(dest="command")
 
-    build_p = sub.add_parser("build", help="Build packages (does not install to sysroot)")
+    # Target selection, shared by every subcommand.
+    target = argparse.ArgumentParser(add_help=False)
+    target.add_argument("--config", default=None, help="Path to a target config yaml")
+    target.add_argument("--arch", default=None,
+                        help="Target architecture (resolves repo/config/<arch>.yaml), or 'all' to run every target")
+
+    build_p = sub.add_parser("build", parents=[target], help="Build packages (does not install to sysroot)")
     build_p.add_argument("packages", nargs="*", help="Packages to build (default: all, supports @set)")
-    build_p.add_argument("--config", default=None)
     build_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     build_p.add_argument("--dry-run", "-n", action="store_true", help="Print build order without building")
     build_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     build_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
 
-    install_p = sub.add_parser("install", help="Install packages into sysroot (builds if needed)")
+    install_p = sub.add_parser("install", parents=[target], help="Install packages into sysroot (builds if needed)")
     install_p.add_argument("packages", nargs="*", help="Packages to install (default: all, supports @set)")
-    install_p.add_argument("--config", default=None)
     install_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     install_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     install_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
     install_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
 
-    rebuild_p = sub.add_parser("rebuild", help="Clean and rebuild specific packages")
+    rebuild_p = sub.add_parser("rebuild", parents=[target], help="Clean and rebuild specific packages")
     rebuild_p.add_argument("packages", nargs="*", help="Packages to rebuild (default: all, supports @set)")
-    rebuild_p.add_argument("--config", default=None)
     rebuild_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     rebuild_p.add_argument("--no-propagate", action="store_true", help="Only rebuild named packages, not reverse deps")
     rebuild_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
 
-    uninstall_p = sub.add_parser("uninstall", help="Remove packages from sysroot")
+    uninstall_p = sub.add_parser("uninstall", parents=[target], help="Remove packages from sysroot")
     uninstall_p.add_argument("packages", nargs="+", help="Packages to uninstall")
-    uninstall_p.add_argument("--config", default=None)
     uninstall_p.add_argument("--force", "-f", action="store_true", help="Uninstall even if other packages depend on it")
 
-    image_p = sub.add_parser("image", help="Assemble ISO image")
-    image_p.add_argument("--config", default=None)
+    image_p = sub.add_parser("image", parents=[target], help="Assemble ISO image")
     image_p.add_argument("--verbose", "-v", action="store_true", help="Show xorriso and limine output")
 
-    test_p = sub.add_parser("test", help="Build and run tests")
+    test_p = sub.add_parser("test", parents=[target], help="Build and run tests")
     test_p.add_argument("tests", nargs="*")
     test_p.add_argument("--verbose", action="store_true")
     test_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
-    test_p.add_argument("--config", default=None)
     test_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
 
-    sub.add_parser("status", help="Show build and install state of all packages").add_argument("--config", default=None)
-    sub.add_parser("validate", help="Validate packages.yml and package Makefiles").add_argument("--config", default=None)
-    sub.add_parser("clean", help="Remove build artifacts").add_argument("--config", default=None)
+    sub.add_parser("status", parents=[target], help="Show build and install state of all packages")
+    sub.add_parser("validate", parents=[target], help="Validate packages.yml and package Makefiles")
+    sub.add_parser("clean", parents=[target], help="Remove build artifacts")
 
-    list_p = sub.add_parser("list", help="List packages")
-    list_p.add_argument("--config", default=None)
+    list_p = sub.add_parser("list", parents=[target], help="List packages")
     list_p.add_argument("--tree", action="store_true", help="Show dependency tree")
 
-    sub.add_parser("world", help="Show packages installed in the sysroot").add_argument("--config", default=None)
-    sub.add_parser("clangd", help="Regenerate compile_commands.json").add_argument("--config", default=None)
+    sub.add_parser("world", parents=[target], help="Show packages installed in the sysroot")
+    sub.add_parser("clangd", parents=[target], help="Regenerate compile_commands.json")
+
+    setconf_p = sub.add_parser("set-config", help="Select the active target config (symlinks ./default.yaml)")
+    setconf_p.add_argument("path", help="Config path or bare arch name, e.g. riscv64")
+
+    run_p = sub.add_parser("run", parents=[target], help="Launch the built ISO in QEMU (interactive; use `plume test` for CI)")
+    run_p.add_argument("--debug", action="store_true", help="Start a GDB stub (-s -S) and wait for attach")
+    run_p.add_argument("--no-display", action="store_true", help="Headless: serial console only")
+    run_p.add_argument("--memory", type=int, default=None, help="Guest memory in MiB (default: from config)")
+    run_p.add_argument("--dry-run", "-n", action="store_true", help="Print the QEMU command without launching")
 
     args = parser.parse_args(argv)
     if not args.command:
@@ -451,5 +612,8 @@ def main(argv=None):
         "rebuild": cmd_rebuild, "image": cmd_image, "test": cmd_test,
         "status": cmd_status, "validate": cmd_validate, "clean": cmd_clean,
         "list": cmd_list, "world": cmd_world, "clangd": cmd_clangd,
+        "set-config": cmd_set_config, "run": cmd_run,
     }
+    if getattr(args, "arch", None) == "all":
+        return _run_matrix(args, commands[args.command])
     return commands[args.command](args)

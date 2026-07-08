@@ -107,6 +107,8 @@ class KernelHarness:
         extra_args: Optional[Sequence[str]] = None,
         verbose: bool = False,
         add_exit_device: bool = True,
+        arch: str = "x86_64",
+        firmware: Optional[Path] = None,
     ) -> None:
         self.qemu = qemu
         self.iso = iso
@@ -115,6 +117,8 @@ class KernelHarness:
         self.extra_args = list(extra_args or [])
         self.verbose = verbose
         self.add_exit_device = add_exit_device
+        self.arch = arch
+        self.firmware = firmware
 
         self.proc: Optional[subprocess.Popen[str]] = None
         self._reader_thread: Optional[threading.Thread] = None
@@ -130,12 +134,11 @@ class KernelHarness:
         if self.proc and self.proc.poll() is None:
             return
         args = [
-            self.qemu, "--cdrom", str(self.iso),
+            self.qemu,
             "-serial", "stdio", "-display", "none", "-no-reboot",
             "-m", str(self.memory),
         ]
-        if self.add_exit_device:
-            args.extend(["-device", "isa-debug-exit,iobase=0x604,iosize=0x02"])
+        args.extend(machine_args(self.arch, self.iso, self.firmware, exit_device=self.add_exit_device))
         args.extend(self.extra_args)
         if self.verbose:
             print(f"[harness] launching: {' '.join(args)}")
@@ -251,12 +254,37 @@ class KernelHarness:
                 return
 
         assert self.proc is not None and self.proc.stdin is not None
-        if self.verbose:
-            print("[harness] -> harness enable")
-        self.proc.stdin.write("harness enable\r")
-        self.proc.stdin.flush()
+        # The settle heuristic can fire during a firmware pause (EDK2's 5-second
+        # ESC window on riscv64), in which case the firmware eats the command
+        # before the kernel shell exists. Resend on a generous interval until
+        # the kernel acknowledges or the boot deadline passes; QEMU applies
+        # serial backpressure, so an early command queues rather than drops.
         self._protocol_enabled = True
-        self._wait_for_ready(deadline)
+        while True:
+            if self.verbose:
+                print("[harness] -> harness enable")
+            self.proc.stdin.write("harness enable\r")
+            self.proc.stdin.flush()
+            inner_deadline = min(deadline, time.monotonic() + 5.0)
+            try:
+                self._wait_for_ready(inner_deadline)
+                self._drain_stale_ready()
+                return
+            except HarnessProcessExit:
+                raise
+            except HarnessError:
+                if time.monotonic() >= deadline:
+                    raise HarnessError("timed out waiting for harness ready")
+
+    def _drain_stale_ready(self) -> None:
+        # Every resent enable that reached the shell produces its own ready;
+        # consume the stragglers until the line goes quiet so a later
+        # gather_until_waiting doesn't mistake one for command completion.
+        while True:
+            try:
+                self._next_event(time.monotonic() + 1.0)
+            except HarnessError:
+                return
 
     def _wait_for_ready(self, deadline: float) -> None:
         while True:
@@ -414,12 +442,18 @@ class KernelHarness:
             crash=crash, duration_ns=self._extract_duration(events),
         )
 
-    @staticmethod
-    def _summarise_exit(exit_code: Optional[int]) -> tuple[str, str]:
+    def _summarise_exit(self, exit_code: Optional[int]) -> tuple[str, str]:
         if exit_code is None:
             return "error", "kernel exited without exit code"
         if exit_code < 0:
             return "error", f"kernel terminated by signal {-exit_code}"
+        if self.arch == "riscv64":
+            # sifive_test finisher: PASS exits 0, FAIL exits with the guest's
+            # code verbatim. A QEMU-internal failure also exits 1, which is
+            # indistinguishable from guest code 1 -- acceptable, both are fatal.
+            if exit_code == 0:
+                return "pass", "guest exited cleanly"
+            return "error", f"guest requested abort via sifive_test finisher (code {exit_code})"
         if exit_code & 1:
             return "error", f"guest requested abort via isa-debug-exit (code {exit_code >> 1})"
         if exit_code == 0:
@@ -578,18 +612,24 @@ def _addr2line(kernel_elf: Path, addrs: List[str]) -> Dict[str, str]:
     return result
 
 
+def _pc_key(crash: Crash) -> str:
+    # x86_64 emits rip, riscv64 emits pc.
+    return "rip" if "rip" in crash.registers else "pc"
+
+
 def symbolicate_crash(crash: Crash, kernel_elf: Path) -> None:
     addrs: List[str] = []
-    rip = crash.registers.get("rip")
-    if rip:
-        addrs.append(rip)
+    pc_key = _pc_key(crash)
+    pc = crash.registers.get(pc_key)
+    if pc:
+        addrs.append(pc)
     for frame in crash.frames:
         addr = frame.get("addr")
         if addr:
             addrs.append(addr)
     resolved = _addr2line(kernel_elf, addrs)
-    if rip and rip in resolved:
-        crash.registers["rip_symbol"] = resolved[rip]
+    if pc and pc in resolved:
+        crash.registers[pc_key + "_symbol"] = resolved[pc]
     for frame in crash.frames:
         addr = frame.get("addr")
         if addr and addr in resolved:
@@ -634,7 +674,7 @@ def _crash_summary(crash: Crash) -> Dict[str, Any]:
     return {
         "trigger": crash.trigger, "vec": crash.vec, "err": crash.err, "test": crash.test,
         "message": crash.message, "file": crash.file, "line": crash.line,
-        "rip": crash.registers.get("rip"), "rip_symbol": crash.registers.get("rip_symbol"),
+        "pc": crash.registers.get(_pc_key(crash)), "pc_symbol": crash.registers.get(_pc_key(crash) + "_symbol"),
         "frame_count": len(crash.frames), "log_count": len(crash.log),
     }
 
@@ -660,13 +700,15 @@ def _write_crash_artifacts(case_dir: Path, crash: Crash) -> None:
     text_lines.append("")
     if crash.registers:
         text_lines.append("Registers:")
-        if rip_sym := crash.registers.get("rip_symbol"):
-            text_lines.append(f"  rip = {crash.registers.get('rip')}  ({rip_sym})")
+        pc_key = _pc_key(crash)
+        if pc_sym := crash.registers.get(pc_key + "_symbol"):
+            text_lines.append(f"  {pc_key} = {crash.registers.get(pc_key)}  ({pc_sym})")
         else:
-            text_lines.append(f"  rip = {crash.registers.get('rip')}")
-        for name in ("rsp", "rbp", "rflags", "cr2", "cr3"):
-            if name in crash.registers:
-                text_lines.append(f"  {name:5s} = {crash.registers[name]}")
+            text_lines.append(f"  {pc_key} = {crash.registers.get(pc_key)}")
+        # Whatever the kernel emitted, in its own order -- no per-arch list here.
+        rest = [n for n in crash.registers if n not in (pc_key, pc_key + "_symbol")]
+        for i in range(0, len(rest), 4):
+            text_lines.append("  " + "  ".join(f"{n}={crash.registers[n]}" for n in rest[i:i + 4]))
         text_lines.append("")
     if crash.frames:
         text_lines.append(f"Backtrace ({len(crash.frames)} frames):")
@@ -735,14 +777,48 @@ def write_summary(base_dir: Optional[Path], proto_results: List[harness_protocol
     harness_protocol.write_junit(summary["results"], str(base_dir / "junit.xml"), "qemu")
 
 
+def machine_args(arch, iso, firmware=None, exit_device: bool = False) -> List[str]:
+    """QEMU machine/media stanza per architecture; the single source, reused
+    by plume's cmd_run so the two launchers cannot drift.
+
+    riscv64 boots UEFI on virt: EDK2 code flash is read-only and the vars
+    flash is snapshotted so parallel workers never contend on writes. The ISO
+    must be a real SCSI CD-ROM -- a virtio-blk disk (what --cdrom degrades to
+    on virt) never gets its El Torito boot image parsed. The guest-exit
+    channel is virt's built-in sifive_test finisher, so no exit device is
+    attached.
+    """
+    if arch == "riscv64":
+        if not firmware:
+            raise HarnessError("riscv64 requires --firmware (EDK2 RISCV_VIRT_CODE.fd)")
+        vars_fd = str(firmware).replace("_CODE.fd", "_VARS.fd")
+        return [
+            "-M", "virt",
+            "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
+            "-drive", f"if=pflash,unit=1,format=raw,snapshot=on,file={vars_fd}",
+            "-device", "virtio-scsi-pci,id=scsi0",
+            "-drive", f"file={iso},format=raw,if=none,id=cd0,media=cdrom,read-only=on",
+            "-device", "scsi-cd,drive=cd0,bus=scsi0.0",
+        ]
+
+    args = ["--cdrom", str(iso)]
+    if exit_device:
+        args.extend(["-device", "isa-debug-exit,iobase=0x604,iosize=0x02"])
+    return args
+
+
 # ----------------------------------------------------------------------
 # Sharded, reboot-per-test execution (brute isolation)
 # ----------------------------------------------------------------------
 def _make_harness(args: argparse.Namespace) -> KernelHarness:
+    memory = args.memory or (256 if args.arch == "riscv64" else 64)
+    boot_timeout = args.boot_timeout or (60.0 if args.arch == "riscv64" else 30.0)
+    qemu = args.qemu or f"qemu-system-{args.arch}"
     return KernelHarness(
-        qemu=args.qemu, iso=args.iso, memory=args.memory,
-        boot_timeout=args.boot_timeout, extra_args=args.qemu_arg,
+        qemu=qemu, iso=args.iso, memory=memory,
+        boot_timeout=boot_timeout, extra_args=args.qemu_arg,
         verbose=args.verbose, add_exit_device=not args.no_exit_device,
+        arch=args.arch, firmware=args.firmware,
     )
 
 
@@ -835,23 +911,38 @@ def run_sharded(
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run Archipelago kernel tests under QEMU")
     p.add_argument("tests", nargs="*", help="Specific tests to run (defaults to all)")
-    p.add_argument("--iso", default="build/image.iso", type=Path, help="Path to the Archipelago ISO")
-    p.add_argument("--qemu", default="qemu-system-x86_64", help="QEMU binary to use")
-    p.add_argument("--memory", type=int, default=64, help="Guest memory size in MiB")
-    p.add_argument("--boot-timeout", type=float, default=30.0, help="Timeout for kernel boot")
+    p.add_argument("--iso", default=None, type=Path, help="Path to the Archipelago ISO (default: build/<arch>/image.iso)")
+    p.add_argument("--qemu", default=None, help="QEMU binary to use (default: qemu-system-<arch>)")
+    p.add_argument("--arch", default="x86_64", choices=["x86_64", "riscv64"],
+                   help="Guest architecture (selects machine model and exit-device handling)")
+    p.add_argument("--firmware", type=Path, default=None,
+                   help="UEFI firmware code image (required for riscv64; loaded as pflash)")
+    p.add_argument("--memory", type=int, default=None,
+                   help="Guest memory size in MiB (default: 64, or 256 on riscv64 where EDK2 needs the headroom)")
+    p.add_argument("--boot-timeout", type=float, default=None,
+                   help="Timeout for kernel boot (default: 30, or 60 on riscv64 to cover the EDK2 phase)")
     p.add_argument("--command-timeout", type=float, default=5.0, help="Timeout for list commands")
     p.add_argument("--test-timeout", type=float, default=5.0, help="Timeout for a test to finish")
     p.add_argument("--retries", type=int, default=3, help="Retries for infrastructure failures")
     p.add_argument("--jobs", "-j", type=int, default=0, help="Parallel QEMU workers (0 = auto: min(cpus, 8))")
     p.add_argument("--list", action="store_true", help="List tests and exit")
-    p.add_argument("--artifacts", type=Path, default=Path("build/test-artifacts"), help="Artifact directory")
+    p.add_argument("--artifacts", type=Path, default=None,
+                   help="Artifact directory (default: build/<arch>/test-artifacts)")
     p.add_argument("--qemu-arg", action="append", default=[], help="Extra QEMU argument (repeatable)")
     p.add_argument("--no-artifacts", action="store_true", help="Disable artifact generation")
     p.add_argument("--no-exit-device", action="store_true", help="Don't attach isa-debug-exit")
-    p.add_argument("--kernel-elf", type=Path, default=Path("build/obj/sys/kernel/kernel.elf"),
-                   help="Unstripped kernel ELF for crash symbolication")
+    p.add_argument("--kernel-elf", type=Path, default=None,
+                   help="Unstripped kernel ELF for crash symbolication (default: build/<arch>/obj/sys/kernel/kernel.elf)")
     p.add_argument("--verbose", action="store_true", help="Verbose harness logging")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    # Build output lives in a per-arch tree; derive the defaults once --arch is known.
+    if args.iso is None:
+        args.iso = Path(f"build/{args.arch}/image.iso")
+    if args.kernel_elf is None:
+        args.kernel_elf = Path(f"build/{args.arch}/obj/sys/kernel/kernel.elf")
+    if args.artifacts is None:
+        args.artifacts = Path(f"build/{args.arch}/test-artifacts")
+    return args
 
 
 def _discover(args: argparse.Namespace) -> List[TestDescriptor]:

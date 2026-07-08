@@ -4,13 +4,17 @@ boot/limine-tools-10.0:
   source:
     type: git
     url: "https://github.com/limine-bootloader/limine.git"
-    branch: "v10.x-binary"
-    depth: 1
+    commit: "7a9013f305de0bea1f6310e76e7baba30499fef0"
 
 boot/limine-10.0:
   description: "Limine bootloader boot binaries"
   dependencies:
     - "boot/limine-tools-10.0"
+
+boot/edk2-riscv-1.0:
+  description: "EDK2 RiscVVirt UEFI firmware (riscv64 QEMU host tool)"
+  is_build_tool: true
+  arches: [riscv64]
 
 boot/limine-config-1.0:
   description: "Limine bootloader configuration"

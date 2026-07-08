@@ -10,7 +10,7 @@ from plume.package import Package
 
 KNOWN_PACKAGE_KEYS = {
     "description", "is_build_tool", "supports_live_sources",
-    "live_source_path", "dependencies", "source",
+    "live_source_path", "dependencies", "source", "arches",
 }
 
 
@@ -30,10 +30,12 @@ def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str
         if not os.path.exists(makefile):
             errors.append(f"{pkg}: no Makefile at {makefile}")
 
-        # Check dependencies exist
+        # Check dependencies exist and are buildable wherever this package is
         for dep in pkg.dependencies:
             if dep not in by_name:
                 errors.append(f"{pkg}: unknown dependency '{dep}'")
+            elif pkg.supported and not by_name[dep].supported:
+                errors.append(f"{pkg}: dependency '{dep}' is not available for {pkg.arch}")
 
         # Check live source path exists
         if pkg.supports_live_sources and pkg.live_source_path:

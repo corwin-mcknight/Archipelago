@@ -9,18 +9,21 @@ BUILD_DIR ?= ./
 OBJ_DIR   ?= $(BUILD_DIR)/obj/sys/kernel
 SRC_DIRS  ?= ./
 
-# Plume exports ARCH from repo/config.yaml; default covers standalone invocation.
+# Plume exports ARCH and TRIPLE from the target config; defaults cover
+# standalone invocation.
 ARCH ?= x86_64
 
 ifeq ($(ARCH),x86_64)
+TRIPLE ?= x86_64-unknown-none
 ARCH_DEFINES  := -D ARCH_X86 -D ARCH_X86_64 -D__x86_64__
-ARCH_CXXFLAGS := -m64 --target=x86_64-unknown-none \
+ARCH_CXXFLAGS := -m64 --target=$(TRIPLE) \
     -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel
 LD_EMULATION  := elf_x86_64
 else ifeq ($(ARCH),riscv64)
+TRIPLE ?= riscv64-unknown-none
 ARCH_DEFINES  := -D ARCH_RISCV64
 # No hard float in-kernel (lp64 ABI, no f/d extensions); medany so the higher-half kernel links.
-ARCH_CXXFLAGS := --target=riscv64-unknown-none -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
+ARCH_CXXFLAGS := --target=$(TRIPLE) -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
 LD_EMULATION  := elf64lriscv
 else
 $(error unsupported ARCH '$(ARCH)')

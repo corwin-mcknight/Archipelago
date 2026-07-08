@@ -1,6 +1,9 @@
 /build
 /.cache
 
+# Active target-config selection (symlink managed by `plume set-config`)
+/default.yaml
+
 .DS_Store
 
 # Various other build files...

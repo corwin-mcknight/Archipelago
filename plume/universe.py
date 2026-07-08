@@ -98,17 +98,24 @@ def _lookup_package(name: str, by_name: dict, by_short: dict, context: str = "")
 
 
 def filter_packages(all_packages: list[Package], requested: list[str]) -> list[Package]:
-    """Filter packages by name or @set reference. If requested is empty, return all."""
+    """Filter packages by name or @set reference. If requested is empty, return all.
+
+    Packages gated to other architectures are dropped from sets and the
+    all-packages default; naming one explicitly is an error.
+    """
     if not requested:
-        return list(all_packages)
+        return [p for p in all_packages if p.supported]
 
     by_name, by_short = _package_lookups(all_packages)
     result = []
     for name in requested:
         if name.startswith("@"):
-            result.extend(load_set(name[1:], all_packages, _lookups=(by_name, by_short)))
+            result.extend(p for p in load_set(name[1:], all_packages, _lookups=(by_name, by_short)) if p.supported)
         else:
-            result.append(_lookup_package(name, by_name, by_short))
+            pkg = _lookup_package(name, by_name, by_short)
+            if not pkg.supported:
+                raise ValueError(f"{pkg.full_name} is not available for {pkg.arch} (arches: {', '.join(pkg.arches)})")
+            result.append(pkg)
 
     # Deduplicate preserving order
     seen = set()

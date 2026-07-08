@@ -17,7 +17,7 @@ List available tests:
 python3 tools/test-harness.py --list
 ```
 
-Artifacts land in `build/test-artifacts/<test-name>/`:
+Artifacts land in `build/<arch>/test-artifacts/<test-name>/`:
 
 | File           | Contents                                             |
 | -------------- | ---------------------------------------------------- |

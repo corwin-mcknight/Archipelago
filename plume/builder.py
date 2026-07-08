@@ -28,24 +28,21 @@ STAGES = [
 
 
 def is_built(config: Config, package: Package) -> bool:
-    """Check whether a package has already been built."""
+    """Check whether a package has already been built for the active config."""
     env = get_build_env(config, package)
     d = env["D"]
 
-    # Live-source packages use a stamp file to detect source changes.
-    if package.supports_live_sources and package.live_source_path:
-        has_output = os.path.isdir(d) and bool(os.listdir(d))
-        stamp_path = os.path.join(env["WORKDIR"], STAMP_NAME)
-        return has_output and not is_stale(env["LIVE_SOURCES"], stamp_path)
-
-    if os.path.isdir(d) and bool(os.listdir(d)):
-        return True
+    has_output = os.path.isdir(d) and bool(os.listdir(d))
     # Build tools install to TOOL_INSTALL, not $D
-    if package.is_build_tool:
-        tool_dir = env.get("TOOL_INSTALL", "")
-        pkg_tool_dir = os.path.join(tool_dir, package.name)
-        return os.path.isdir(pkg_tool_dir) and bool(os.listdir(pkg_tool_dir))
-    return False
+    if not has_output and package.is_build_tool:
+        pkg_tool_dir = os.path.join(env.get("TOOL_INSTALL", ""), package.name)
+        has_output = os.path.isdir(pkg_tool_dir) and bool(os.listdir(pkg_tool_dir))
+    if not has_output:
+        return False
+
+    stamp_path = os.path.join(env["WORKDIR"], STAMP_NAME)
+    source_path = env["LIVE_SOURCES"] if package.supports_live_sources and package.live_source_path else None
+    return not is_stale(stamp_path, config.build_hash, source_path)
 
 
 def is_installed(config: Config, package: Package) -> bool:
@@ -93,9 +90,8 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
         if not ok:
             return False, time.monotonic() - pkg_start
 
-    # Update stamp so future builds can detect source changes.
-    if package.supports_live_sources and package.live_source_path:
-        update_stamp(os.path.join(env["WORKDIR"], STAMP_NAME))
+    # Record the config hash so source or config changes trigger a rebuild.
+    update_stamp(os.path.join(env["WORKDIR"], STAMP_NAME), config.build_hash)
 
     # Generate manifest and cache a binary package (skip build tools with no $D)
     if os.path.isdir(env["D"]) and os.listdir(env["D"]):

@@ -35,7 +35,7 @@ host-coverage:
 	@python3 tools/host-coverage.py $(if $(COV_MIN),--min $(COV_MIN),) $(TEST)
 
 # Periodic/on-demand lane, not the inner loop. FUZZ_TIME caps wall-clock (default 30s); crashes land
-# under build/host-fuzz/ as repro files. ponytail: no seed corpus/dict -- coverage feedback finds the
+# under build/host-fuzz/ as repro files. No seed corpus/dict -- coverage feedback finds the
 # 2-byte "_Z" prefix in well under a second; add a dict if a deeper target ever needs steering.
 # LSan is disabled: it is unreliable on musl and the target allocates nothing, so the at-exit check
 # only ever flags libFuzzer's own retained corpus state.
@@ -54,7 +54,7 @@ host-tsan:
 	@build/tools/kernel-tsan/tsan-log-ring
 
 shell: install
-	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -display none -m 128 -smp 1
+	@$(PLUME) run --no-display
 
 clean:
 	@$(PLUME) clean
@@ -83,7 +83,7 @@ docs:
 	@echo 'Kernel documentation available in ${DOCS_OUTPUT_DIR}/html'
 
 run: install
-	@qemu-system-x86_64 --cdrom build/image.iso -serial stdio -m 128 -smp 1
+	@$(PLUME) run
 
 debug: install
-	qemu-system-x86_64 --cdrom build/image.iso -serial stdio -s  -S -m 128 -smp 4
+	@$(PLUME) run --debug
