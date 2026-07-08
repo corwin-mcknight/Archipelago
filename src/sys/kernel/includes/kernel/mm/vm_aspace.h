@@ -19,7 +19,7 @@ namespace kernel::mm {
 // handler path. Take it with kernel::synchronization::lock_guard (irq-safe).
 // Rule: VMM code never touches faultable memory while holding this lock; all
 // VMM structures live in HHDM-mapped PMM frames, which are always resident.
-// ponytail: single global lock; split per-aspace/per-VMO when scheduler-era
+// Single global lock; split per-aspace/per-VMO when scheduler-era
 // contention is measured.
 extern kernel::synchronization::spinlock g_vmm_lock;
 

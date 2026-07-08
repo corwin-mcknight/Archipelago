@@ -7,9 +7,13 @@
 namespace kernel {
 namespace driver {
 
-class uart : public logging_device {
-    constexpr static uint16_t port              = 0x3f8;
+// Per-arch access to the 16550's byte-wide register file (port I/O on x86_64,
+// MMIO on riscv64); implemented in <arch>/uart.cpp.
+bool uart_present();
+uint8_t uart_reg_read(uint16_t offset);
+void uart_reg_write(uint16_t offset, uint8_t value);
 
+class uart : public logging_device {
     // Upper bound on transmit-ready polling in write_byte(). A real 16550 drains a byte in well
     // under a millisecond at any baud rate (a few thousand spins at most); one million iterations
     // is generously past that while keeping a wedged or absent port from hanging the kernel.

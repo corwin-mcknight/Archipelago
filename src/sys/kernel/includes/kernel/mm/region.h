@@ -45,7 +45,7 @@ struct region_child_less {
 // and a max protection its descendants can never exceed. Regions are kernel
 // Objects held by ktl::ref; handle exposure and the detached-state machine
 // land with the task/IPC milestone.
-// ponytail: a child dropped from its parent while external refs remain has no
+// A child dropped from its parent while external refs remain has no
 // detached state -- callers must not use a region after unmapping it.
 class Region : public obj::Object {
    public:
@@ -69,7 +69,7 @@ class Region : public obj::Object {
 
     // Remove every child slot fully contained in [base, base+size), zapping
     // any installed translations. A range that partially overlaps a slot is an
-    // error. ponytail: no binding splitting -- whole-slot unmap only until a
+    // error. No binding splitting -- whole-slot unmap only until a
     // consumer needs partial unmaps.
     ktl::result<void> unmap(uintptr_t base, size_t size);
 

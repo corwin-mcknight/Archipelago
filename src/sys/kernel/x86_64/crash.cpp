@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ktl/fmt>
+
 // HHDM (higher-half direct map) offset published by the Limine boot path (x86_64/main.cpp).
 extern uintptr_t g_hhdm_offset;
 
@@ -122,14 +124,50 @@ const char* exception_name(uint32_t vec) {
     }
 }
 
-const char* trigger_name(kernel::crash::trigger_kind kind) {
-    switch (kind) {
-        case kernel::crash::trigger_kind::panic: return "panic";
-        case kernel::crash::trigger_kind::exception: return "exception";
-        case kernel::crash::trigger_kind::assertion: return "assertion";
-        case kernel::crash::trigger_kind::watchdog: return "watchdog";
-        default: return "unknown";
-    }
+uint64_t frame_vec(register_frame_t* regs) { return regs->int_no; }
+uint64_t frame_err(register_frame_t* regs) { return regs->err_code; }
+uintptr_t frame_fp(register_frame_t* regs) { return regs->rbp; }
+uintptr_t frame_sp(register_frame_t* regs) { return regs->userrsp; }
+
+namespace {
+char g_reg_fmt_buf[512];
+template <typename... Args> void emit(const char* fmt, const Args&... args) {
+    ktl::format::format_to_buffer_raw(g_reg_fmt_buf, sizeof(g_reg_fmt_buf), fmt, args...);
+    kernel::crash::crash_write(g_reg_fmt_buf);
+}
+}  // namespace
+
+// cr[] carries {cr0, cr2, cr3, cr4} (see read_control_registers).
+void emit_registers_harness(register_frame_t* regs, const uint64_t cr[4]) {
+    emit(
+        "@@CRASH_REG {{\"rip\":\"0x{0:016p}\",\"rsp\":\"0x{1:016p}\",\"rbp\":\"0x{2:016p}\","
+        "\"rflags\":\"0x{3:016p}\",\"cs\":\"0x{4:016p}\",\"ss\":\"0x{5:016p}\",",
+        regs->rip, regs->userrsp, regs->rbp, regs->eflags, regs->cs, regs->ss);
+    emit(
+        "\"rax\":\"0x{0:016p}\",\"rbx\":\"0x{1:016p}\",\"rcx\":\"0x{2:016p}\","
+        "\"rdx\":\"0x{3:016p}\",\"rsi\":\"0x{4:016p}\",\"rdi\":\"0x{5:016p}\",",
+        regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rsi, regs->rdi);
+    emit(
+        "\"r8\":\"0x{0:016p}\",\"r9\":\"0x{1:016p}\",\"r10\":\"0x{2:016p}\","
+        "\"r11\":\"0x{3:016p}\",\"r12\":\"0x{4:016p}\",\"r13\":\"0x{5:016p}\","
+        "\"r14\":\"0x{6:016p}\",\"r15\":\"0x{7:016p}\",",
+        regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15);
+    emit("\"cr0\":\"0x{0:016p}\",\"cr2\":\"0x{1:016p}\",\"cr3\":\"0x{2:016p}\",\"cr4\":\"0x{3:016p}\"}}\n", cr[0],
+         cr[1], cr[2], cr[3]);
+}
+
+void emit_registers_prose(register_frame_t* regs, const uint64_t cr[4]) {
+    kernel::crash::crash_write("Registers:\n");
+    emit("* rip=0x{0:016p}  rfl=0x{1:016p}\n", regs->rip, regs->eflags);
+    emit("* rsp=0x{0:016p}  rbp=0x{1:016p}\n", regs->userrsp, regs->rbp);
+    emit("* rax=0x{0:016p}  rbx=0x{1:016p}  rcx=0x{2:016p}\n", regs->rax, regs->rbx, regs->rcx);
+    emit("* rdx=0x{0:016p}  rsi=0x{1:016p}  rdi=0x{2:016p}\n", regs->rdx, regs->rsi, regs->rdi);
+    emit("*  r8=0x{0:016p}   r9=0x{1:016p}  r10=0x{2:016p}\n", regs->r8, regs->r9, regs->r10);
+    emit("* r11=0x{0:016p}  r12=0x{1:016p}  r13=0x{2:016p}\n", regs->r11, regs->r12, regs->r13);
+    emit("* r14=0x{0:016p}  r15=0x{1:016p}\n", regs->r14, regs->r15);
+    emit("*  cs=0x{0:016p}   ss=0x{1:016p}\n", regs->cs, regs->ss);
+    emit("* cr0=0x{0:016p}  cr2=0x{1:016p}\n", cr[0], cr[1]);
+    emit("* cr3=0x{0:016p}  cr4=0x{1:016p}\n", cr[2], cr[3]);
 }
 
 }  // namespace kernel::crash::arch

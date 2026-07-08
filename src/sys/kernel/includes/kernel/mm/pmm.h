@@ -16,7 +16,7 @@ class page_frame_allocator {
     ktl::maybe<vm_paddr_t> alloc();
     void free(vm_paddr_t addr);
     // Carve a physically contiguous, zeroed run of pages from an untouched
-    // region tail. ponytail: no free_contiguous -- the only caller (the page
+    // region tail. No free_contiguous -- the only caller (the page
     // descriptor array) lives for the kernel's lifetime.
     ktl::maybe<vm_paddr_t> alloc_contiguous(size_t count);
     void debug_print_state();

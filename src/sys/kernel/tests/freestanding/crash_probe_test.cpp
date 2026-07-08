@@ -59,20 +59,33 @@ KTEST(crash_walk_rejects_unmapped_rbp, "crash_probe") {
 }
 
 KTEST(crash_walk_fake_chain, "crash_probe") {
-    // Build a two-frame fp chain on the (mapped, higher-half) stack:
-    // frame layout is [rbp+0] = saved rbp, [rbp+8] = return address.
+    // Build a two-frame fp chain on the (mapped, higher-half) stack using the
+    // architecture's frame-record layout.
     uintptr_t ret1 = reinterpret_cast<uintptr_t>(&g_probe_anchor);
     uintptr_t ret2 = ret1 + 4;
 
     uint64_t buf[6];
-    buf[0]  = reinterpret_cast<uintptr_t>(&buf[2]);  // frame A: saved rbp -> frame B
-    buf[1]  = ret1;
-    buf[2]  = reinterpret_cast<uintptr_t>(&buf[4]);  // frame B: saved rbp -> terminator
-    buf[3]  = ret2;
-    buf[4]  = 0;  // terminator: implausible saved rbp stops the walk
-    buf[5]  = 0;
+#ifdef ARCH_X86
+    // x86_64: rbp points at the record: [rbp+0] = saved rbp, [rbp+8] = return address.
+    buf[0]          = reinterpret_cast<uintptr_t>(&buf[2]);  // frame A: saved rbp -> frame B
+    buf[1]          = ret1;
+    buf[2]          = reinterpret_cast<uintptr_t>(&buf[4]);  // frame B: saved rbp -> terminator
+    buf[3]          = ret2;
+    buf[4]          = 0;  // terminator: implausible saved rbp stops the walk
+    buf[5]          = 0;
+    uintptr_t start = reinterpret_cast<uintptr_t>(&buf[0]);
+#elif defined(ARCH_RISCV64)
+    // riscv64: fp points one past the record: [fp-8] = return address, [fp-16] = saved fp.
+    buf[0]          = reinterpret_cast<uintptr_t>(&buf[4]);  // frame A: saved fp -> frame B
+    buf[1]          = ret1;
+    buf[2]          = 0;  // frame B: saved fp terminator stops the walk
+    buf[3]          = ret2;
+    buf[4]          = 0;
+    buf[5]          = 0;
+    uintptr_t start = reinterpret_cast<uintptr_t>(&buf[2]);
+#endif
 
-    auto bt = kernel::crash::arch::walk_frame_pointers(reinterpret_cast<uintptr_t>(&buf[0]));
+    auto bt = kernel::crash::arch::walk_frame_pointers(start);
     KTEST_REQUIRE_EQUAL(bt.depth, static_cast<size_t>(2));
     KTEST_EXPECT_EQUAL(bt.frames[0], ret1);
     KTEST_EXPECT_EQUAL(bt.frames[1], ret2);

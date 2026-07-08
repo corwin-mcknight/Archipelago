@@ -81,7 +81,13 @@ KTEST_INTEGRATION(fault_write_breaks_cow_to_private_copy, "mm/fault") {
     KTEST_REQUIRE_TRUE(desc != nullptr);
     KTEST_EXPECT_TRUE(desc->owner == v.get());
     KTEST_REQUIRE_TRUE(kernel_aspace().unmap_page(MAP_BASE).has_value());
+    uint64_t faults_before_zap = kernel_aspace().fault_count();
     KTEST_EXPECT_EQUAL(*word, 0x5EED'F00D'CAFE'D00Dull);
+    // A stale TLB entry would satisfy the read without faulting; the increment
+    // proves unmap_page flushed the translation. QEMU's TCG TLB evicts
+    // aggressively, so only real hardware reliably fails this on a missing
+    // sfence.vma.
+    KTEST_EXPECT_TRUE(kernel_aspace().fault_count() > faults_before_zap);
 
     KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());
 }
