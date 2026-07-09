@@ -38,9 +38,9 @@ bool try_resolve_page_fault(register_frame_t* regs) {
 
 }  // namespace
 
-// Low-water mark for the trap entry's stack-overflow backstop. Single kernel
-// stack this milestone; per-thread stacks need this to move per-CPU.
-extern "C" uintptr_t g_kstack_floor = 0;
+// Low-water mark for the trap entry's stack-overflow backstop, published per running thread by
+// the scheduler on every switch; the definition lives in core/sched/scheduler.cpp.
+extern "C" uintptr_t g_kstack_floor;
 
 namespace kernel::riscv {
 

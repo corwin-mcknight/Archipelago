@@ -31,4 +31,17 @@ void harness_exit(uint8_t code);
 [[noreturn]] void trigger_invalid_opcode();
 [[noreturn]] void trigger_breakpoint();
 
+/// Halt until the next interrupt (hlt / wfi). Call with interrupts enabled.
+void wait_for_interrupt();
+
+/// Fabricate the initial callee-saved switch frame on a fresh stack so the first
+/// arch_context_switch into it lands in the arch's entry trampoline, which enables
+/// interrupts, calls entry(arg), and falls into sched_thread_exit(). Returns the initial sp.
+uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* arg);
+
 }  // namespace kernel::arch
+
+/// Callee-saved context switch: pushes callee-saved registers on the current stack, stores the
+/// resulting sp to *save_sp, loads load_sp, pops, returns on the new stack. Interrupts must be
+/// disabled by the caller.
+extern "C" void arch_context_switch(uintptr_t* save_sp, uintptr_t load_sp);

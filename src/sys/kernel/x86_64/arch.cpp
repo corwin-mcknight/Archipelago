@@ -47,4 +47,22 @@ void harness_exit(uint8_t code) { outw(0x604, static_cast<uint16_t>(code | 0x200
     hcf();
 }
 
+void wait_for_interrupt() { asm volatile("hlt"); }
+
+extern "C" void thread_entry_trampoline();
+
+uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* arg) {
+    // Mirrors the pop order in context_switch.s: r15, r14, r13, r12, rbx, rbp, ret.
+    // stack_top must be 16-aligned so the trampoline's calls keep SysV alignment.
+    uint64_t* sp = reinterpret_cast<uint64_t*>(stack_top);
+    *--sp        = reinterpret_cast<uint64_t>(&thread_entry_trampoline);  // ret target
+    *--sp        = 0;                                                     // rbp
+    *--sp        = reinterpret_cast<uint64_t>(entry);                     // rbx
+    *--sp        = reinterpret_cast<uint64_t>(arg);                       // r12
+    *--sp        = 0;                                                     // r13
+    *--sp        = 0;                                                     // r14
+    *--sp        = 0;                                                     // r15
+    return reinterpret_cast<uintptr_t>(sp);
+}
+
 }  // namespace kernel::arch

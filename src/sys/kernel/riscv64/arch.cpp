@@ -67,4 +67,19 @@ void harness_exit(uint8_t code) {
     hcf();
 }
 
+void wait_for_interrupt() { asm volatile("wfi"); }
+
+extern "C" void thread_entry_trampoline();
+
+uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* arg) {
+    // Mirrors the 112-byte frame in context_switch.S: ra slot 0, s1 slot 2, s2 slot 3.
+    uintptr_t sp = stack_top - 112;
+    uint64_t* f  = reinterpret_cast<uint64_t*>(sp);
+    for (int i = 0; i < 14; ++i) { f[i] = 0; }
+    f[0] = reinterpret_cast<uint64_t>(&thread_entry_trampoline);  // ra
+    f[2] = reinterpret_cast<uint64_t>(entry);                     // s1
+    f[3] = reinterpret_cast<uint64_t>(arg);                       // s2
+    return sp;
+}
+
 }  // namespace kernel::arch

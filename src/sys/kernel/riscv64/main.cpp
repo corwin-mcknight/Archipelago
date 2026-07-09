@@ -73,5 +73,5 @@ extern "C" [[noreturn]] void _start(void) {
 
     g_log.info("riscv64: single-hart boot; secondary harts not started");
 
-    kernel::boot::late_boot();
+    kernel::boot::late_boot(0);
 }

@@ -1,0 +1,210 @@
+// src/sys/kernel/core/sched/scheduler.cpp
+#include <kernel/arch.h>
+#include <kernel/assert.h>
+#include <kernel/config.h>
+#include <kernel/log.h>
+#include <kernel/mm/pmm.h>
+#include <kernel/panic.h>
+#include <kernel/sched/scheduler.h>
+#include <kernel/sched/task.h>
+
+#include <ktl/deque>
+#include <ktl/stack>
+
+extern uintptr_t g_hhdm_offset;
+
+// Stack tripwire floor for the running thread, consumed by the arch trap entries. Published on
+// every switch. Zero disables the check (x86 idle; pre-scheduler riscv boot writes a real floor
+// from trap_init).
+extern "C" uintptr_t g_kstack_floor = 0;
+
+namespace kernel::sched {
+
+struct cpu_sched {
+    ktl::deque<ktl::ref<Thread>> run_queue;
+    ktl::ref<Thread> current;
+    ktl::ref<Thread> idle;
+    // Outgoing thread of the in-flight switch; dropped by sched_finish_switch() on the incoming
+    // thread's stack so a dead thread's final ref never dies on its own stack.
+    ktl::ref<Thread> previous;
+};
+
+// All scheduler state below is guarded by interrupts-off on the single scheduling core.
+// ponytail: g_boot_core indexing, not a per-CPU pointer; GS/tp per-CPU state when APs schedule.
+cpu_sched g_cpus[CONFIG_MAX_CORES];
+uint32_t g_boot_core = 0;
+
+cpu_sched& cur_cpu() { return g_cpus[g_boot_core]; }
+
+namespace {
+
+bool g_started = false;
+
+// Dead threads awaiting the reaper, and recycled stacks. Stacks come from alloc_contiguous,
+// which has no contiguous free -- the cache recycles them among threads instead; the pool is
+// bounded by the peak live thread count.
+ktl::deque<ktl::ref<Thread>> g_zombies;
+ktl::stack<kernel::mm::vm_paddr_t> g_stack_cache;
+
+// Interrupts must be disabled. Returns when this thread is next switched in.
+void switch_to(ktl::ref<Thread> next) {
+    auto& c = cur_cpu();
+    next->set_state(thread_state::RUNNING);
+    next->reset_slice();
+    Thread* outgoing = c.current.get();
+    assert(c.previous.get() == nullptr, "switch_to: unfinished previous switch");
+    c.previous     = ktl::move(c.current);
+    c.current      = ktl::move(next);
+    g_kstack_floor = c.current->kstack_floor();
+    arch_context_switch(outgoing->saved_sp_slot(), c.current->saved_sp());
+    sched_finish_switch();
+}
+
+// Returns a stack to the cache; shared by reap() and spawn()'s failure paths.
+void release_stack(kernel::mm::vm_paddr_t phys) {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    bool ok        = g_stack_cache.push(phys);
+    kernel::arch::restore_interrupts(flags);
+    if (!ok) { g_log.warn("sched: stack cache full; leaking a thread stack"); }
+}
+
+void reap(ktl::ref<Thread> zombie) {
+    kernel_task()->remove_thread(zombie->id());
+    if (zombie->kstack_phys() != 0) { release_stack(zombie->kstack_phys()); }
+}
+
+[[noreturn]] void reaper_main(void*) {
+    while (true) {
+        ktl::maybe<ktl::ref<Thread>> zombie;
+        uint64_t flags = kernel::arch::save_and_disable_interrupts();
+        zombie         = g_zombies.pop_front();
+        kernel::arch::restore_interrupts(flags);
+        if (!zombie.has_value()) {
+            // ponytail: busy-yield until wait_queue lands (next tasks); then this blocks.
+            yield();
+            continue;
+        }
+        reap(ktl::move(*zombie));
+    }
+}
+
+}  // namespace
+
+bool started() { return g_started; }
+
+ktl::ref<Thread> current() {
+    uint64_t flags     = kernel::arch::save_and_disable_interrupts();
+    ktl::ref<Thread> t = cur_cpu().current;
+    kernel::arch::restore_interrupts(flags);
+    return t;
+}
+
+void make_ready(ktl::ref<Thread> thread) {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    assert(thread->state() == thread_state::BLOCKED, "make_ready: thread is not blocked");
+    thread->set_state(thread_state::READY);
+    bool ok = cur_cpu().run_queue.push_back(ktl::move(thread));
+    assert(ok, "make_ready: run queue allocation failed");
+    kernel::arch::restore_interrupts(flags);
+}
+
+void schedule_out() {
+    auto& c   = cur_cpu();
+    auto next = c.run_queue.pop_front();
+    switch_to(next.has_value() ? ktl::move(*next) : c.idle);
+}
+
+void yield() {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    auto& c        = cur_cpu();
+    auto next      = c.run_queue.pop_front();
+    if (next.has_value()) {
+        if (c.current.get() != c.idle.get()) {
+            c.current->set_state(thread_state::READY);
+            bool ok = c.run_queue.push_back(c.current);
+            assert(ok, "yield: run queue allocation failed");
+        }
+        switch_to(ktl::move(*next));
+    }
+    kernel::arch::restore_interrupts(flags);
+}
+
+ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
+    constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
+
+    uint64_t flags                          = kernel::arch::save_and_disable_interrupts();
+    ktl::maybe<kernel::mm::vm_paddr_t> phys = g_stack_cache.pop();
+    kernel::arch::restore_interrupts(flags);
+    if (!phys.has_value()) { phys = kernel::mm::g_page_frame_allocator.alloc_contiguous(STACK_PAGES); }
+    if (!phys.has_value()) { return ktl::err(ktl::errc::oom); }
+
+    uintptr_t virt_base = g_hhdm_offset + *phys;
+    auto thread         = ktl::make_ref<Thread>(*phys, virt_base);
+    if (!thread) {
+        release_stack(*phys);
+        return ktl::err(ktl::errc::oom);
+    }
+    thread->set_name(name);
+    thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
+
+    auto added = kernel_task()->add_thread(thread);
+    if (added.is_err()) {
+        release_stack(*phys);
+        return ktl::err(added.unwrap_err());
+    }
+
+    flags   = kernel::arch::save_and_disable_interrupts();
+    bool ok = cur_cpu().run_queue.push_back(thread);
+    kernel::arch::restore_interrupts(flags);
+    if (!ok) {
+        kernel_task()->remove_thread(thread->id());
+        release_stack(*phys);
+        return ktl::err(ktl::errc::oom);
+    }
+    return ktl::result<ktl::ref<Thread>>::ok(thread);
+}
+
+[[noreturn]] void exit_current() {
+    kernel::arch::disable_interrupts();
+    auto& c = cur_cpu();
+    assert(c.current.get() != c.idle.get(), "exit_current: idle thread cannot exit");
+    c.current->set_state(thread_state::DEAD);
+    c.current->signal_set(Thread::SIGNAL_TERMINATED);
+    bool ok = g_zombies.push_back(c.current);
+    assert(ok, "exit_current: zombie list allocation failed");
+    schedule_out();
+    panic("exit_current: switched back into a dead thread");
+}
+
+void init(uint32_t boot_core_index) {
+    g_boot_core = boot_core_index;
+    auto idle   = ktl::make_ref<Thread>();
+    assert(static_cast<bool>(idle), "sched: idle thread allocation failed");
+    idle->set_name("idle0");
+    idle->set_state(thread_state::RUNNING);
+    // The boot stack keeps whatever tripwire the arch established (riscv trap_init; 0 on x86).
+    idle->set_kstack_floor(g_kstack_floor);
+    kernel_task()->add_thread(idle).expect("sched: task zero rejected the idle thread");
+    auto& c   = cur_cpu();
+    c.idle    = idle;
+    c.current = ktl::move(idle);
+    g_started = true;
+    spawn("reaper", reaper_main, nullptr).expect("sched: reaper spawn failed");
+    g_log.info("sched: online (core {0})", boot_core_index);
+}
+
+[[noreturn]] void idle_loop() {
+    // ponytail: cooperative hand-off only -- no tick preemption yet (a later milestone), so idle
+    // must actively yield to whatever is ready instead of just halting. yield() is a fast no-op
+    // when the run queue is empty, so this still spends most of its time halted in-between.
+    while (true) {
+        yield();
+        kernel::arch::wait_for_interrupt();
+    }
+}
+
+}  // namespace kernel::sched
+
+// Trampoline hooks. cur_cpu() is file-scope state above, so these live in this file.
+extern "C" void sched_finish_switch() { kernel::sched::cur_cpu().previous.reset(); }
+extern "C" [[noreturn]] void sched_thread_exit() { kernel::sched::exit_current(); }

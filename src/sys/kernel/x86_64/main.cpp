@@ -117,5 +117,5 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
 
-    kernel::boot::late_boot();
+    kernel::boot::late_boot(bsp_index);
 }

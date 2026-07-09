@@ -1,5 +1,6 @@
 #include <kernel/boot.h>
 #include <kernel/obj/handle_table.h>
+#include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/shell/shell.h>
 
@@ -162,7 +163,11 @@ void init_memory() {
     kernel::mm::vmm_init(usable_ranges, usable_range_count, wired_ranges, wired_range_count);
 }
 
-[[noreturn]] void late_boot() {
+#if CONFIG_KERNEL_SHELL
+static void shell_thread_main(void*) { kernel::shell::shell_main(); }
+#endif
+
+[[noreturn]] void late_boot(uint32_t boot_core_index) {
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
 
@@ -172,11 +177,13 @@ void init_memory() {
                            .unwrap();
     kernel_task->handles().get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
+    kernel::sched::init(boot_core_index);
+
     bool shell_boot = resolve_shell_boot();
 #if CONFIG_KERNEL_SHELL
     if (shell_boot) {
-        g_log.info("boot: kernel shell boot -- handing control to interactive shell");
-        kernel::shell::shell_main();
+        g_log.info("boot: kernel shell boot -- starting shell thread");
+        kernel::sched::spawn("kshell", shell_thread_main, nullptr).expect("boot: shell spawn failed");
     } else {
         g_log.info("boot: normal boot -- initialization complete");
     }
@@ -185,7 +192,7 @@ void init_memory() {
     g_log.info("boot: normal boot -- initialization complete");
 #endif
 
-    panic("Boot processor exited early");
+    kernel::sched::idle_loop();
 }
 
 }  // namespace kernel::boot

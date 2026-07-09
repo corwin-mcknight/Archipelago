@@ -48,8 +48,8 @@
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
 ## Scheduler & Concurrency
-- Build the per-CPU scheduler with run queues and idle thread handling, per the round-robin design in `docs/Design/Scheduling.md` (no priority system by design).
-- Implement context switching, timeslice accounting, and cross-CPU load balancing.
+- Extend the round-robin scheduler to multiple cores (currently single-core: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design).
+- Implement timeslice accounting (tick-driven preemption) and cross-CPU load balancing.
 - Add a kernel mutex (blocking lock) and contention diagnostics; spinlocks and a semaphore already exist in `kernel/synchronization/`.
 - Back per-core identity with a GS-based per-CPU pointer when interrupt or scheduler code starts needing the calling core -- the CPUID-based current_core_index() is currently dead code with no callers; make per-core lapic_id atomic to close the bring-up read/write race.
 
