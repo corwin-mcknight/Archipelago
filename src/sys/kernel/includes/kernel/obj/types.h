@@ -9,11 +9,14 @@ using TypeId   = uint32_t;
 using Rights   = uint32_t;
 
 namespace type_ids {
-constexpr TypeId INVALID = 0;
-constexpr TypeId EVENT   = 1;
-constexpr TypeId COUNTER = 2;
-constexpr TypeId REGION  = 3;
-constexpr TypeId VMO     = 4;
+constexpr TypeId INVALID   = 0;
+constexpr TypeId EVENT     = 1;
+constexpr TypeId COUNTER   = 2;
+constexpr TypeId REGION    = 3;
+constexpr TypeId VMO       = 4;
+constexpr TypeId THREAD    = 5;
+constexpr TypeId TASK      = 6;
+constexpr TypeId SEMAPHORE = 7;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;
@@ -21,6 +24,7 @@ constexpr Rights RIGHT_WRITE     = 1 << 1;
 constexpr Rights RIGHT_DUPLICATE = 1 << 2;
 constexpr Rights RIGHT_TRANSFER  = 1 << 3;
 constexpr Rights RIGHT_SIGNAL    = 1 << 4;
-constexpr Rights RIGHTS_ALL      = 0x1F;
+constexpr Rights RIGHT_WAIT      = 1 << 5;
+constexpr Rights RIGHTS_ALL      = 0x3F;
 
 }  // namespace kernel::obj

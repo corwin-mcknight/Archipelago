@@ -22,6 +22,13 @@
 #define CONFIG_KERNEL_SHELL 1
 #define CONFIG_MAX_OBJECT_TYPES 64
 
+// Kernel thread stacks: physically contiguous, used through the HHDM mapping.
+#define CONFIG_KERNEL_STACK_SIZE (16 * 1024)
+// Trap entries panic when sp falls below (stack base + margin); see the stack tripwire.
+#define CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN 4096
+// Round-robin timeslice in kernel ticks (1 tick = 1 ms on both timers today).
+#define CONFIG_SCHED_TIMESLICE_TICKS 10
+
 // Testing overrides
 #ifndef PRODUCT_DEBUG
 #define PRODUCT_DEBUG 0

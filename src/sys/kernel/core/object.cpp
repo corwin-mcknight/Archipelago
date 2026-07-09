@@ -2,6 +2,7 @@
 #include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
+#include <kernel/sched/thread.h>
 
 namespace kernel::obj {
 
@@ -10,6 +11,7 @@ namespace kernel::obj {
 void obj_init() {
     Event::register_type(g_type_registry).expect("obj_init: Event type registration failed");
     Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
+    kernel::sched::Thread::register_type(g_type_registry).expect("obj_init: Thread type registration failed");
 }
 
 namespace { ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace
