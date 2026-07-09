@@ -8,6 +8,7 @@
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
+#include "kernel/riscv/timer.h"
 #include "vendor/limine.h"
 
 namespace kernel::riscv {
@@ -15,6 +16,8 @@ void trap_init();  // riscv64/trap.cpp
 }
 
 extern kernel::driver::uart uart;
+
+kernel::riscv::drivers::sbi_timer timer;
 
 extern "C" void init_global_constructors_array(void);
 
@@ -57,11 +60,13 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::boot::init_memory();
 
     // Single-hart bring-up: install the trap vector, then let interrupts in.
-    // The SBI timer and CLINT/PLIC routing are future work.
+    // CLINT/PLIC routing for external interrupts is future work.
     kernel::riscv::trap_init();
     g_interrupt_manager.initialize();
     kernel::arch::enable_interrupts();
     g_log.debug("cpu0: Interrupts Enabled");
+
+    timer.init();
 
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();

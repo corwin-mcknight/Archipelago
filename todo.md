@@ -1,7 +1,8 @@
 # TODO
 
 ## Second Architecture (riscv64)
-- SBI timer driver (kernel::time is never initialized on riscv64) and CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
+- CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
+- SBI timer hardcodes QEMU virt's 10 MHz timebase; read the DTB's /cpus/timebase-frequency for real hardware (VisionFive 2 is 4 MHz).
 - Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).
 - Grow the riscv64/tests/ suite (external interrupt claim path, more sfence/TLB behavior).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
