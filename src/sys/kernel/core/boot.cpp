@@ -1,5 +1,6 @@
 #include <kernel/boot.h>
 #include <kernel/obj/handle_table.h>
+#include <kernel/sched/task.h>
 #include <kernel/shell/shell.h>
 
 #include <ktl/maybe>
@@ -165,10 +166,11 @@ void init_memory() {
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
 
-    auto evt_id =
-        kernel::obj::g_handle_table.emplace<kernel::obj::Event>(kernel::obj::RIGHT_READ | kernel::obj::RIGHT_SIGNAL)
-            .unwrap();
-    kernel::obj::g_handle_table.get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
+    auto kernel_task = kernel::sched::kernel_task();
+    auto evt_id      = kernel_task->handles()
+                           .emplace<kernel::obj::Event>(kernel::obj::RIGHT_READ | kernel::obj::RIGHT_SIGNAL)
+                           .unwrap();
+    kernel_task->handles().get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
     bool shell_boot = resolve_shell_boot();
 #if CONFIG_KERNEL_SHELL

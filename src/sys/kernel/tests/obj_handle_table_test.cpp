@@ -2,12 +2,16 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/sched/task.h>
 #include <kernel/testing/test_objects.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
 
-static void handle_table_init() { register_all_test_types(); }
+static void handle_table_init() {
+    register_all_test_types();
+    kernel::sched::Task::register_type(g_type_registry).expect("task type registration failed");
+}
 
 // Subsumes the old emplace_valid test -- emplace + get + verify type in one.
 KTEST_WITH_INIT(obj_handle_table_emplace_and_get, "obj/handle_table", handle_table_init) {
@@ -107,11 +111,12 @@ KTEST_WITH_INIT(obj_handle_table_invalid_handle, "obj/handle_table", handle_tabl
 }
 
 KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_table_init) {
-    size_t before = g_handle_table.count();
-    KTEST_UNWRAP(id, g_handle_table.emplace<TestObjA>(RIGHTS_ALL));
-    KTEST_EXPECT_TRUE(g_handle_table.count() == before + 1);
-    KTEST_EXPECT_TRUE(g_handle_table.close(id).is_ok());
-    KTEST_EXPECT_TRUE(g_handle_table.count() == before);
+    auto& handles = kernel::sched::kernel_task()->handles();
+    size_t before = handles.count();
+    KTEST_UNWRAP(id, handles.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_EXPECT_TRUE(handles.count() == before + 1);
+    KTEST_EXPECT_TRUE(handles.close(id).is_ok());
+    KTEST_EXPECT_TRUE(handles.count() == before);
 }
 
 // F033: rights outside the type's registered valid_rights contract are rejected, not clamped.

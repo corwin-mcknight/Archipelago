@@ -3,8 +3,6 @@
 
 namespace kernel::obj {
 
-HandleTable g_handle_table;
-
 HandleTable::~HandleTable() = default;
 
 ktl::result<void> HandleTable::grow() {

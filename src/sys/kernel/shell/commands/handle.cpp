@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/obj/handle_table.h>
+#include <kernel/sched/task.h>
 #include <kernel/shell/output.h>
 
 #include <ktl/string_view>
@@ -15,7 +16,7 @@ void handle_handler(int argc, const ktl::string_view argv[], kernel::shell::Shel
         return;
     }
     if (argv[1] == "stats") {
-        output.print("Kernel handle table: {0} handles\n", kernel::obj::g_handle_table.count());
+        output.print("Kernel handle table: {0} handles\n", kernel::sched::kernel_task()->handles().count());
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);
     }

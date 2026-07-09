@@ -93,6 +93,4 @@ template <typename T> ktl::result<ktl::ref<T>> HandleTable::get(HandleId id, Rig
     return ktl::result<ktl::ref<T>>::ok(ktl::static_ref_cast<T>(entry->object));
 }
 
-extern HandleTable g_handle_table;
-
 }  // namespace kernel::obj
