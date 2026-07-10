@@ -28,6 +28,8 @@
 #define CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN 4096
 // Round-robin timeslice in kernel ticks (1 tick = 1 ms on both timers today).
 #define CONFIG_SCHED_TIMESLICE_TICKS 10
+// Scheduler trace ring capacity in records (~32 bytes each; always-on flight recorder).
+#define CONFIG_SCHED_TRACE_EVENTS 512
 
 // Testing overrides
 #ifndef PRODUCT_DEBUG
