@@ -3,12 +3,15 @@
 #if CONFIG_KERNEL_TESTING
 
 #include <kernel/obj/event.h>
+#include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
 #include <kernel/sched/wait_queue.h>
 #include <kernel/time.h>
+
+#include <ktl/ref>
 
 using namespace kernel::sched;
 
@@ -99,6 +102,11 @@ KTEST(sched_block_and_wake, "kernel/sched") {
     KTEST_UNWRAP(t, spawn("blocker", blocker_thread, nullptr));
     for (int i = 0; i < 100000 && g_blocked_phase == 0; ++i) { yield(); }
     KTEST_REQUIRE_EQUAL(g_blocked_phase, 1);
+    for (int i = 0; i < 100000; ++i) {
+        if (t->state() == thread_state::BLOCKED) break;
+        yield();
+    }
+    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
     sleep_ticks(3);  // give it slices; it must stay blocked, not spin
     KTEST_EXPECT_EQUAL(g_blocked_phase, 1);
     KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
@@ -153,6 +161,11 @@ KTEST(sched_mask_zero_ignores_signal_wake, "kernel/sched") {
     KTEST_UNWRAP(t, spawn("mask0", mask_zero_wait_thread, &args));
     for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
     KTEST_REQUIRE_EQUAL(phase, 1);
+    for (int i = 0; i < 100000; ++i) {
+        if (t->state() == thread_state::BLOCKED) break;
+        yield();
+    }
+    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
     ev.signal_set(TEST_SIGNAL);
     sleep_ticks(3);  // give it slices; a wrongly-woken waiter would have advanced by now
     KTEST_EXPECT_EQUAL(phase, 1);
@@ -170,6 +183,11 @@ KTEST(sched_signal_waiter_ignores_wake_one, "kernel/sched") {
     KTEST_UNWRAP(t, spawn("sigwait", signal_wait_thread, &args));
     for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
     KTEST_REQUIRE_EQUAL(phase, 1);
+    for (int i = 0; i < 100000; ++i) {
+        if (t->state() == thread_state::BLOCKED) break;
+        yield();
+    }
+    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
     ev.waiters().wake_one();
     sleep_ticks(3);
     KTEST_EXPECT_EQUAL(phase, 1);
@@ -177,6 +195,36 @@ KTEST(sched_signal_waiter_ignores_wake_one, "kernel/sched") {
     ev.signal_set(TEST_SIGNAL);
     for (int i = 0; i < 100000 && phase != 2; ++i) { yield(); }
     KTEST_EXPECT_EQUAL(phase, 2);
+}
+
+namespace {
+volatile int g_sem_phase;
+void sem_acquirer_thread(void* arg) {
+    auto* sem   = static_cast<kernel::obj::Semaphore*>(arg);
+    g_sem_phase = 1;
+    sem->acquire();
+    g_sem_phase = 2;
+}
+}  // namespace
+
+KTEST(sched_semaphore_blocks_and_wakes, "kernel/sched") {
+    auto sem    = ktl::make_ref<kernel::obj::Semaphore>(0u);
+    g_sem_phase = 0;
+    KTEST_UNWRAP(t, spawn("acquirer", sem_acquirer_thread, sem.get()));
+    for (int i = 0; i < 100000 && g_sem_phase == 0; ++i) { yield(); }
+    KTEST_REQUIRE_EQUAL(g_sem_phase, 1);
+    for (int i = 0; i < 100000; ++i) {
+        if (t->state() == thread_state::BLOCKED) break;
+        yield();
+    }
+    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    sleep_ticks(3);  // must stay blocked across slices
+    KTEST_EXPECT_EQUAL(g_sem_phase, 1);
+    sem->release();
+    for (int i = 0; i < 100000 && g_sem_phase != 2; ++i) { yield(); }
+    KTEST_EXPECT_EQUAL(g_sem_phase, 2);
+    uint32_t sig = t->wait_signals(kernel::sched::Thread::SIGNAL_TERMINATED);
+    KTEST_EXPECT_TRUE((sig & kernel::sched::Thread::SIGNAL_TERMINATED) != 0);
 }
 
 #endif

@@ -2,6 +2,7 @@
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/obj/object.h>
+#include <kernel/obj/semaphore.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/thread.h>
 #include <kernel/sched/wait_queue.h>
@@ -114,6 +115,18 @@ uint32_t Object::wait_signals(uint32_t mask) {
         cur = signals();
     }
     return cur;
+}
+
+void Semaphore::acquire() {
+    while (!try_acquire()) {
+        // mask 0: woken by release()'s wake_one, never by signal waiters' wake_matching.
+        waiters().block_if(0, [](void* p) { return static_cast<Semaphore*>(p)->count() == 0; }, this);
+    }
+}
+
+void Semaphore::release() {
+    __atomic_fetch_add(&m_count, 1, __ATOMIC_RELEASE);
+    waiters().wake_one();
 }
 
 }  // namespace kernel::obj
