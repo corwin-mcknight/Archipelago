@@ -37,7 +37,9 @@ template <typename... Args>
 void emit_harness_event(kernel::shell::ShellOutput& output, const char* fmt, const Args&... args) {
     ktl::fixed_string<kHarnessBufferSize> buffer;
     ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-    output.write(buffer.c_str());
+    // Atomic: an interrupt-context log line splicing into a protocol event corrupts the
+    // harness JSON stream (seen live with the unhandled-vector warning during interrupt tests).
+    output.write_atomic(buffer.c_str());
 }
 
 void reset_test_state() {

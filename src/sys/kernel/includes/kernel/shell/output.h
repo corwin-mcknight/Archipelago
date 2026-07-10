@@ -4,6 +4,7 @@
 
 #if CONFIG_KERNEL_SHELL
 
+#include <kernel/arch.h>
 #include <kernel/drivers/uart.h>
 
 #include <ktl/fixed_string>
@@ -22,9 +23,15 @@ class ShellOutput {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
         if (protocol_mode_) {
+            // Protocol lines must reach the wire unspliced: a log write from interrupt context
+            // (or from another thread after a preemption) landing mid-line corrupts the harness
+            // JSON stream. Interrupts stay off for the whole line; protocol mode only runs under
+            // QEMU, whose virtual UART drains fast enough that the window is microseconds.
+            uint64_t flags = kernel::arch::save_and_disable_interrupts();
             write("@@HARNESS {\"event\":\"result\",\"text\":\"");
             write_json_escaped(buffer.c_str());
             write("\"}\n");
+            kernel::arch::restore_interrupts(flags);
         } else {
             write(buffer.c_str());
         }
@@ -34,14 +41,26 @@ class ShellOutput {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
         if (protocol_mode_) {
+            // Same anti-splice guard as print(); see the comment there.
+            uint64_t flags = kernel::arch::save_and_disable_interrupts();
             write("@@HARNESS ");
             write(buffer.c_str());
             write("\n");
+            kernel::arch::restore_interrupts(flags);
         }
     }
 
     void write(const char* s);
     void write_char(char c);
+
+    // Writes a complete, pre-formatted harness protocol line with interrupts disabled so log
+    // writes from interrupt context (or another thread after a preemption) cannot splice into
+    // it; see print() for the full rationale.
+    void write_atomic(const char* s) {
+        uint64_t flags = kernel::arch::save_and_disable_interrupts();
+        write(s);
+        kernel::arch::restore_interrupts(flags);
+    }
 
    private:
     // Writes the string while escaping JSON-special characters so the result is safe to embed
