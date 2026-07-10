@@ -41,7 +41,8 @@ class wait_queue {
 
     // Park the current thread. should_block is evaluated under the queue lock, closing the
     // check-then-block race against wakers that publish state before waking: pass nullptr to
-    // block unconditionally.
+    // block unconditionally. Callers must enter with interrupts enabled -- the entry/woke
+    // lifecycle log lines assume it.
     void block_if(uint32_t mask, bool (*should_block)(void*), void* ctx);
     void block(uint32_t mask = 0) { block_if(mask, nullptr, nullptr); }
 

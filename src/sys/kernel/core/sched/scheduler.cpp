@@ -341,9 +341,11 @@ global_stats stats_snapshot() {
     s.sleepers     = g_sleepers.size();
     s.zombies      = g_zombies.size();
     // Charge the running thread's in-progress slice so idle/busy shares are current.
-    uint64_t now   = kernel::arch::timestamp();
-    c.current->stats().cpu_cycles += now - g_last_switch_ts;
-    g_last_switch_ts = now;
+    if (c.current) {
+        uint64_t now = kernel::arch::timestamp();
+        c.current->stats().cpu_cycles += now - g_last_switch_ts;
+        g_last_switch_ts = now;
+    }
     if (c.idle) { s.idle_cycles = c.idle->stats().cpu_cycles; }
     kernel::arch::restore_interrupts(flags);
     return s;
