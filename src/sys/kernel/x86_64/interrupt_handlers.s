@@ -2,6 +2,7 @@
 
 extern k_exception_handler
 extern k_irq_handler
+extern g_kstack_floor
 
 %macro isr_handler 2
 global %1
@@ -28,6 +29,8 @@ global %1
 %endmacro
 
 isr_common:
+    cmp rsp, [rel g_kstack_floor]
+    jb trap_sp_overflow
     rframe_save
     mov rdi, rsp                ; First argument is the register file
     xor rbp, rbp                ; New stack frame
@@ -38,6 +41,8 @@ isr_common:
     iretq                       ; Return
 
 irq_common:
+    cmp rsp, [rel g_kstack_floor]
+    jb trap_sp_overflow
     rframe_save
     mov rdi, rsp                ; First argument is the register file
     xor rbp, rbp                ; New stack frame
@@ -96,3 +101,15 @@ irq_handler         interrupt_irq12, 44
 irq_handler         interrupt_irq13, 45
 irq_handler         interrupt_irq14, 46
 irq_handler         interrupt_irq15, 47
+
+extern x86_trap_stack_overflow
+
+; sp is untrustworthy here; adopt the emergency stack and hand off to a noreturn panic.
+trap_sp_overflow:
+    lea rsp, [rel emergency_stack_top]
+    call x86_trap_stack_overflow
+
+section .bss
+align 16
+emergency_stack: resb 4096
+emergency_stack_top:

@@ -1,11 +1,14 @@
 #include <kernel/crash.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.h>
+#include <kernel/panic.h>
 #include <kernel/registers.h>
 #include <kernel/x86/descriptor_tables.h>
 #include <kernel/x86/ioport.h>
 
 extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
+
+extern "C" [[noreturn]] void x86_trap_stack_overflow() { panic("kernel stack overflow (trap below stack floor)"); }
 
 extern "C" void k_exception_handler(register_frame_t* regs) {
     // Page faults get one shot at demand-paging resolution before the crash

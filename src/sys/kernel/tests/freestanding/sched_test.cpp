@@ -227,4 +227,17 @@ KTEST(sched_semaphore_blocks_and_wakes, "kernel/sched") {
     KTEST_EXPECT_TRUE((sig & kernel::sched::Thread::SIGNAL_TERMINATED) != 0);
 }
 
+namespace {
+volatile uint64_t g_recursion_sink;
+__attribute__((noinline)) uint64_t recurse_forever(uint64_t depth) {
+    volatile uint64_t pad[32];
+    pad[0]           = depth;
+    g_recursion_sink = pad[0];
+    if (depth < (1ull << 40)) { return recurse_forever(depth + 1) + pad[31]; }
+    return pad[31];
+}
+}  // namespace
+
+KTEST_CRASH_TEST(sched_stack_tripwire, "kernel/sched") { (void)recurse_forever(0); }
+
 #endif
