@@ -39,6 +39,14 @@ void wait_for_interrupt();
 /// interrupts, calls entry(arg), and falls into sched_thread_exit(). Returns the initial sp.
 uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* arg);
 
+/// Raw CPU cycle counter (TSC on x86_64, time CSR on riscv64). Monotonic on the calling core.
+uint64_t timestamp();
+/// Cycles per second for timestamp(), 0 if not yet calibrated (readers must handle 0).
+uint64_t timestamp_hz();
+/// Establish timestamp_hz(). Requires a ticking kernel timer and interrupts enabled;
+/// called once from late boot before the scheduler starts.
+void timestamp_calibrate();
+
 }  // namespace kernel::arch
 
 /// Callee-saved context switch: pushes callee-saved registers on the current stack, stores the

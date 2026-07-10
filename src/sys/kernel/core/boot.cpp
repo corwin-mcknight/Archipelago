@@ -1,3 +1,4 @@
+#include <kernel/arch.h>
 #include <kernel/boot.h>
 #include <kernel/obj/handle_table.h>
 #include <kernel/sched/scheduler.h>
@@ -177,6 +178,7 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
                            .unwrap();
     kernel_task->handles().get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
+    kernel::arch::timestamp_calibrate();
     kernel::sched::init(boot_core_index);
 
     bool shell_boot = resolve_shell_boot();

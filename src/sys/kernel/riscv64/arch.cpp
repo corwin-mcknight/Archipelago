@@ -82,4 +82,16 @@ uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* 
     return sp;
 }
 
+uint64_t timestamp() {
+    uint64_t t;
+    asm volatile("rdtime %0" : "=r"(t));
+    return t;
+}
+
+// QEMU virt's timebase, matching the SBI timer driver's hardcode; DTB-driven discovery for
+// real hardware (VisionFive 2: 4 MHz) is an existing todo shared with the timer.
+uint64_t timestamp_hz() { return 10'000'000; }
+
+void timestamp_calibrate() {}
+
 }  // namespace kernel::arch

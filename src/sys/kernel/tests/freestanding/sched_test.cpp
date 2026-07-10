@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/arch.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
@@ -239,5 +240,16 @@ __attribute__((noinline)) uint64_t recurse_forever(uint64_t depth) {
 }  // namespace
 
 KTEST_CRASH_TEST(sched_stack_tripwire, "kernel/sched") { (void)recurse_forever(0); }
+
+KTEST(sched_timestamp_monotonic_and_calibrated, "kernel/sched") {
+    uint64_t hz = kernel::arch::timestamp_hz();
+    KTEST_EXPECT_TRUE(hz > 0);  // riscv constant; x86 calibrated in late_boot
+    uint64_t a = kernel::arch::timestamp();
+    uint64_t b = kernel::arch::timestamp();
+    KTEST_EXPECT_TRUE(b >= a);
+    ktime_t t0 = kernel::time::now();
+    while (kernel::time::now() < t0 + 2) {}
+    KTEST_EXPECT_TRUE(kernel::arch::timestamp() > a);
+}
 
 #endif
