@@ -118,6 +118,12 @@ void yield() {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto& c        = cur_cpu();
     auto next      = c.run_queue.pop_front();
+    if (!next.has_value() && c.current.get() != c.idle.get()) {
+        // Queue empty: hand off to idle. The boot context runs as the idle thread and is never
+        // re-queued after a tick preemption, so a busy-yielding thread (the reaper, until it can
+        // block on a wait_queue) would otherwise starve it forever.
+        next = c.idle;
+    }
     if (next.has_value()) {
         if (c.current.get() != c.idle.get()) {
             c.current->set_state(thread_state::READY);
@@ -127,6 +133,21 @@ void yield() {
         switch_to(ktl::move(*next));
     }
     kernel::arch::restore_interrupts(flags);
+}
+
+void on_tick() {
+    if (!g_started) { return; }
+    auto& c = cur_cpu();
+    if (c.run_queue.size() == 0) { return; }
+    bool idle_running = (c.current.get() == c.idle.get());
+    if (!idle_running && c.current->decrement_slice() > 0) { return; }
+    auto next = c.run_queue.pop_front();
+    if (!idle_running) {
+        c.current->set_state(thread_state::READY);
+        bool ok = c.run_queue.push_back(c.current);
+        assert(ok, "on_tick: run queue allocation failed");
+    }
+    switch_to(ktl::move(*next));
 }
 
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {

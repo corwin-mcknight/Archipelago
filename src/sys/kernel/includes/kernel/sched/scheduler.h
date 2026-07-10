@@ -19,6 +19,8 @@ ktl::ref<Thread> current();
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg);
 
 void yield();
+// Timer-tick hook: slice accounting and preemption. Interrupt context only.
+void on_tick();
 [[noreturn]] void exit_current();
 [[noreturn]] void idle_loop();
 

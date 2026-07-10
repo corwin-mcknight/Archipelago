@@ -48,8 +48,9 @@ void sbi_timer::init() {
 time_ns_t sbi_timer::resolution_ns() { return static_cast<time_ns_t>(1'000'000'000ULL / TICK_HZ); }
 
 bool sbi_timer::handle_interrupt(register_frame_t*) {
-    kernel::time::tick();
+    // Re-arm first: tick() may preempt into another thread and not return for a full timeslice.
     sbi_set_timer(rdtime() + TICKS_PER_INTERVAL);
+    kernel::time::tick();
     return true;
 }
 

@@ -6,6 +6,7 @@
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
+#include <kernel/time.h>
 
 using namespace kernel::sched;
 
@@ -51,6 +52,28 @@ KTEST(sched_exit_reaps_thread, "kernel/sched") {
     }
     for (int i = 0; i < 100000 && g_type_registry.live_count(Thread::TYPE_ID) > before; ++i) { yield(); }
     KTEST_EXPECT_EQUAL(g_type_registry.live_count(Thread::TYPE_ID), before);
+}
+
+namespace {
+volatile uint64_t g_spin_count;
+volatile bool g_spin_stop;
+void spinner_thread(void*) {
+    while (!g_spin_stop) { g_spin_count = g_spin_count + 1; }
+}
+}  // namespace
+
+KTEST(sched_preempts_spinner, "kernel/sched") {
+    g_spin_count = 0;
+    g_spin_stop  = false;
+    KTEST_UNWRAP(t, spawn("spinner", spinner_thread, nullptr));
+    // Busy-wait WITHOUT yielding: only preemption can give the spinner CPU time.
+    ktime_t start = kernel::time::now();
+    while (kernel::time::now() < start + 3 * CONFIG_SCHED_TIMESLICE_TICKS) {}
+    uint64_t observed = g_spin_count;
+    g_spin_stop       = true;
+    KTEST_EXPECT_TRUE(observed > 0);
+    for (int i = 0; i < 100000 && t->state() != thread_state::DEAD; ++i) { yield(); }
+    KTEST_EXPECT_TRUE(t->state() == thread_state::DEAD);
 }
 
 #endif

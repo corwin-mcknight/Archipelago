@@ -25,9 +25,10 @@ extern "C" void k_exception_handler(register_frame_t* regs) {
 }
 
 extern "C" void k_irq_handler(register_frame_t* regs) {
-    g_interrupt_manager.dispatch_interrupt((unsigned int)regs->int_no, regs);
-
-    // Send end of interrupt to PIC
+    // EOI first: the tick handler may switch threads and not return here for a while. PIC lines
+    // are edge-triggered, so early EOI cannot re-raise a level.
     if (regs->int_no >= 40) { outb(0xA0, 0x20); }
     outb(0x20, 0x20);
+
+    g_interrupt_manager.dispatch_interrupt((unsigned int)regs->int_no, regs);
 }

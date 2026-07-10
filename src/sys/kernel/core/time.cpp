@@ -1,9 +1,14 @@
 #include "kernel/time.h"
 
+#include "kernel/sched/scheduler.h"
+
 ktl::atomic<ktime_t> kernel::time::_now = 0;
 time_ns_t kernel::time::_ns_per_tick    = 0;
 
-void kernel::time::tick() { _now.fetch_add(1, ktl::memory_order::relaxed); }
+void kernel::time::tick() {
+    _now.fetch_add(1, ktl::memory_order::relaxed);
+    kernel::sched::on_tick();
+}
 ktime_t kernel::time::now() { return _now.load(ktl::memory_order::relaxed); }
 time_ns_t kernel::time::ns_since_boot() {
     return (time_ns_t)((uint64_t)_now.load(ktl::memory_order::relaxed) * (uint64_t)_ns_per_tick);
