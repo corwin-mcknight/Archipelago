@@ -6,6 +6,7 @@
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
+#include <kernel/sched/wait_queue.h>
 #include <kernel/time.h>
 
 using namespace kernel::sched;
@@ -74,6 +75,35 @@ KTEST(sched_preempts_spinner, "kernel/sched") {
     KTEST_EXPECT_TRUE(observed > 0);
     for (int i = 0; i < 100000 && t->state() != thread_state::DEAD; ++i) { yield(); }
     KTEST_EXPECT_TRUE(t->state() == thread_state::DEAD);
+}
+
+namespace {
+kernel::sched::wait_queue g_test_wq;
+volatile int g_blocked_phase;
+void blocker_thread(void*) {
+    g_blocked_phase = 1;
+    g_test_wq.block();
+    g_blocked_phase = 2;
+}
+}  // namespace
+
+KTEST(sched_sleep_advances_time, "kernel/sched") {
+    ktime_t before = kernel::time::now();
+    sleep_ticks(5);
+    KTEST_EXPECT_TRUE(kernel::time::now() >= before + 5);
+}
+
+KTEST(sched_block_and_wake, "kernel/sched") {
+    g_blocked_phase = 0;
+    KTEST_UNWRAP(t, spawn("blocker", blocker_thread, nullptr));
+    for (int i = 0; i < 100000 && g_blocked_phase == 0; ++i) { yield(); }
+    KTEST_REQUIRE_EQUAL(g_blocked_phase, 1);
+    sleep_ticks(3);  // give it slices; it must stay blocked, not spin
+    KTEST_EXPECT_EQUAL(g_blocked_phase, 1);
+    KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
+    g_test_wq.wake_one();
+    for (int i = 0; i < 100000 && g_blocked_phase != 2; ++i) { yield(); }
+    KTEST_EXPECT_EQUAL(g_blocked_phase, 2);
 }
 
 #endif

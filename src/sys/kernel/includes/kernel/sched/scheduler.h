@@ -19,6 +19,9 @@ ktl::ref<Thread> current();
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg);
 
 void yield();
+// Block the current thread until at least `ticks` kernel ticks have elapsed. The idle thread
+// must never sleep.
+void sleep_ticks(uint64_t ticks);
 // Timer-tick hook: slice accounting and preemption. Interrupt context only.
 void on_tick();
 [[noreturn]] void exit_current();

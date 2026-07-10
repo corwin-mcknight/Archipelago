@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/obj/types.h>
+#include <kernel/sched/wait_queue.h>
 
 #include <ktl/atomic>
 
@@ -23,11 +24,15 @@ class Object {
     void signal_set(uint32_t bits);
     void signal_clear(uint32_t bits);
 
+    /// Waiters parked on this object's signals (and, for Semaphore, its counter).
+    kernel::sched::wait_queue& waiters() { return m_waiters; }
+
    private:
     ObjectId m_id;
     TypeId m_type_id;
     const char* m_name = nullptr;
     ktl::atomic<uint32_t> m_signals{0};
+    kernel::sched::wait_queue m_waiters;
 
     static ObjectId allocate_id();
 };

@@ -7,9 +7,12 @@
 #include <kernel/panic.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
+#include <kernel/sched/wait_queue.h>
+#include <kernel/time.h>
 
 #include <ktl/deque>
 #include <ktl/stack>
+#include <ktl/vector>
 
 extern uintptr_t g_hhdm_offset;
 
@@ -45,6 +48,13 @@ bool g_started = false;
 // bounded by the peak live thread count.
 ktl::deque<ktl::ref<Thread>> g_zombies;
 ktl::stack<kernel::mm::vm_paddr_t> g_stack_cache;
+wait_queue g_reaper_wq;
+
+struct sleeper {
+    ktime_t wake_at = 0;
+    ktl::ref<Thread> thread;
+};
+ktl::vector<sleeper> g_sleepers;
 
 // Interrupts must be disabled. Returns when this thread is next switched in.
 void switch_to(ktl::ref<Thread> next) {
@@ -80,8 +90,7 @@ void reap(ktl::ref<Thread> zombie) {
         zombie         = g_zombies.pop_front();
         kernel::arch::restore_interrupts(flags);
         if (!zombie.has_value()) {
-            // ponytail: busy-yield until wait_queue lands (next tasks); then this blocks.
-            yield();
+            g_reaper_wq.block_if(0, [](void*) { return g_zombies.size() == 0; }, nullptr);
             continue;
         }
         reap(ktl::move(*zombie));
@@ -120,8 +129,10 @@ void yield() {
     auto next      = c.run_queue.pop_front();
     if (!next.has_value() && c.current.get() != c.idle.get()) {
         // Queue empty: hand off to idle. The boot context runs as the idle thread and is never
-        // re-queued after a tick preemption, so a busy-yielding thread (the reaper, until it can
-        // block on a wait_queue) would otherwise starve it forever.
+        // re-queued after a tick preemption, so a cooperatively-yielding thread would otherwise
+        // starve it forever.
+        // ponytail: this is a double-switch per empty-queue yield (caller -> idle, then idle's
+        // own yield back out); revisit if this path ever gets hot.
         next = c.idle;
     }
     if (next.has_value()) {
@@ -135,9 +146,36 @@ void yield() {
     kernel::arch::restore_interrupts(flags);
 }
 
+void sleep_ticks(uint64_t ticks) {
+    if (ticks == 0) {
+        yield();
+        return;
+    }
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    auto& c        = cur_cpu();
+    assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
+    c.current->set_state(thread_state::BLOCKED);
+    bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
+    assert(ok, "sleep_ticks: sleeper allocation failed");
+    schedule_out();
+    kernel::arch::restore_interrupts(flags);
+}
+
 void on_tick() {
     if (!g_started) { return; }
     auto& c = cur_cpu();
+    // Wake due sleepers first so a woken thread can be this tick's switch target.
+    // ponytail: linear scan; a deadline-ordered list when thread counts grow.
+    for (size_t i = 0; i < g_sleepers.size();) {
+        if (g_sleepers[i].wake_at <= kernel::time::now()) {
+            ktl::ref<Thread> t = ktl::move(g_sleepers[i].thread);
+            g_sleepers[i]      = ktl::move(g_sleepers[g_sleepers.size() - 1]);
+            auto discard       = g_sleepers.pop_back();
+            make_ready(ktl::move(t));
+        } else {
+            ++i;
+        }
+    }
     if (c.run_queue.size() == 0) { return; }
     bool idle_running = (c.current.get() == c.idle.get());
     if (!idle_running && c.current->decrement_slice() > 0) { return; }
@@ -193,6 +231,7 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
     c.current->signal_set(Thread::SIGNAL_TERMINATED);
     bool ok = g_zombies.push_back(c.current);
     assert(ok, "exit_current: zombie list allocation failed");
+    g_reaper_wq.wake_one();
     schedule_out();
     panic("exit_current: switched back into a dead thread");
 }
@@ -215,9 +254,10 @@ void init(uint32_t boot_core_index) {
 }
 
 [[noreturn]] void idle_loop() {
-    // ponytail: cooperative hand-off only -- no tick preemption yet (a later milestone), so idle
-    // must actively yield to whatever is ready instead of just halting. yield() is a fast no-op
-    // when the run queue is empty, so this still spends most of its time halted in-between.
+    // Tick preemption (on_tick) switches threads in and out automatically, but idle itself is
+    // never preempted into -- it has to cooperatively yield to hand the CPU to a newly-ready
+    // thread. yield() is a fast no-op when the run queue is empty, so this still spends most of
+    // its time halted in-between.
     while (true) {
         yield();
         kernel::arch::wait_for_interrupt();
