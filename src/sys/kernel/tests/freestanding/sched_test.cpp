@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/obj/event.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
@@ -104,6 +105,78 @@ KTEST(sched_block_and_wake, "kernel/sched") {
     g_test_wq.wake_one();
     for (int i = 0; i < 100000 && g_blocked_phase != 2; ++i) { yield(); }
     KTEST_EXPECT_EQUAL(g_blocked_phase, 2);
+}
+
+namespace {
+void sleep_then_exit_thread(void*) { kernel::sched::sleep_ticks(3); }
+}  // namespace
+
+KTEST(sched_join_via_terminated_signal, "kernel/sched") {
+    KTEST_UNWRAP(t, spawn("mortal", sleep_then_exit_thread, nullptr));
+    uint32_t sig = t->wait_signals(Thread::SIGNAL_TERMINATED);
+    KTEST_EXPECT_TRUE((sig & Thread::SIGNAL_TERMINATED) != 0);
+    KTEST_EXPECT_TRUE(t->state() == thread_state::DEAD);
+}
+
+namespace {
+// Bundles a mask==0 waiter and a signal (nonzero-mask) waiter with the shared object they park on,
+// so the two directions of the mask-disjointness contract (wake_one/wake_matching only ever cross
+// their own lane) can be driven from a single spawned thread each.
+struct EventWaitArgs {
+    kernel::obj::Event* ev;
+    volatile int* phase;
+};
+
+constexpr uint32_t TEST_SIGNAL = 1u << 3;
+
+void mask_zero_wait_thread(void* arg) {
+    auto* a   = static_cast<EventWaitArgs*>(arg);
+    *a->phase = 1;
+    a->ev->waiters().block(0);
+    *a->phase = 2;
+}
+
+void signal_wait_thread(void* arg) {
+    auto* a   = static_cast<EventWaitArgs*>(arg);
+    *a->phase = 1;
+    a->ev->wait_signals(TEST_SIGNAL);
+    *a->phase = 2;
+}
+}  // namespace
+
+// wake_matching (driven here via signal_set) must never wake a mask==0 waiter -- only wake_one/
+// wake_all may.
+KTEST(sched_mask_zero_ignores_signal_wake, "kernel/sched") {
+    kernel::obj::Event ev;
+    volatile int phase = 0;
+    EventWaitArgs args{&ev, &phase};
+    KTEST_UNWRAP(t, spawn("mask0", mask_zero_wait_thread, &args));
+    for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
+    KTEST_REQUIRE_EQUAL(phase, 1);
+    ev.signal_set(TEST_SIGNAL);
+    sleep_ticks(3);  // give it slices; a wrongly-woken waiter would have advanced by now
+    KTEST_EXPECT_EQUAL(phase, 1);
+    KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
+    ev.waiters().wake_one();
+    for (int i = 0; i < 100000 && phase != 2; ++i) { yield(); }
+    KTEST_EXPECT_EQUAL(phase, 2);
+}
+
+// wake_one/wake_all must never wake a signal (nonzero-mask) waiter -- only wake_matching may.
+KTEST(sched_signal_waiter_ignores_wake_one, "kernel/sched") {
+    kernel::obj::Event ev;
+    volatile int phase = 0;
+    EventWaitArgs args{&ev, &phase};
+    KTEST_UNWRAP(t, spawn("sigwait", signal_wait_thread, &args));
+    for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
+    KTEST_REQUIRE_EQUAL(phase, 1);
+    ev.waiters().wake_one();
+    sleep_ticks(3);
+    KTEST_EXPECT_EQUAL(phase, 1);
+    KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
+    ev.signal_set(TEST_SIGNAL);
+    for (int i = 0; i < 100000 && phase != 2; ++i) { yield(); }
+    KTEST_EXPECT_EQUAL(phase, 2);
 }
 
 #endif

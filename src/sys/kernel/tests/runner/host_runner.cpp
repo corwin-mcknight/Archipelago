@@ -206,6 +206,13 @@ uint64_t save_and_disable_interrupts() { return 0; }
 void restore_interrupts(uint64_t) {}
 }  // namespace kernel::arch
 
+// Object signal wakes route into the scheduler, which does not exist on the host. Hosted tests
+// exercise signal bits only; blocking waits are QEMU-tier.
+namespace kernel::obj {
+class Object;
+void object_signal_wake(Object*) {}
+}  // namespace kernel::obj
+
 // Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child
 // _exit()s, which skips the runtime's atexit writer, so we flush this child's counters explicitly.
 // Weak: in a normal (non-coverage) build the symbol is absent and the call is skipped.

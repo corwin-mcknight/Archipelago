@@ -27,6 +27,10 @@ class Object {
     /// Waiters parked on this object's signals (and, for Semaphore, its counter).
     kernel::sched::wait_queue& waiters() { return m_waiters; }
 
+    /// Block the calling thread until any signal bit in mask is set; returns the signals
+    /// observed. mask must be nonzero. Kernel-only (defined in core/sched/wait_queue.cpp).
+    uint32_t wait_signals(uint32_t mask);
+
    private:
     ObjectId m_id;
     TypeId m_type_id;
@@ -38,5 +42,9 @@ class Object {
 };
 
 void obj_init();
+
+/// Wake waiters whose mask matches the object's current signals. Implemented by the scheduler
+/// layer in kernel builds and stubbed by the host runner (hosted tests see signal bits only).
+void object_signal_wake(Object* obj);
 
 }  // namespace kernel::obj

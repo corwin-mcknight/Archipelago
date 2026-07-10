@@ -14,6 +14,9 @@ void init(uint32_t boot_core_index);
 bool started();
 
 ktl::ref<Thread> current();
+// True if the current thread is the idle thread. The idle thread must never block: it is the
+// scheduler's fallback when the run queue is empty, so parking it would wedge the core.
+bool current_is_idle();
 
 // Create a kernel thread under task zero and make it runnable. name must be a string literal.
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg);

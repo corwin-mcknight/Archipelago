@@ -108,6 +108,14 @@ ktl::ref<Thread> current() {
     return t;
 }
 
+bool current_is_idle() {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    auto& c        = cur_cpu();
+    bool idle      = c.current.get() == c.idle.get();
+    kernel::arch::restore_interrupts(flags);
+    return idle;
+}
+
 void make_ready(ktl::ref<Thread> thread) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     assert(thread->state() == thread_state::BLOCKED, "make_ready: thread is not blocked");
