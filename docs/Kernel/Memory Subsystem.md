@@ -22,7 +22,8 @@ Free pushes the returned page to the dirty pool without scrubbing it.
 The PMM never hands out a dirty page.
 
 A background zeroing worker is the intended steady-state mechanism for moving pages from dirty to zeroed.
-Until the scheduler exists, the inline fallback in allocation is the only path that performs zeroing, and the dirty pool is also drained on demand.
+Until the background zeroing worker is built, the inline fallback in allocation remains the only path that performs zeroing.
+The dirty pool is also drained on demand.
 
 The PMM only counts reserved pages -- it does not own a list of reserved physical ranges.
 Tracking specific kernel-occupied ranges belongs to the VMM, which receives them at init separately from the PMM's free-page accounting.

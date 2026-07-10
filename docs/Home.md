@@ -7,6 +7,7 @@ Today, Archipelago provides a small kernel with boot, memory-management, testing
 - [[Boot Process]]: Limine handoff, early heap, SMP bringup
 - [[Memory Subsystem]]: Current allocators plus planned virtual memory design
 - [[Interrupt Model]]: Current interrupt dispatch plus planned object-model direction
+- [[Scheduling]]: Kernel-owned round-robin scheduler for kernel threads
 - [[Device Drivers]]: Planned userspace driver model plus today's bootstrap UART/PIT drivers
 - [[KTL]]: Freestanding container library
 - [[Configuration]]: Compile-time constants
@@ -20,7 +21,6 @@ The following pages describe the long-term design for Archipelago. These feature
 - [[Object Model]]: Typed kernel objects and capability handles
 - [[Handle Table]]: Per-process handle management
 - [[Task Model]]: Tasks, threads, and the kernel as task zero
-- [[Scheduling]]: Kernel-owned round-robin scheduler
 - [[Syscall Interface]]: Single entry point and three-path dispatch
 - [[IPC Primitives]]: Inter-process communication
 - [[Object Transaction Programs]]: Programmable dispatch optimization

@@ -1,7 +1,8 @@
 # Task Model
 
-> [!info] Design
-> This feature is not yet implemented. This page describes the planned design.
+> [!info] Partial Implementation
+> The kernel runs today as task zero, with its own handle table and threads.
+> Userspace tasks, ELF loading, and task creation and teardown are not yet implemented; the rest of this page describes the planned design.
 
 A task is the unit of isolation in Archipelago.
 It is deliberately not called a "process" -- there is no UNIX lineage here.

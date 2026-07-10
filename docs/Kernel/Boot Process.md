@@ -40,7 +40,8 @@ See [[Memory Subsystem#Physical Memory Manager]].
 If `CONFIG_KERNEL_TESTING` is enabled (the default), the kernel enters the test runner.
 See [[Testing]].
 
-Otherwise, the kernel currently panics. There is no scheduler or userspace yet.
+Otherwise, the boot context becomes the idle thread, and the shell runs as a kernel thread when shell boot is selected.
+There is still no userspace.
 
 ## Limine Requests
 The kernel communicates with Limine through request structures placed in the `__limine_requests` linker section (`limine.cpp`).

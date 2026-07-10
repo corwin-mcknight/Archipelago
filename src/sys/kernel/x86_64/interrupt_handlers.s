@@ -105,6 +105,9 @@ irq_handler         interrupt_irq15, 47
 extern x86_trap_stack_overflow
 
 ; sp is untrustworthy here; adopt the emergency stack and hand off to a noreturn panic.
+; No IST-backed stacks yet, so a fault or NMI during the panic path below re-enters
+; isr_common on this same live emergency stack; bounded today only by crash.cpp's
+; g_in_dump recursion guard, not by hardware stack switching.
 trap_sp_overflow:
     lea rsp, [rel emergency_stack_top]
     call x86_trap_stack_overflow

@@ -30,7 +30,7 @@
 - rb_tree has no reverse iteration or predecessor query; find_le covers the interval-lookup need for now.
 
 ## Memory Management
-- Background page-zeroing worker thread (gated on scheduler).
+- Background page-zeroing worker thread.
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Implement NUMA awareness and reserved region handling.
 - Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
@@ -48,10 +48,12 @@
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
 ## Scheduler & Concurrency
-- Extend the round-robin scheduler to multiple cores (currently single-core: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design).
-- Implement timeslice accounting (tick-driven preemption) and cross-CPU load balancing.
-- Add a kernel mutex (blocking lock) and contention diagnostics; spinlocks and a semaphore already exist in `kernel/synchronization/`.
-- Back per-core identity with a GS-based per-CPU pointer when interrupt or scheduler code starts needing the calling core -- the CPUID-based current_core_index() is currently dead code with no callers; make per-core lapic_id atomic to close the bring-up read/write race.
+- Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs a per-core (LAPIC) timer driver, wake IPIs, and a reaper switch-completed handshake.
+- Cross-CPU load balancing, once multi-core scheduling lands.
+- Add a kernel mutex (blocking lock) and contention diagnostics; spinlocks and a blocking Semaphore object already exist.
+- Back per-core identity with a GS-based per-CPU pointer -- a prerequisite for AP scheduling (interrupt and scheduler code need to know the calling core); the CPUID-based current_core_index() is currently dead code with no callers; make per-core lapic_id atomic to close the bring-up read/write race.
+- VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
+- IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 
 ## Handles & Syscalls
 - Implement handle transfer between tables for cross-process capability passing.
@@ -89,10 +91,11 @@
 - Continue growing driver/core unit and stress coverage where gaps remain; add IPC suites once the IPC subsystem exists.
 - VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands), OOM paths in the fault/commit paths (needs PMM fault injection), and the shell `vm` command output (no automated harness coverage).
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
-- Extend the fuzz harness to memory-subsystem interfaces now; add scheduler/syscall fuzz targets once those subsystems exist.
+- Extend the fuzz harness to memory-subsystem interfaces now; add scheduler fuzz targets (run-queue rotation, wait-queue bookkeeping, signal-mask matching) now that the scheduler exists, and syscall fuzz targets once syscalls exist.
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
+- Task's thread-list removal performs a live self-move when removing the last element, and the same swap-remove idiom is duplicated across scheduler, wait-queue, and task code; a shared KTL swap-remove helper plus a host test for the last-element case would pin it.
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/drivers/pit.cpp`, and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience
