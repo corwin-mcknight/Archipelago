@@ -82,6 +82,7 @@
 - Expand x86_64 bring-up with APIC/IOAPIC, HPET, and interrupt controller configuration.
 - Add keyboard (PS/2) and framebuffer/console drivers; wire the Limine framebuffer request (UART hardening already landed).
 - UART: pre-init panics lose their output (writes before init are dropped by the health gate); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
+- UART RX interrupt path (IOAPIC/PLIC routing) so shell input can block on a wait queue instead of sleep-polling; QEMU's chardev backpressure makes the current 1 ms poll lossless, but a real 16550's 16-byte FIFO would drop pasted input.
 - Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers.
 
 ## Security & Reliability

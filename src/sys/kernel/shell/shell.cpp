@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/drivers/uart.h>
+#include <kernel/sched/scheduler.h>
 
 #include <ktl/algorithm>
 #include <ktl/maybe>
@@ -23,6 +24,12 @@ bool g_boot_continue = false;
 void read_line(char* buffer, size_t buffer_size) {
     size_t idx = 0;
     while (idx < buffer_size - 1) {
+        // Sleep-poll instead of busy-waiting in uart.read() so idle absorbs the wait between
+        // keystrokes; buffered bytes drain back-to-back because received_data() stays set.
+        // QEMU's chardev backpressure holds input while we sleep, so a 1 ms gap loses nothing.
+        // ponytail: poll+sleep; UART RX interrupt wakeup once IOAPIC/PLIC routing exists (real
+        // 16550 FIFOs are 16 bytes and would overflow on paste without it).
+        while (uart.received_data() == 0) { kernel::sched::sleep_ticks(1); }
         char c = uart.read();
         if (c == '\r' || c == '\n') {
             g_output.write("\r\n");
