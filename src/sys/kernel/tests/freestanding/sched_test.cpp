@@ -13,6 +13,8 @@
 #include <kernel/time.h>
 
 #include <ktl/ref>
+#include <ktl/string_view>
+#include <ktl/vector>
 
 using namespace kernel::sched;
 
@@ -309,6 +311,21 @@ KTEST(sched_global_stats_advance, "kernel/sched") {
     KTEST_EXPECT_TRUE(s1.sleep_switches > s0.sleep_switches);
     KTEST_EXPECT_TRUE(s1.boot_ts == s0.boot_ts);
     KTEST_EXPECT_TRUE(s1.boot_ts != 0);
+}
+
+KTEST(sched_idle_state_truthful_while_switched_out, "kernel/sched") {
+    // We (the kshell thread) are RUNNING, so on a single scheduling core idle must report READY,
+    // never a second RUNNING.
+    ktl::vector<ktl::ref<Thread>> threads;
+    KTEST_REQUIRE_TRUE(kernel::sched::kernel_task()->snapshot_threads(threads));
+    bool found_idle = false;
+    for (size_t i = 0; i < threads.size(); ++i) {
+        if (threads[i]->name() != nullptr && ktl::string_view(threads[i]->name()) == "idle0") {
+            found_idle = true;
+            KTEST_EXPECT_TRUE(threads[i]->state() == thread_state::READY);
+        }
+    }
+    KTEST_REQUIRE_TRUE(found_idle);
 }
 
 #endif

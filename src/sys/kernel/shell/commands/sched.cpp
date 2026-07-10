@@ -9,6 +9,7 @@
 #include <kernel/sched/trace.h>
 #include <kernel/shell/output.h>
 
+#include <ktl/fmt>
 #include <ktl/ref>
 #include <ktl/string_view>
 #include <ktl/vector>
@@ -60,13 +61,21 @@ ktl::maybe<size_t> parse_size(ktl::string_view sv) {
     return v;
 }
 
-void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t hz) {
+// Renders a cycle count into buf ("1.71s", "454us", "123cyc") and returns buf for inline use.
+const char* human_str(char* buf, size_t len, uint64_t cycles, uint64_t hz) {
     auto h = cycles_to_human(cycles, hz);
     if (h.unit[0] == 'c' || h.unit[0] == 'u') {
-        output.print("{0}{1}", h.whole, h.unit);
+        ktl::format::format_to_buffer_raw(buf, len, "{0}{1}", h.whole, h.unit);
     } else {
-        output.print("{0}.{1}{2}{3}", h.whole, h.hundredths / 10, h.hundredths % 10, h.unit);
+        ktl::format::format_to_buffer_raw(buf, len, "{0}.{1}{2}{3}", h.whole, h.hundredths / 10, h.hundredths % 10,
+                                          h.unit);
     }
+    return buf;
+}
+
+void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t hz) {
+    char buf[24];
+    output.print("{0}", human_str(buf, sizeof(buf), cycles, hz));
 }
 
 // Resolve an id through a threads snapshot; reaped threads print as bare ids.
@@ -97,22 +106,31 @@ void cmd_threads(kernel::shell::ShellOutput& output, bool top) {
     auto cur       = current();
     auto s         = stats_snapshot();
     uint64_t total = kernel::arch::timestamp() - s.boot_ts;
-    output.print("  ID NAME       STATE    CPU-TIME  {0}SCHED PRE  YLD  BLK  SLP  WAKE LAT-AVG LAT-MAX\n",
-                 top ? "%CPU " : "");
+    // Header and rows share one format string so the columns cannot drift apart.
+    constexpr const char* ROW_FMT =
+        "{0}{1:3} {2:-10} {3:-8} {4:9} {5:5} {6:5} {7:5} {8:5} {9:5} {10:5} {11:5} "
+        "{12:9} {13:9}\n";
+    output.print(ROW_FMT, " ", "ID", "NAME", "STATE", "CPU-TIME", "%CPU", "SCHED", "PRE", "YLD", "BLK", "SLP", "WAKE",
+                 "LAT-AVG", "LAT-MAX");
     for (size_t i = 0; i < threads.size(); ++i) {
         auto& t     = threads[i];
         auto& st    = t->stats();
         bool is_cur = cur && cur->id() == t->id();
-        output.print("{0} {1} {2} {3} ", is_cur ? ">" : " ", t->id(), t->name() ? t->name() : "?",
-                     state_name(t->state()));
-        print_human(output, st.cpu_cycles, hz);
-        if (top && total > 0) { output.print(" {0}%", st.cpu_cycles * 100 / total); }
-        output.print(" {0} {1} {2} {3} {4} {5} ", st.scheduled, st.preemptions, st.yields, st.blocks, st.sleeps,
-                     st.wakes);
-        print_human(output, st.scheduled ? st.lat_total_cycles / st.scheduled : 0, hz);
-        output.print(" ");
-        print_human(output, st.lat_max_cycles, hz);
-        output.print("\n");
+        char cpu_buf[24];
+        char pct_buf[8];
+        char lat_avg_buf[24];
+        char lat_max_buf[24];
+        if (total > 0) {
+            ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "{0}%", st.cpu_cycles * 100 / total);
+        } else {
+            ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "-");
+        }
+        output.print(
+            ROW_FMT, is_cur ? ">" : " ", t->id(), t->name() ? t->name() : "?", state_name(t->state()),
+            human_str(cpu_buf, sizeof(cpu_buf), st.cpu_cycles, hz), pct_buf, st.scheduled, st.preemptions, st.yields,
+            st.blocks, st.sleeps, st.wakes,
+            human_str(lat_avg_buf, sizeof(lat_avg_buf), st.scheduled ? st.lat_total_cycles / st.scheduled : 0, hz),
+            human_str(lat_max_buf, sizeof(lat_max_buf), st.lat_max_cycles, hz));
     }
 }
 

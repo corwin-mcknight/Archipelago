@@ -98,9 +98,12 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
     }
     trace_push(trace_kind::SWITCH, reason, c.current->id(), next->id());
 
+    Thread* outgoing = c.current.get();
+    // Callers park or re-queue the outgoing thread before switching; only the idle handoff paths
+    // leave it RUNNING (idle is never re-queued), so demote it here to keep reported state truthful.
+    if (outgoing->state() == thread_state::RUNNING) { outgoing->set_state(thread_state::READY); }
     next->set_state(thread_state::RUNNING);
     next->reset_slice();
-    Thread* outgoing = c.current.get();
     assert(c.previous.get() == nullptr, "switch_to: unfinished previous switch");
     c.previous     = ktl::move(c.current);
     c.current      = ktl::move(next);
