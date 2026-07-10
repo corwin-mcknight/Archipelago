@@ -25,6 +25,10 @@ class Task : public kernel::obj::Object {
     void remove_thread(kernel::obj::ObjectId thread_id);
     size_t thread_count();
 
+    // Copies refs to all threads under the task lock, so callers can inspect or format
+    // without holding it. Returns false if the copy failed to allocate.
+    bool snapshot_threads(ktl::vector<ktl::ref<Thread>>& out);
+
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
         return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE, RIGHT_READ);

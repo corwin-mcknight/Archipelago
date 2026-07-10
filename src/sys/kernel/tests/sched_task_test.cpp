@@ -8,6 +8,7 @@
 #include <kernel/sched/thread.h>
 
 #include <ktl/ref>
+#include <ktl/vector>
 
 using namespace kernel::sched;
 using namespace kernel::obj;
@@ -45,6 +46,19 @@ KTEST_WITH_INIT(sched_task_owns_handles, "sched/task", sched_task_init) {
     KTEST_UNWRAP(id, kt->handles().emplace<Event>(RIGHT_READ | RIGHT_SIGNAL));
     KTEST_EXPECT_EQUAL(kt->handles().count(), before + 1);
     KTEST_EXPECT_TRUE(kt->handles().close(id).is_ok());
+}
+
+KTEST_WITH_INIT(sched_task_snapshot_threads, "sched/task", sched_task_init) {
+    Task task;
+    auto t1 = ktl::make_ref<Thread>();
+    auto t2 = ktl::make_ref<Thread>();
+    KTEST_REQUIRE_TRUE(task.add_thread(t1).is_ok());
+    KTEST_REQUIRE_TRUE(task.add_thread(t2).is_ok());
+    ktl::vector<ktl::ref<Thread>> snap;
+    KTEST_REQUIRE_TRUE(task.snapshot_threads(snap));
+    KTEST_EXPECT_EQUAL(snap.size(), 2u);
+    task.remove_thread(t1->id());
+    KTEST_EXPECT_EQUAL(snap.size(), 2u);  // snapshot is a copy, not a view
 }
 
 #endif

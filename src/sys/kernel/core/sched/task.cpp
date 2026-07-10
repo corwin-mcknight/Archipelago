@@ -35,4 +35,12 @@ size_t Task::thread_count() {
     return m_threads.size();
 }
 
+bool Task::snapshot_threads(ktl::vector<ktl::ref<Thread>>& out) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    for (size_t i = 0; i < m_threads.size(); ++i) {
+        if (!out.push_back(m_threads[i])) { return false; }
+    }
+    return true;
+}
+
 }  // namespace kernel::sched

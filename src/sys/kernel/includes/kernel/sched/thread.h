@@ -13,6 +13,20 @@ using thread_entry_fn = void (*)(void*);
 
 enum class thread_state : uint32_t { READY = 0, RUNNING, BLOCKED, DEAD };
 
+// Per-thread scheduler accounting. Plain data: mutated only by the scheduler with interrupts
+// disabled on the scheduling core; read by the shell via snapshots.
+struct thread_stats {
+    uint64_t cpu_cycles       = 0;
+    uint64_t scheduled        = 0;
+    uint64_t preemptions      = 0;
+    uint64_t yields           = 0;
+    uint64_t blocks           = 0;
+    uint64_t sleeps           = 0;
+    uint64_t wakes            = 0;
+    uint64_t lat_total_cycles = 0;
+    uint64_t lat_max_cycles   = 0;
+};
+
 class Thread : public kernel::obj::Object {
    public:
     DECLARE_OBJECT_TYPE(Thread, kernel::obj::type_ids::THREAD)
@@ -46,6 +60,14 @@ class Thread : public kernel::obj::Object {
         return m_slice;
     }
 
+    thread_stats& stats() { return m_stats; }
+    const thread_stats& stats() const { return m_stats; }
+
+    // Timestamp of the last enqueue onto the run queue; 0 when not pending. Set at every
+    // enqueue, consumed (and zeroed) when the thread is switched in -- READY latency.
+    uint64_t ready_ts() const { return m_ready_ts; }
+    void set_ready_ts(uint64_t ts) { m_ready_ts = ts; }
+
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
         return registry.register_type(TYPE_ID, "thread", RIGHT_READ | RIGHT_WAIT | RIGHT_DUPLICATE,
@@ -59,6 +81,8 @@ class Thread : public kernel::obj::Object {
     uintptr_t m_kstack_floor = 0;
     uintptr_t m_saved_sp     = 0;
     uint32_t m_slice         = CONFIG_SCHED_TIMESLICE_TICKS;
+    thread_stats m_stats;
+    uint64_t m_ready_ts = 0;
 };
 
 }  // namespace kernel::sched

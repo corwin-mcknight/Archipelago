@@ -51,4 +51,22 @@ KTEST_WITH_INIT(sched_thread_terminated_signal, "sched/thread", sched_thread_ini
     KTEST_EXPECT_TRUE((t.signals() & Thread::SIGNAL_TERMINATED) != 0);
 }
 
+KTEST_WITH_INIT(sched_thread_stats_default_zero, "sched/thread", sched_thread_init) {
+    Thread t;
+    KTEST_EXPECT_EQUAL(t.stats().cpu_cycles, 0u);
+    KTEST_EXPECT_EQUAL(t.stats().scheduled, 0u);
+    KTEST_EXPECT_EQUAL(t.stats().lat_max_cycles, 0u);
+    KTEST_EXPECT_EQUAL(t.ready_ts(), 0u);
+}
+
+KTEST_WITH_INIT(sched_thread_stats_mutable, "sched/thread", sched_thread_init) {
+    Thread t;
+    t.stats().cpu_cycles += 100;
+    t.stats().preemptions += 1;
+    t.set_ready_ts(42);
+    KTEST_EXPECT_EQUAL(t.stats().cpu_cycles, 100u);
+    KTEST_EXPECT_EQUAL(t.stats().preemptions, 1u);
+    KTEST_EXPECT_EQUAL(t.ready_ts(), 42u);
+}
+
 #endif
