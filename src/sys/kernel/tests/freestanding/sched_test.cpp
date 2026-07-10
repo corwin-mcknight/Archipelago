@@ -252,4 +252,63 @@ KTEST(sched_timestamp_monotonic_and_calibrated, "kernel/sched") {
     KTEST_EXPECT_TRUE(kernel::arch::timestamp() > a);
 }
 
+namespace {
+volatile int g_acct_phase;
+void acct_thread(void*) {
+    g_acct_phase = 1;
+    kernel::sched::yield();
+    kernel::sched::sleep_ticks(2);
+}
+}  // namespace
+
+KTEST(sched_accounting_lifecycle_counters, "kernel/sched") {
+    g_acct_phase = 0;
+    KTEST_UNWRAP(t, spawn("acct", acct_thread, nullptr));
+    t->wait_signals(Thread::SIGNAL_TERMINATED);
+    KTEST_EXPECT_TRUE(t->stats().scheduled >= 2);  // initial run + wake from sleep
+    KTEST_EXPECT_TRUE(t->stats().yields >= 1);
+    KTEST_EXPECT_TRUE(t->stats().sleeps == 1);
+    KTEST_EXPECT_TRUE(t->stats().wakes >= 1);      // sleeper wake
+    KTEST_EXPECT_TRUE(t->stats().cpu_cycles > 0);  // sub-tick runtime still visible
+}
+
+KTEST(sched_accounting_latency_under_contention, "kernel/sched") {
+    g_spin_count = 0;
+    g_spin_stop  = false;
+    KTEST_UNWRAP(t, spawn("latspin", spinner_thread, nullptr));
+    ktime_t start = kernel::time::now();
+    while (kernel::time::now() < start + 3 * CONFIG_SCHED_TIMESLICE_TICKS) {}
+    g_spin_stop = true;
+    t->wait_signals(Thread::SIGNAL_TERMINATED);
+    KTEST_EXPECT_TRUE(t->stats().preemptions >= 1);
+    KTEST_EXPECT_TRUE(t->stats().lat_max_cycles > 0);  // waited while main held the CPU
+}
+
+KTEST(sched_trace_records_thread_life, "kernel/sched") {
+    kernel::sched::trace_clear();
+    KTEST_UNWRAP(t, spawn("traced", exit_immediately_thread, nullptr));
+    uint64_t tid = t->id();
+    t->wait_signals(Thread::SIGNAL_TERMINATED);
+    kernel::sched::trace_record recs[64];
+    size_t n = kernel::sched::trace_copy_newest(recs, 64);
+    KTEST_REQUIRE_TRUE(n > 0);
+    bool saw_spawn = false, saw_switch_in = false, saw_exit = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (recs[i].kind == kernel::sched::trace_kind::SPAWN && recs[i].to_id == tid) { saw_spawn = true; }
+        if (recs[i].kind == kernel::sched::trace_kind::SWITCH && recs[i].to_id == tid) { saw_switch_in = true; }
+        if (recs[i].kind == kernel::sched::trace_kind::EXIT && recs[i].from_id == tid) { saw_exit = true; }
+    }
+    KTEST_EXPECT_ALL(saw_spawn, saw_switch_in, saw_exit);
+}
+
+KTEST(sched_global_stats_advance, "kernel/sched") {
+    auto s0 = kernel::sched::stats_snapshot();
+    kernel::sched::sleep_ticks(2);
+    auto s1 = kernel::sched::stats_snapshot();
+    KTEST_EXPECT_TRUE(s1.switches > s0.switches);
+    KTEST_EXPECT_TRUE(s1.sleep_switches > s0.sleep_switches);
+    KTEST_EXPECT_TRUE(s1.boot_ts == s0.boot_ts);
+    KTEST_EXPECT_TRUE(s1.boot_ts != 0);
+}
+
 #endif

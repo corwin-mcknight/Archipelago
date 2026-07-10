@@ -2,6 +2,7 @@
 #pragma once
 
 #include <kernel/sched/thread.h>
+#include <kernel/sched/trace.h>
 
 #include <ktl/ref>
 #include <ktl/result>
@@ -31,9 +32,37 @@ void on_tick();
 [[noreturn]] void idle_loop();
 
 // wait_queue/scheduler internals. schedule_out() requires interrupts disabled and the current
-// thread already parked (BLOCKED/DEAD, or re-queued by the caller).
-void schedule_out();
+// thread already parked (BLOCKED/DEAD, or re-queued by the caller); reason tags the trace.
+void schedule_out(switch_reason reason);
 void make_ready(ktl::ref<Thread> thread);
+
+// Global scheduler counters plus live queue depths, snapshotted with interrupts disabled.
+struct global_stats {
+    uint64_t switches       = 0;
+    uint64_t preempts       = 0;
+    uint64_t yields         = 0;
+    uint64_t block_switches = 0;
+    uint64_t sleep_switches = 0;
+    uint64_t exit_switches  = 0;
+    uint64_t wakes          = 0;
+    uint64_t spawned        = 0;
+    uint64_t reaped         = 0;
+    uint64_t boot_ts        = 0;  // timestamp at sched::init
+    uint64_t idle_cycles    = 0;  // convenience copy of the idle thread's cpu_cycles
+    size_t runq_depth       = 0;
+    size_t sleepers         = 0;
+    size_t zombies          = 0;
+};
+global_stats stats_snapshot();
+
+// Flight-recorder access. Copies are taken with interrupts disabled; newest first.
+size_t trace_copy_newest(trace_record* out, size_t max);
+void trace_clear();
+
+// Lifecycle log stream (spawn/block/sleep/wake/exit/reap through g_log.debug). Default off.
+// Emit sites are interrupt-enabled contexts only -- never the switch path or tick handler.
+void set_lifecycle_log(bool enabled);
+bool lifecycle_log_enabled();
 
 }  // namespace kernel::sched
 

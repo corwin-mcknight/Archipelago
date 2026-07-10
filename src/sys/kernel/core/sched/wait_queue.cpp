@@ -1,6 +1,7 @@
 // src/sys/kernel/core/sched/wait_queue.cpp
 #include <kernel/arch.h>
 #include <kernel/assert.h>
+#include <kernel/log.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/semaphore.h>
 #include <kernel/sched/scheduler.h>
@@ -11,6 +12,7 @@ namespace kernel::sched {
 
 void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx) {
     assert(!current_is_idle(), "block_if: idle thread cannot block");
+    if (lifecycle_log_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     m_lock.lock();
     if (should_block != nullptr && !should_block(ctx)) {
@@ -19,14 +21,16 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
         return;
     }
     ktl::ref<Thread> self = current();
+    self->stats().blocks += 1;
     self->set_state(thread_state::BLOCKED);
     bool pushed = m_nodes.push_back(wait_node{ktl::move(self), mask});
     assert(pushed, "wait_queue: waiter allocation failed");
     m_lock.unlock();
     // Interrupts stay off between unlock and the switch: on the single scheduling core nothing
     // can run and wake us in that window.
-    schedule_out();
+    schedule_out(switch_reason::BLOCK);
     kernel::arch::restore_interrupts(flags);
+    if (lifecycle_log_enabled()) { g_log.debug("sched: woke id={0}", current()->id()); }
 }
 
 namespace {

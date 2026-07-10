@@ -26,7 +26,8 @@ class Task : public kernel::obj::Object {
     size_t thread_count();
 
     // Copies refs to all threads under the task lock, so callers can inspect or format
-    // without holding it. Returns false if the copy failed to allocate.
+    // without holding it. Returns false if the copy failed to allocate; out may be partially
+    // filled in that case.
     bool snapshot_threads(ktl::vector<ktl::ref<Thread>>& out);
 
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
