@@ -61,6 +61,12 @@ This is a tripwire, not a hardware guard page -- it catches the realistic failur
 Scheduler state is shaped per-CPU, but only the boot processor runs a scheduler today.
 Application processors continue to park; bringing them into scheduling is future work that needs a per-CPU timer, per-CPU core-identity pointers, and cross-core wake paths, without reshaping the scheduler's data structures.
 
+## Observability
+The scheduler keeps per-thread accounting -- CPU time, scheduling counts, and wait latency -- alongside an always-on bounded event trace and an optional lifecycle log stream.
+All of it surfaces through the kernel shell.
+Trace detail is pulled on demand rather than streamed continuously, because the serial wire cannot carry per-switch logging at the rate threads actually switch.
+This keeps the scheduler inspectable without adding overhead or bandwidth pressure to the hot path.
+
 ## Relationship to Other Subsystems
 - [[Task Model]] -- threads live inside tasks; the scheduler operates on threads
 - [[Syscall Interface]] -- yield and block become syscalls once userspace exists, adding syscall boundaries as a third context switch point
