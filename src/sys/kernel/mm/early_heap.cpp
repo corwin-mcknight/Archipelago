@@ -5,7 +5,6 @@
 
 #include <ktl/bit>
 
-#include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/panic.h"
 
@@ -52,31 +51,6 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     m_peak_used          = 0;
     m_alloc_calls        = 0;
     m_free_calls         = 0;
-}
-
-void early_heap::debug_print_state() {
-    size_t allocated_bytes = 0;
-    size_t free_bytes      = 0;
-    size_t block_count     = 0;
-
-    for (early_heap_block* block = m_head; block != nullptr; block = block->next) {
-        ++block_count;
-        size_t payload_bytes = block->size > sizeof(early_heap_block) ? block->size - sizeof(early_heap_block) : 0;
-        if (block->free) {
-            free_bytes += payload_bytes;
-        } else {
-            allocated_bytes += payload_bytes;
-        }
-    }
-
-    g_log.debug("Early heap state:");
-    g_log.debug("  Heap start:      0x{0:p}", heap_start);
-    g_log.debug("  Heap end:        0x{0:p}", heap_end);
-    g_log.debug("  Blocks:          {0}", block_count);
-    g_log.debug("  Allocated:       {0} bytes ({1} KiB, {2} pages)", allocated_bytes, allocated_bytes / 1024,
-                allocated_bytes / KERNEL_MINIMUM_PAGE_SIZE);
-    g_log.debug("  Remaining size:  {0} bytes ({1} KiB, {2} pages)", free_bytes, free_bytes / 1024,
-                free_bytes / KERNEL_MINIMUM_PAGE_SIZE);
 }
 
 early_heap_stats early_heap::stats() {

@@ -22,7 +22,6 @@ struct early_heap_stats {
 class early_heap {
    public:
     void on_boot(uintptr_t start, uintptr_t end);
-    void debug_print_state();
 
     void* alloc(size_t size, size_t alignment = 1);
     void free(void* ptr);

@@ -11,17 +11,7 @@ extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
-namespace {
-constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE;
-
-// Logs a labeled page count, auto-scaling to KiB or MiB. The label carries its
-// own trailing padding so the columns line up.
-void log_size(const char* label, size_t pages) {
-    const size_t kb = pages * PAGE_SIZE / 1024;
-    const bool mb   = kb >= 1024;
-    g_log.info("  {0}{1} {3} ({2} pages)", label, mb ? (kb / 1024) : kb, pages, mb ? "MiB" : "KiB");
-}
-}  // namespace
+namespace { constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE; }  // namespace
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
     kernel::synchronization::lock_guard guard(m_lock);
@@ -156,17 +146,6 @@ pmm_stats page_frame_allocator::stats() {
         .alloc_failures     = m_alloc_failures,
         .zeroer_pages       = m_zeroer_pages,
     };
-}
-
-void page_frame_allocator::debug_print_state() {
-    g_log.info("Page Frame Allocator State:");
-    log_size("Total:    ", m_total_pages);
-    log_size("Free:     ", m_free_pages);
-    log_size("Used:     ", m_total_pages - m_free_pages);
-    log_size("Reserved: ", m_reserved_pages);
-    g_log.info("  Zeroed:   {0} pages ({1} pooled, {2} region tail)", zeroed_pages(), m_zeroed.size(), m_region_zeroed);
-    g_log.info("  Dirty:    {0} pages", m_dirty.size());
-    g_log.info("  Regions:  {0}", m_regions.size());
 }
 
 page_frame_allocator g_page_frame_allocator;

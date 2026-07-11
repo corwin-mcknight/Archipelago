@@ -43,7 +43,6 @@ class page_frame_allocator {
     // free memory is zeroed. The zeroer thread's work loop; safe to race with
     // alloc/free.
     bool zero_one_page();
-    void debug_print_state();
 
     pmm_stats stats();
 
