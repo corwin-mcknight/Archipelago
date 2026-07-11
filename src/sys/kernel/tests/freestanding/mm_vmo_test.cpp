@@ -72,10 +72,12 @@ KTEST_INTEGRATION(vmo_decommit_releases_frames, "mm/vmo") {
     KTEST_EXPECT_EQUAL(v->resident_pages(), PAGES - 1);
     KTEST_EXPECT_FALSE(v->resident_frame(3).has_value());
 
-    // The released frame went back to the PMM with ownership cleared.
+    // The released frame went back to the PMM with ownership cleared. The
+    // zeroer thread may relabel it ZEROED at any point; both states mean the
+    // frame is back in the PMM.
     page_descriptor* desc = g_page_descriptors.lookup(frame.value());
     KTEST_REQUIRE_TRUE(desc != nullptr);
-    KTEST_EXPECT_TRUE(desc->state == page_state::FREE);
+    KTEST_EXPECT_TRUE(desc->state == page_state::FREE || desc->state == page_state::ZEROED);
     KTEST_EXPECT_TRUE(desc->owner == nullptr);
 }
 

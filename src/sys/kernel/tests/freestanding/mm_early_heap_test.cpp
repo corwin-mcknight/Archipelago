@@ -148,3 +148,55 @@ KTEST_WITH_INIT(early_heap_free_null_is_noop, "mm/early_heap", early_heap_init_1
 static void early_heap_init_128() { reset_shared_heap(128); }
 static void early_heap_init_512() { reset_shared_heap(512); }
 static void early_heap_init_full() { reset_shared_heap(shared_heap_size); }
+
+KTEST_WITH_INIT(early_heap_stats_track_usage_and_peak, "mm/early_heap", early_heap_init_512) {
+    auto fresh = g_test_heap.stats();
+    KTEST_EXPECT_EQUAL(fresh.used_bytes, static_cast<size_t>(0));
+    KTEST_EXPECT_EQUAL(fresh.alloc_calls, static_cast<uint64_t>(0));
+
+    void* a = g_test_heap.alloc(64, 16);
+    void* b = g_test_heap.alloc(96, 16);
+    KTEST_REQUIRE_TRUE(a != nullptr);
+    KTEST_REQUIRE_TRUE(b != nullptr);
+
+    auto loaded = g_test_heap.stats();
+    KTEST_EXPECT_EQUAL(loaded.alloc_calls, static_cast<uint64_t>(2));
+    KTEST_EXPECT_TRUE(loaded.used_bytes >= 64 + 96);
+    KTEST_EXPECT_EQUAL(loaded.peak_used, loaded.used_bytes);
+    KTEST_EXPECT_TRUE(loaded.largest_free <= loaded.free_bytes);
+
+    g_test_heap.free(b);
+    auto drained = g_test_heap.stats();
+    KTEST_EXPECT_EQUAL(drained.free_calls, static_cast<uint64_t>(1));
+    KTEST_EXPECT_TRUE(drained.used_bytes < loaded.used_bytes);
+    KTEST_EXPECT_EQUAL(drained.peak_used, loaded.peak_used);
+    g_test_heap.free(a);
+}
+
+KTEST_WITH_INIT(early_heap_block_walk_matches_stats, "mm/early_heap", early_heap_init_512) {
+    void* a = g_test_heap.alloc(64, 16);
+    KTEST_REQUIRE_TRUE(a != nullptr);
+
+    struct walk_totals {
+        size_t blocks    = 0;
+        size_t used      = 0;
+        size_t free_seen = 0;
+    } totals;
+    g_test_heap.for_each_block(
+        [](void* ctx, size_t payload, bool is_free) {
+            auto* t = static_cast<walk_totals*>(ctx);
+            ++t->blocks;
+            if (is_free) {
+                t->free_seen += payload;
+            } else {
+                t->used += payload;
+            }
+        },
+        &totals);
+
+    auto s = g_test_heap.stats();
+    KTEST_EXPECT_EQUAL(totals.blocks, s.blocks);
+    KTEST_EXPECT_EQUAL(totals.used, s.used_bytes);
+    KTEST_EXPECT_EQUAL(totals.free_seen, s.free_bytes);
+    g_test_heap.free(a);
+}

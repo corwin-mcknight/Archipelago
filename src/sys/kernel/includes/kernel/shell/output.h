@@ -53,6 +53,25 @@ class ShellOutput {
     void write(const char* s);
     void write_char(char c);
 
+    // Redirects all output to fn (tests capture bytes instead of driving the
+    // UART). Pass nullptr to restore UART output.
+    using sink_fn = void (*)(char c, void* ctx);
+    void set_sink(sink_fn fn, void* ctx) {
+        sink_     = fn;
+        sink_ctx_ = ctx;
+    }
+
+    // Emits an SGR escape (color/style). Suppressed in protocol mode so
+    // harness JSON stays byte-clean.
+    void sgr(const char* code) {
+        if (protocol_mode_) { return; }
+        write_char('\x1b');
+        write_char('[');
+        write(code);
+        write_char('m');
+    }
+    void reset_style() { sgr("0"); }
+
     // Writes a complete, pre-formatted harness protocol line with interrupts disabled so log
     // writes from interrupt context (or another thread after a preemption) cannot splice into
     // it; see print() for the full rationale.
@@ -107,6 +126,8 @@ class ShellOutput {
     }
 
     bool protocol_mode_ = false;
+    sink_fn sink_       = nullptr;
+    void* sink_ctx_     = nullptr;
 };
 
 }  // namespace kernel::shell

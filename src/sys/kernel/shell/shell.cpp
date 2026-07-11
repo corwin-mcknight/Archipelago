@@ -27,8 +27,6 @@ void read_line(char* buffer, size_t buffer_size) {
         // Sleep-poll instead of busy-waiting in uart.read() so idle absorbs the wait between
         // keystrokes; buffered bytes drain back-to-back because received_data() stays set.
         // QEMU's chardev backpressure holds input while we sleep, so a 1 ms gap loses nothing.
-        // ponytail: poll+sleep; UART RX interrupt wakeup once IOAPIC/PLIC routing exists (real
-        // 16550 FIFOs are 16 bytes and would overflow on paste without it).
         while (uart.received_data() == 0) { kernel::sched::sleep_ticks(1); }
         char c = uart.read();
         if (c == '\r' || c == '\n') {
@@ -68,25 +66,25 @@ ktl::maybe<kernel::shell::shell_command&> find_command(ktl::string_view name) {
                         [&](const kernel::shell::shell_command& cmd) { return name == cmd.name; });
 }
 
-void dispatch(int argc, const ktl::string_view argv[]) {
+void dispatch(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc == 0) { return; }
 
     if (argv[0] == "help") {
-        g_output.print("Available commands:\n");
-        g_output.print("  help -- show this message\n");
+        output.print("Available commands:\n");
+        output.print("  help -- show this message\n");
         for (auto* cmd = __start__kshell_cmds; cmd != __stop__kshell_cmds; ++cmd) {
-            g_output.print("  {0} -- {1}\n", cmd->name, cmd->description);
+            output.print("  {0} -- {1}\n", cmd->name, cmd->description);
         }
         return;
     }
 
     auto cmd = find_command(argv[0]);
     if (!cmd) {
-        g_output.print("unknown command: {0}\n", argv[0]);
+        output.print("unknown command: {0}\n", argv[0]);
         return;
     }
 
-    cmd->handler(argc, argv, g_output);
+    cmd->handler(argc, argv, output);
 }
 
 }  // namespace
@@ -106,8 +104,14 @@ void shell_main() {
 
         read_line(buffer, sizeof(buffer));
         int argc = tokenize(buffer, argv, kMaxArgs);
-        dispatch(argc, argv);
+        dispatch(argc, argv, g_output);
     }
+}
+
+void run_line(const char* line, ShellOutput& output) {
+    ktl::string_view argv[kMaxArgs];
+    int argc = tokenize(line, argv, kMaxArgs);
+    dispatch(argc, argv, output);
 }
 
 ShellOutput& shell_output() { return g_output; }

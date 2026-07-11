@@ -116,7 +116,8 @@ struct vm_fault {
 bool vmm_handle_fault(const vm_fault& fault);
 
 // VMM initialization: sizes and fills the page descriptor array from the boot
-// memory map (usable ranges become FREE, kernel/wired ranges stay WIRED),
+// memory map (usable ranges become FREE, kernel/wired ranges WIRED, holes
+// and firmware ranges MMIO),
 // then builds the kernel's own page tables and switches onto them. Panics on
 // failure -- the kernel cannot run without either.
 void vmm_init(const vm_page_region* usable, size_t usable_count, const vm_page_region* wired, size_t wired_count);

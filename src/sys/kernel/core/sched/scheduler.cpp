@@ -33,7 +33,6 @@ struct cpu_sched {
 };
 
 // All scheduler state below is guarded by interrupts-off on the single scheduling core.
-// ponytail: g_boot_core indexing, not a per-CPU pointer; GS/tp per-CPU state when APs schedule.
 cpu_sched g_cpus[CONFIG_MAX_CORES];
 uint32_t g_boot_core = 0;
 
@@ -189,8 +188,6 @@ void yield() {
         // Queue empty: hand off to idle. The boot context runs as the idle thread and is never
         // re-queued after a tick preemption, so a cooperatively-yielding thread would otherwise
         // starve it forever.
-        // ponytail: this is a double-switch per empty-queue yield (caller -> idle, then idle's
-        // own yield back out); revisit if this path ever gets hot.
         next = c.idle;
     }
     if (next.has_value()) {
@@ -227,7 +224,6 @@ void on_tick() {
     if (!g_started) { return; }
     auto& c = cur_cpu();
     // Wake due sleepers first so a woken thread can be this tick's switch target.
-    // ponytail: linear scan; a deadline-ordered list when thread counts grow.
     for (size_t i = 0; i < g_sleepers.size();) {
         if (g_sleepers[i].wake_at <= kernel::time::now()) {
             ktl::ref<Thread> t = ktl::move(g_sleepers[i].thread);

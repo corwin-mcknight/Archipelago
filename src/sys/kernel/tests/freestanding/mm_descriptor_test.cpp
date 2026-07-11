@@ -22,6 +22,9 @@ KTEST_INTEGRATION(descriptor_array_initialized_at_boot, "mm/descriptor") {
     // A booted kernel always has pinned frames (its own image, the array).
     KTEST_EXPECT_TRUE(g_page_descriptors.count(page_state::WIRED) > 0);
     KTEST_EXPECT_TRUE(g_page_descriptors.count(page_state::FREE) > 0);
+    // Address holes below RAM (legacy ranges on x86_64, the sub-2GiB gap on
+    // riscv64) are MMIO, not WIRED -- they must stay out of usage accounting.
+    KTEST_EXPECT_TRUE(g_page_descriptors.count(page_state::MMIO) > 0);
 }
 
 KTEST_INTEGRATION(descriptor_kernel_image_is_wired, "mm/descriptor") {
@@ -54,7 +57,9 @@ KTEST_INTEGRATION(descriptor_tracks_pmm_alloc_free, "mm/descriptor") {
     KTEST_EXPECT_EQUAL(desc->share_count, 0u);
 
     g_page_frame_allocator.free(probe.value());
-    KTEST_EXPECT_TRUE(desc->state == page_state::FREE);
+    // The zeroer thread may relabel the freed page ZEROED at any point; both
+    // states mean the frame is back in the PMM.
+    KTEST_EXPECT_TRUE(desc->state == page_state::FREE || desc->state == page_state::ZEROED);
 }
 
 KTEST_INTEGRATION(kernel_owns_its_page_tables, "mm/descriptor") {

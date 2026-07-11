@@ -19,6 +19,9 @@ struct shell_command {
 };
 
 void shell_main();
+// Tokenizes and dispatches one command line against the registry; the
+// interactive loop and tests share this path.
+void run_line(const char* line, ShellOutput& output);
 ShellOutput& shell_output();
 void request_boot_continue();
 

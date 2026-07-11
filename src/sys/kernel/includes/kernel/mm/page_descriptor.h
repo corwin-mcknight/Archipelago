@@ -9,12 +9,15 @@ namespace kernel::mm {
 
 class vmo;  // owner back-references are wired up in the VMO phase
 
-// Lifecycle of a physical frame. WIRED frames are permanently pinned (kernel
-// image, descriptor array, MMIO, holes); ACTIVE frames are allocated and in
-// use; FREE frames belong to the PMM; ZEROED frames are free and known-zero.
-// INACTIVE is defined for the eviction era and unused this milestone.
+// Lifecycle of a physical frame. MMIO frames are address holes, firmware
+// ranges, and device windows -- not memory, never allocatable, excluded from
+// usage accounting. WIRED frames are permanently pinned RAM (kernel image,
+// descriptor array, zero page); ACTIVE frames are allocated and in use; FREE
+// frames belong to the PMM; ZEROED frames are free and known-zero. INACTIVE
+// is defined for the eviction era and unused this milestone.
 enum class page_state : uint8_t {
-    WIRED = 0,  // zero so the freshly zeroed array starts fully pinned
+    MMIO = 0,  // zero so the freshly zeroed array starts unallocatable
+    WIRED,
     FREE,
     ZEROED,
     ACTIVE,
@@ -38,7 +41,7 @@ class page_descriptor_table {
    public:
     // Sizes the array from the highest end address across both range lists,
     // marks usable ranges FREE, wired (kernel) ranges WIRED, and the array's
-    // own frames WIRED. Everything else stays WIRED (the zeroed default).
+    // own frames WIRED. Everything else stays MMIO (the zeroed default).
     bool init(const vm_page_region* usable, size_t usable_count, const vm_page_region* wired, size_t wired_count);
 
     bool initialized() const { return m_array != nullptr; }

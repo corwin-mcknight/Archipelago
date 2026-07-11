@@ -168,6 +168,20 @@ void init_memory() {
 static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 #endif
 
+// Keeps the PMM's zeroed page supply topped up so alloc() skips its inline
+// memset. Paced in small batches so the initial climb to the pre-zero target
+// trickles out over tens of seconds instead of monopolizing the CPU.
+[[noreturn]] static void zeroer_thread_main(void*) {
+    constexpr size_t BATCH_PAGES    = 32;
+    constexpr uint64_t PERIOD_TICKS = 50;  // 1 tick = 1 ms
+    while (true) {
+        for (size_t i = 0; i < BATCH_PAGES; ++i) {
+            if (!kernel::mm::g_page_frame_allocator.zero_one_page()) { break; }
+        }
+        kernel::sched::sleep_ticks(PERIOD_TICKS);
+    }
+}
+
 [[noreturn]] void late_boot(uint32_t boot_core_index) {
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
@@ -180,6 +194,8 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 
     kernel::arch::timestamp_calibrate();
     kernel::sched::init(boot_core_index);
+
+    kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");
 
     bool shell_boot = resolve_shell_boot();
 #if CONFIG_KERNEL_SHELL

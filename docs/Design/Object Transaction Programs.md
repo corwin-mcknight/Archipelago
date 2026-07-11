@@ -6,6 +6,8 @@
 Object Transaction Programs (OTPs) are a programmable dispatch layer that sits between the handle table and IPC dispatch.
 Servers attach small programs -- composed of safe opcodes -- to their object types, and the kernel executes these programs to short-circuit the IPC path where it can safely do so.
 
+An OTP may optimize an operation, but it must not change the operation’s observable semantics relative to server dispatch.
+
 ## Philosophy
 ### Graduated opacity
 OTPs embody [[Design Principles#Graduated opacity]].

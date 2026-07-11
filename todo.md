@@ -92,7 +92,7 @@
 
 ## Testing & QA
 - Continue growing driver/core unit and stress coverage where gaps remain; add IPC suites once the IPC subsystem exists.
-- VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands), OOM paths in the fault/commit paths (needs PMM fault injection), and the shell `vm` command output (no automated harness coverage).
+- VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands) and OOM paths in the fault/commit paths (needs PMM fault injection).
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler fuzz targets (run-queue rotation, wait-queue bookkeeping, signal-mask matching) now that the scheduler exists, and syscall fuzz targets once syscalls exist.
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.

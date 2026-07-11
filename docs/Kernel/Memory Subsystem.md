@@ -69,6 +69,7 @@ VMOs are resizable: growth extends the residency index lazily, and shrinking win
 Residency is tracked in a chunked index whose chunks are whole page frames allocated directly from the PMM, arriving pre-zeroed from the zeroed pool.
 
 Pages are physical frames with lifecycle states ranging from wired through active, inactive, free, and zeroed.
+Address holes, firmware ranges, and device windows outside RAM carry a separate MMIO state so they never appear in memory usage accounting.
 Per-frame state -- lifecycle, share count for copy-on-write, owner back-reference -- lives in a global page descriptor array indexed by frame number, allocated at VMM initialization to cover usable RAM.
 
 Pagers are kernel policy objects that load or flush pages.

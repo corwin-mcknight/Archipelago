@@ -64,7 +64,7 @@ SECTIONS
         . = ALIGN(CONSTANT(MAXPAGESIZE));
 
         _initial_heap_start = .;
-        . += 0x40000;
+        . += 0x10000;
         _initial_heap_end = .;
     } :data
 

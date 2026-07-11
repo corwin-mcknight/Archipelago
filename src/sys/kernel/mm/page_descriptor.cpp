@@ -30,8 +30,8 @@ bool page_descriptor_table::init(const vm_page_region* usable, size_t usable_cou
     auto base          = g_page_frame_allocator.alloc_contiguous(array_pages);
     if (!base.has_value()) { return false; }
 
-    // Frames arrive zeroed: every descriptor starts {nullptr, 0, 0, WIRED},
-    // so holes and firmware ranges default to pinned.
+    // Frames arrive zeroed: every descriptor starts {nullptr, 0, 0, MMIO},
+    // so holes and firmware ranges default to not-memory.
     m_array = reinterpret_cast<page_descriptor*>(base.value() + g_hhdm_offset);
 
     for (size_t i = 0; i < usable_count; ++i) { mark_range(usable[i].start, usable[i].count, page_state::FREE); }
