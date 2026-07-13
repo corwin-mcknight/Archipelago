@@ -88,3 +88,6 @@ CLAUDE.md
 .codex
 .agents
 /skills-lock.json
+
+# Personal devcontainer config
+.devcontainer/personal/
