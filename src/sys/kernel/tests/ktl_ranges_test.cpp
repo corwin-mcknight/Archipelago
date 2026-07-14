@@ -12,6 +12,9 @@
 
 using namespace kernel::testing;
 
+// The pair/tuple/span suites below keep their own module names via explicit KTEST.
+KTEST_MODULE("ktl/ranges");
+
 // ============================================================
 // ktl::pair
 // ============================================================
@@ -101,7 +104,7 @@ KTEST(ktl_span_basics, "ktl/span") {
 // ktl::ranges
 // ============================================================
 
-KTEST(ktl_views_enumerate, "ktl/ranges") {
+KTEST_CASE(ktl_views_enumerate) {
     int arr[3]      = {7, 8, 9};
     size_t expect_i = 0;
     int expect_v    = 7;
@@ -119,7 +122,7 @@ KTEST(ktl_views_enumerate, "ktl/ranges") {
     KTEST_EXPECT_EQUAL(arr[2], 2);
 }
 
-KTEST(ktl_views_filter, "ktl/ranges") {
+KTEST_CASE(ktl_views_filter) {
     int arr[6] = {1, 2, 3, 4, 5, 6};
     int sum    = 0;
     int n      = 0;
@@ -136,14 +139,14 @@ KTEST(ktl_views_filter, "ktl/ranges") {
     KTEST_EXPECT_EQUAL(none, 0);
 }
 
-KTEST(ktl_views_transform, "ktl/ranges") {
+KTEST_CASE(ktl_views_transform) {
     int arr[3] = {1, 2, 3};
     int sum    = 0;
     for (int v : ktl::span(arr) | ktl::views::transform([](int x) { return x * 10; })) { sum += v; }
     KTEST_EXPECT_EQUAL(sum, 60);
 }
 
-KTEST(ktl_views_take_drop, "ktl/ranges") {
+KTEST_CASE(ktl_views_take_drop) {
     int arr[5] = {1, 2, 3, 4, 5};
 
     int sum    = 0;
@@ -165,7 +168,7 @@ KTEST(ktl_views_take_drop, "ktl/ranges") {
     KTEST_EXPECT_EQUAL(sum, 0);
 }
 
-KTEST(ktl_views_for_each, "ktl/ranges") {
+KTEST_CASE(ktl_views_for_each) {
     int arr[6] = {1, 2, 3, 4, 5, 6};
 
     // Plain range.
@@ -212,7 +215,7 @@ KTEST(ktl_views_for_each, "ktl/ranges") {
     KTEST_EXPECT_EQUAL(arr[5], 5);
 }
 
-KTEST(ktl_views_enumerate_then_filter_keeps_index, "ktl/ranges") {
+KTEST_CASE(ktl_views_enumerate_then_filter_keeps_index) {
     // The exact cpu.cpp semantics: enumerate BEFORE filter, so indices stay original.
     int arr[5]       = {10, 20, 30, 40, 50};
     size_t seen_i[2] = {99, 99};

@@ -7,6 +7,8 @@
 
 using namespace kernel::testing;
 
+KTEST_MODULE("ktl/rb_tree");
+
 namespace {
 
 struct item {
@@ -35,18 +37,14 @@ template <size_t N> struct pool {
 
 }  // namespace
 
-KTEST(ktl_rb_tree_empty, "ktl/rb_tree") {
-    tree t;
-    KTEST_EXPECT_TRUE(t.empty());
-    KTEST_EXPECT_EQUAL(t.size(), 0u);
-    KTEST_EXPECT_TRUE(t.begin() == t.end());
-    KTEST_EXPECT_TRUE(t.validate());
-    KTEST_EXPECT_TRUE(t.find(42) == t.end());
-}
-
-KTEST(ktl_rb_tree_ordered_iteration, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_ordered_iteration) {
     pool<16> nodes;
     tree t;
+
+    // Freshly constructed tree is empty, valid, and finds nothing.
+    KTEST_EXPECT_ALL(t.empty(), t.begin() == t.end(), t.validate(), t.find(42) == t.end());
+    KTEST_EXPECT_EQUAL(t.size(), 0u);
+
     // Insert in a scrambled order; iteration must come out sorted.
     const int order[16] = {8, 3, 12, 1, 15, 7, 4, 0, 11, 9, 2, 14, 6, 5, 13, 10};
     for (int i : order) {
@@ -64,7 +62,7 @@ KTEST(ktl_rb_tree_ordered_iteration, "ktl/rb_tree") {
     KTEST_EXPECT_EQUAL(expected, 16);
 }
 
-KTEST(ktl_rb_tree_duplicate_rejected, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_duplicate_rejected) {
     pool<2> nodes;
     nodes[0].key = 5;
     nodes[1].key = 5;
@@ -75,7 +73,7 @@ KTEST(ktl_rb_tree_duplicate_rejected, "ktl/rb_tree") {
     KTEST_EXPECT_TRUE(t.validate());
 }
 
-KTEST(ktl_rb_tree_find_and_bounds, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_find_and_bounds) {
     pool<10> nodes;
     tree t;
     // Keys 0,10,20,...,90.
@@ -107,7 +105,7 @@ KTEST(ktl_rb_tree_find_and_bounds, "ktl/rb_tree") {
     KTEST_EXPECT_TRUE(t.find_le(-1) == t.end());
 }
 
-KTEST(ktl_rb_tree_erase_and_reinsert, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_erase_and_reinsert) {
     pool<32> nodes;
     nodes.set_keys_identity();
     tree t;
@@ -139,7 +137,7 @@ KTEST(ktl_rb_tree_erase_and_reinsert, "ktl/rb_tree") {
     KTEST_EXPECT_EQUAL(expected, 32);
 }
 
-KTEST(ktl_rb_tree_erase_root_and_all, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_erase_root_and_all) {
     pool<7> nodes;
     nodes.set_keys_identity();
     tree t;
@@ -156,7 +154,7 @@ KTEST(ktl_rb_tree_erase_root_and_all, "ktl/rb_tree") {
     KTEST_EXPECT_TRUE(t.begin() == t.end());
 }
 
-KTEST(ktl_rb_tree_mixed_workload, "ktl/rb_tree") {
+KTEST_CASE(ktl_rb_tree_mixed_workload) {
     // Deterministic pseudo-random churn validated after every mutation, mirroring the fuzz oracle at a
     // fixed seed so the host tier alone exercises the balance paths.
     constexpr size_t kMax = 128;

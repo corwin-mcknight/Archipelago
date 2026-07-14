@@ -4,13 +4,15 @@
 #include <kernel/arch.h>
 #include <kernel/interrupt.h>
 
-KTEST(riscv_translation_root_active, "riscv64/arch") {
+KTEST_MODULE("riscv64/arch");
+
+KTEST_CASE(riscv_translation_root_active) {
     // Sv48 is live from boot; the active root must be a real page-aligned frame.
     KTEST_REQUIRE_TRUE(kernel::arch::active_translation_root() != 0);
     KTEST_EXPECT_EQUAL(kernel::arch::active_translation_root() & 0xFFFull, 0ull);
 }
 
-KTEST(riscv_interrupt_save_restore, "riscv64/arch") {
+KTEST_CASE(riscv_interrupt_save_restore) {
     uint64_t saved = kernel::arch::save_and_disable_interrupts();
     KTEST_EXPECT_FALSE(kernel::arch::interrupts_enabled());
     kernel::arch::restore_interrupts(saved);
@@ -32,7 +34,7 @@ bool ssi_handler(register_frame_t*) {
 // Round-trip the asynchronous trap path: pend a supervisor software interrupt
 // (cause code 1) against ourselves and require the trap entry, dispatcher,
 // and handler chain to deliver it.
-KTEST(riscv_software_interrupt_round_trip, "riscv64/arch") {
+KTEST_CASE(riscv_software_interrupt_round_trip) {
     constexpr unsigned SSI_CODE = 1;
     g_ssi_fired                 = false;
     g_interrupt_manager.register_interrupt(SSI_CODE, ssi_handler, 0);

@@ -8,13 +8,15 @@
 using namespace kernel::testing;
 using namespace kernel::obj;
 
+KTEST_MODULE_WITH_INIT("obj/handle_table", handle_table_init);
+
 static void handle_table_init() {
     register_all_test_types();
     kernel::sched::Task::register_type(g_type_registry).expect("task type registration failed");
 }
 
 // Subsumes the old emplace_valid test -- emplace + get + verify type in one.
-KTEST_WITH_INIT(obj_handle_table_emplace_and_get, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_emplace_and_get) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_EXPECT_ALL(id.is_valid(), table.count() == 1);
@@ -22,14 +24,7 @@ KTEST_WITH_INIT(obj_handle_table_emplace_and_get, "obj/handle_table", handle_tab
     KTEST_EXPECT_TRUE(got->type_id() == TEST_TYPE_A);
 }
 
-KTEST_WITH_INIT(obj_handle_table_get_returns_object, "obj/handle_table", handle_table_init) {
-    HandleTable table;
-    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
-    KTEST_UNWRAP(got, table.get<TestObjA>(id));
-    KTEST_EXPECT_TRUE(got->type_id() == TEST_TYPE_A);
-}
-
-KTEST_WITH_INIT(obj_handle_table_close_invalidates, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_close_invalidates) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_REQUIRE_TRUE(table.is_valid(id));
@@ -38,7 +33,7 @@ KTEST_WITH_INIT(obj_handle_table_close_invalidates, "obj/handle_table", handle_t
 }
 
 // Subsumes old close_destroys_object + emplace_with_args -- both tested destroyed flag.
-KTEST_WITH_INIT(obj_handle_table_close_destroys_object, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_close_destroys_object) {
     bool destroyed = false;
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL, &destroyed));
@@ -48,7 +43,7 @@ KTEST_WITH_INIT(obj_handle_table_close_destroys_object, "obj/handle_table", hand
     KTEST_EXPECT_TRUE(destroyed);
 }
 
-KTEST_WITH_INIT(obj_handle_table_generation_counter, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_generation_counter) {
     HandleTable table;
     KTEST_UNWRAP(id1, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_EXPECT_TRUE(table.close(id1).is_ok());
@@ -57,14 +52,14 @@ KTEST_WITH_INIT(obj_handle_table_generation_counter, "obj/handle_table", handle_
                      table.is_valid(id2));
 }
 
-KTEST_WITH_INIT(obj_handle_table_info_returns_metadata, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_info_returns_metadata) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ | RIGHT_SIGNAL));
     KTEST_REQUIRE_VALUE(info, table.info(id));
     KTEST_EXPECT_ALL(info.rights == (RIGHT_READ | RIGHT_SIGNAL), info.type_id == TEST_TYPE_A);
 }
 
-KTEST_WITH_INIT(obj_handle_table_duplicate_ands_rights, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_duplicate_ands_rights) {
     HandleTable table;
     KTEST_UNWRAP(src, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
     KTEST_UNWRAP(dup, table.duplicate(src, RIGHT_READ));
@@ -72,27 +67,21 @@ KTEST_WITH_INIT(obj_handle_table_duplicate_ands_rights, "obj/handle_table", hand
     KTEST_EXPECT_ALL(info.rights == RIGHT_READ, table.count() == 2);
 }
 
-KTEST_WITH_INIT(obj_handle_table_get_wrong_type, "obj/handle_table", handle_table_init) {
+// One rights-enforcement story for get(): a cross-type get is rejected with wrong_type,
+// requesting a right the handle lacks fails with rights_violation, and requesting a
+// subset of the held rights succeeds.
+KTEST_CASE(obj_handle_table_get_enforces_type_and_rights) {
     HandleTable table;
-    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
-    auto got = table.get<TestObjB>(id);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::wrong_type);
+    KTEST_UNWRAP(ro, table.emplace<TestObjA>(RIGHT_READ));
+    KTEST_UNWRAP(rw, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
+    auto wrong = table.get<TestObjB>(ro);
+    KTEST_EXPECT_ALL(wrong.is_err(), wrong.unwrap_err() == ktl::errc::wrong_type);
+    auto denied = table.get<TestObjA>(ro, RIGHT_WRITE);
+    KTEST_EXPECT_ALL(denied.is_err(), denied.unwrap_err() == ktl::errc::rights_violation);
+    KTEST_EXPECT_TRUE(table.get<TestObjA>(rw, RIGHT_READ).is_ok());
 }
 
-KTEST_WITH_INIT(obj_handle_table_get_insufficient_rights, "obj/handle_table", handle_table_init) {
-    HandleTable table;
-    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ));
-    auto got = table.get<TestObjA>(id, RIGHT_WRITE);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::rights_violation);
-}
-
-KTEST_WITH_INIT(obj_handle_table_get_sufficient_rights, "obj/handle_table", handle_table_init) {
-    HandleTable table;
-    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
-    KTEST_EXPECT_TRUE(table.get<TestObjA>(id, RIGHT_READ).is_ok());
-}
-
-KTEST_WITH_INIT(obj_handle_table_growth, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_growth) {
     HandleTable table;
     HandleId first_id = HandleId::invalid();
     for (int i = 0; i < 64; i++) {
@@ -103,14 +92,14 @@ KTEST_WITH_INIT(obj_handle_table_growth, "obj/handle_table", handle_table_init) 
     KTEST_EXPECT_TRUE(table.get<TestObjA>(first_id).is_ok());
 }
 
-KTEST_WITH_INIT(obj_handle_table_invalid_handle, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_invalid_handle) {
     HandleTable table;
     KTEST_EXPECT_FALSE(table.is_valid(HandleId::invalid()));
     auto got = table.get<TestObjA>(HandleId::invalid());
     KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::handle_invalid);
 }
 
-KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_global_emplace) {
     auto& handles = kernel::sched::kernel_task()->handles();
     size_t before = handles.count();
     KTEST_UNWRAP(id, handles.emplace<TestObjA>(RIGHTS_ALL));
@@ -119,23 +108,15 @@ KTEST_WITH_INIT(obj_handle_table_global_emplace, "obj/handle_table", handle_tabl
     KTEST_EXPECT_TRUE(handles.count() == before);
 }
 
-// F033: rights outside the type's registered valid_rights contract are rejected, not clamped.
-KTEST_WITH_INIT(obj_handle_table_rejects_out_of_contract_rights, "obj/handle_table", handle_table_init) {
+// F033: rights outside the type's registered valid_rights contract are rejected, not clamped --
+// whether entirely out-of-contract or a mix of in-contract and out-of-contract bits -- while
+// rights within the contract still work, including duplicate (whose rights are a masked subset).
+KTEST_CASE(obj_handle_table_enforces_rights_contract) {
     HandleTable table;
     auto bad = table.emplace<TestObjRestricted>(RIGHT_WRITE);
     KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
-}
-
-// F033: a mix of in-contract and out-of-contract bits is rejected outright (no silent clamping).
-KTEST_WITH_INIT(obj_handle_table_rejects_mixed_rights, "obj/handle_table", handle_table_init) {
-    HandleTable table;
-    auto bad = table.emplace<TestObjRestricted>(RIGHT_READ | RIGHT_WRITE);
-    KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
-}
-
-// F033: rights within the contract still work, including duplicate (whose rights are a masked subset).
-KTEST_WITH_INIT(obj_handle_table_accepts_in_contract_rights, "obj/handle_table", handle_table_init) {
-    HandleTable table;
+    auto mixed = table.emplace<TestObjRestricted>(RIGHT_READ | RIGHT_WRITE);
+    KTEST_EXPECT_ALL(mixed.is_err(), mixed.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
     KTEST_UNWRAP(id, table.emplace<TestObjRestricted>(TEST_RESTRICTED_VALID_RIGHTS));
     KTEST_REQUIRE_VALUE(info, table.info(id));
     KTEST_EXPECT_TRUE(info.rights == TEST_RESTRICTED_VALID_RIGHTS);
@@ -145,7 +126,7 @@ KTEST_WITH_INIT(obj_handle_table_accepts_in_contract_rights, "obj/handle_table",
 }
 
 // F033: objects whose type was never registered cannot be given handles at all.
-KTEST_WITH_INIT(obj_handle_table_rejects_unregistered_type, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_rejects_unregistered_type) {
     HandleTable table;
     auto bad = table.emplace<TestObjUnregistered>(RIGHT_READ);
     KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::wrong_type, table.count() == 0);
@@ -153,7 +134,7 @@ KTEST_WITH_INIT(obj_handle_table_rejects_unregistered_type, "obj/handle_table", 
 
 // F021: a slot whose generation counter saturates is retired on close instead of being recycled,
 // so a stale HandleId can never revalidate after the counter would have wrapped.
-KTEST_WITH_INIT(obj_handle_table_generation_wrap_retires_slot, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_generation_wrap_retires_slot) {
     HandleTable table;
     KTEST_UNWRAP(initial, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_REQUIRE_VALUE(id, table.testing_set_generation(initial, 0xFFFFFFFFu));
@@ -169,7 +150,7 @@ KTEST_WITH_INIT(obj_handle_table_generation_wrap_retires_slot, "obj/handle_table
     KTEST_EXPECT_FALSE(table.is_valid(HandleId{id.index, 0}));
 }
 
-KTEST_WITH_INIT(obj_handle_table_destructor_closes_all, "obj/handle_table", handle_table_init) {
+KTEST_CASE(obj_handle_table_destructor_closes_all) {
     bool d1 = false, d2 = false;
     {
         HandleTable table;

@@ -53,6 +53,32 @@
 
 #define KTEST_NOINIT(name_sym, module_literal) KTEST(name_sym, module_literal)
 
+// File-scope defaults for the common one-module-per-file case. Declare once at the top of the file:
+//     KTEST_MODULE("obj/object");                     // or
+//     KTEST_MODULE_WITH_INIT("obj/object", my_init);  // my_init is defined by the file
+// then define tests without repeating the module or init:
+//     KTEST_CASE(obj_object_monotonic_ids) { ... }
+// KTEST_CASE_INTEGRATION and KTEST_CASE_CRASH mirror KTEST_INTEGRATION / KTEST_CRASH_TEST.
+#define KTEST_MODULE(module_literal)                                                   \
+    [[maybe_unused]] static constexpr const char* _ktest_file_module = module_literal; \
+    [[maybe_unused]] static void _ktest_file_init() {}
+
+#define KTEST_MODULE_WITH_INIT(module_literal, init_sym)                               \
+    [[maybe_unused]] static constexpr const char* _ktest_file_module = module_literal; \
+    static void init_sym();                                                            \
+    [[maybe_unused]] static void _ktest_file_init() { init_sym(); }
+
+#define KTEST_CASE(name_sym) \
+    KTEST_WITH_INIT_FLAGS(name_sym, _ktest_file_module, _ktest_file_init, kernel::testing::KTEST_FLAG_NONE)
+
+#define KTEST_CASE_INTEGRATION(name_sym)                                  \
+    KTEST_WITH_INIT_FLAGS(name_sym, _ktest_file_module, _ktest_file_init, \
+                          kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV)
+
+#define KTEST_CASE_CRASH(name_sym)                                        \
+    KTEST_WITH_INIT_FLAGS(name_sym, _ktest_file_module, _ktest_file_init, \
+                          kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV | kernel::testing::KTEST_FLAG_EXPECTS_CRASH)
+
 // The expression-capturing EXPECT / REQUIRE live in <kernel/testing/expect.h> and route through
 // kernel::testing::report_assertion (declared above, defined per-backend). The legacy KTEST_* macros
 // below are thin aliases over them, so a test written in either style shares one backend and runs on
@@ -154,6 +180,16 @@
 #define KTEST_CRASH_TEST(name_sym, module_literal) KTEST(name_sym, module_literal)
 
 #define KTEST_NOINIT(name_sym, module_literal) KTEST(name_sym, module_literal)
+
+#define KTEST_MODULE(module_literal)
+#define KTEST_MODULE_WITH_INIT(module_literal, init_sym) [[maybe_unused]] static void init_sym();
+
+#define KTEST_CASE(name_sym)                        \
+    [[maybe_unused]] static void name_sym##_body(); \
+    [[maybe_unused]] static void name_sym##_body()
+
+#define KTEST_CASE_INTEGRATION(name_sym) KTEST_CASE(name_sym)
+#define KTEST_CASE_CRASH(name_sym) KTEST_CASE(name_sym)
 
 #define KTEST_EXPECT(condition) ((void)0)
 #define KTEST_EXPECT_EQUAL(actual, expected) ((void)0)

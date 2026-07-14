@@ -8,7 +8,9 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_tuple_construct_and_get, "ktl/tuple") {
+KTEST_MODULE("ktl/tuple");
+
+KTEST_CASE(ktl_tuple_construct_get_and_traits) {
     ktl::tuple<int, char, bool> t{7, 'a', true};
     KTEST_EXPECT_TRUE(ktl::get<0>(t) == 7);
     KTEST_EXPECT_TRUE(ktl::get<1>(t) == 'a');
@@ -19,18 +21,15 @@ KTEST(ktl_tuple_construct_and_get, "ktl/tuple") {
 
     ktl::tuple<int, int> def;
     KTEST_EXPECT_ALL(ktl::get<0>(def) == 0, ktl::get<1>(def) == 0);
-}
 
-KTEST(ktl_tuple_traits, "ktl/tuple") {
+    // tuple_size / tuple_element see through the pack.
     using T = ktl::tuple<int, char, bool>;
     static_assert(ktl::tuple_size_v<T> == 3);
     static_assert(ktl::is_same_v<ktl::tuple_element_t<0, T>, int>);
     static_assert(ktl::is_same_v<ktl::tuple_element_t<2, T>, bool>);
     static_assert(ktl::tuple_size_v<ktl::tuple<>> == 0);
-    KTEST_EXPECT_TRUE(true);
-}
 
-KTEST(ktl_tuple_make_and_decay, "ktl/tuple") {
+    // make_tuple decays its arguments.
     int x   = 5;
     auto tp = ktl::make_tuple(x, 'z', 2u);
     static_assert(ktl::is_same_v<ktl::tuple_element_t<0, decltype(tp)>, int>);
@@ -38,7 +37,7 @@ KTEST(ktl_tuple_make_and_decay, "ktl/tuple") {
     KTEST_EXPECT_ALL(ktl::get<0>(tp) == 5, ktl::get<1>(tp) == 'z', ktl::get<2>(tp) == 2u);
 }
 
-KTEST(ktl_tuple_equality, "ktl/tuple") {
+KTEST_CASE(ktl_tuple_equality) {
     ktl::tuple<int, int> a{1, 2};
     ktl::tuple<int, int> b{1, 2};
     ktl::tuple<int, int> c{1, 3};
@@ -50,7 +49,7 @@ KTEST(ktl_tuple_equality, "ktl/tuple") {
     KTEST_EXPECT_TRUE(e1 == e2);
 }
 
-KTEST(ktl_tuple_tie_and_move, "ktl/tuple") {
+KTEST_CASE(ktl_tuple_tie_and_move) {
     int a          = 0;
     char b         = 0;
     ktl::tie(a, b) = ktl::make_tuple(11, 'q');
@@ -61,7 +60,7 @@ KTEST(ktl_tuple_tie_and_move, "ktl/tuple") {
     KTEST_EXPECT_ALL(ktl::get<0>(dst).value == 42, ktl::get<0>(dst).move_observed, ktl::get<1>(dst) == 5);
 }
 
-KTEST(ktl_tuple_structured_binding, "ktl/tuple") {
+KTEST_CASE(ktl_tuple_structured_binding) {
     ktl::tuple<int, char, bool> t{7, 'a', true};
 
     // Bind by reference: writes go back to the original tuple.

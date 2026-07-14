@@ -8,15 +8,19 @@
 #include "kernel/testing/testing.h"
 
 // These tests drive the global page frame allocator, which zeroes pages through
-// the real HHDM mapping and mutates the shared free/dirty pools. They are marked
-// as integration tests so the harness reboots into a fresh VM before and after
-// each, giving every test a pristine, deterministic allocator state. The zeroer
-// thread runs alongside them, so no test may assume which pool a page comes
-// from -- only end-state invariants (counts, zeroed contents) are asserted.
+// the real HHDM mapping and mutates the shared free/dirty pools. They are
+// merged into two integration stories, each booting one fresh VM. Within a
+// story the phases share that VM, so every phase snapshots the counters it
+// needs at its own start and asserts deltas; only the story's first phase may
+// rely on anything boot-shaped. The zeroer thread runs alongside them, so no
+// phase may assume which pool a page comes from -- only end-state invariants
+// (counts, zeroed contents) are asserted.
 
 // Set during boot from the Limine HHDM response; lets us touch a physical page
 // through its higher-half identity mapping.
 extern uintptr_t g_hhdm_offset;
+
+KTEST_MODULE("mm/pmm");
 
 namespace {
 
@@ -39,130 +43,132 @@ void dirty_page(kernel::mm::vm_paddr_t addr) {
 
 }  // namespace
 
-KTEST_INTEGRATION(pmm_alloc_returns_zeroed_aligned_page, "mm/pmm") {
-    auto page = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
+// Story: the single-page allocation lifecycle. A fresh allocation is zeroed
+// and aligned, an alloc/free pair balances the free-page count exactly,
+// consecutive allocations are distinct, and a dirtied-then-freed page is
+// re-zeroed before it is ever handed out again.
+KTEST_CASE_INTEGRATION(pmm_allocation_lifecycle) {
+    auto& pmm = kernel::mm::g_page_frame_allocator;
 
-    kernel::mm::vm_paddr_t addr = page.value();
-    KTEST_REQUIRE_NOT_EQUAL(addr, static_cast<size_t>(0));
-    KTEST_EXPECT_ALIGNED(addr, PAGE_SIZE);
-    KTEST_EXPECT_TRUE(page_is_zeroed(addr));
-
-    kernel::mm::g_page_frame_allocator.free(addr);
-}
-
-KTEST_INTEGRATION(pmm_free_restores_free_page_count, "mm/pmm") {
-    // The zeroer thread moves pages between pools but never changes the free
-    // count, so the accounting must balance exactly around an alloc/free pair.
-    size_t baseline = kernel::mm::g_page_frame_allocator.free_pages();
-
-    auto page       = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
-    KTEST_EXPECT_EQUAL(kernel::mm::g_page_frame_allocator.free_pages(), baseline - 1);
-
-    kernel::mm::g_page_frame_allocator.free(page.value());
-    KTEST_EXPECT_EQUAL(kernel::mm::g_page_frame_allocator.free_pages(), baseline);
-}
-
-KTEST_INTEGRATION(pmm_recycled_page_is_rezeroed, "mm/pmm") {
-    auto page = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
-    kernel::mm::vm_paddr_t addr = page.value();
-
-    // Dirty the page and free it, then allocate until it comes back. It may
-    // return via the inline alloc path or via the zeroer thread, but every
-    // page handed out along the way must be zeroed. Recycled pages sit ahead
-    // of pre-zeroed region tails in alloc order, so the bound only needs to
-    // clear the (small) pool of pages recycled since boot.
-    dirty_page(addr);
-    kernel::mm::g_page_frame_allocator.free(addr);
-
-    constexpr size_t MAX_ALLOCS = 256;
-    kernel::mm::vm_paddr_t taken[MAX_ALLOCS];
-    size_t taken_count = 0;
-    bool found         = false;
-    while (taken_count < MAX_ALLOCS) {
-        auto p = kernel::mm::g_page_frame_allocator.alloc();
-        KTEST_REQUIRE_TRUE(p.has_value());
-        KTEST_EXPECT_TRUE(page_is_zeroed(p.value()));
-        taken[taken_count++] = p.value();
-        if (p.value() == addr) {
-            found = true;
-            break;
-        }
+    // Phase 1: a fresh allocation is a nonzero, page-aligned, zeroed frame.
+    {
+        KTEST_REQUIRE_VALUE(addr, pmm.alloc());
+        KTEST_REQUIRE_NOT_EQUAL(addr, static_cast<size_t>(0));
+        KTEST_EXPECT_ALIGNED(addr, PAGE_SIZE);
+        KTEST_EXPECT_TRUE(page_is_zeroed(addr));
+        pmm.free(addr);
     }
-    KTEST_REQUIRE_TRUE(found);
 
-    for (size_t i = 0; i < taken_count; ++i) { kernel::mm::g_page_frame_allocator.free(taken[i]); }
+    // Phase 2: the zeroer thread moves pages between pools but never changes
+    // the free count, so the accounting must balance exactly around an
+    // alloc/free pair (baseline snapshotted here, not at boot).
+    {
+        size_t baseline = pmm.free_pages();
+        KTEST_REQUIRE_VALUE(addr, pmm.alloc());
+        KTEST_EXPECT_EQUAL(pmm.free_pages(), baseline - 1);
+        pmm.free(addr);
+        KTEST_EXPECT_EQUAL(pmm.free_pages(), baseline);
+    }
+
+    // Phase 3: consecutive allocations are distinct frames.
+    {
+        KTEST_REQUIRE_VALUE(a, pmm.alloc());
+        KTEST_REQUIRE_VALUE(b, pmm.alloc());
+        KTEST_REQUIRE_VALUE(c, pmm.alloc());
+        KTEST_EXPECT_ALL(a != b, b != c, a != c);
+        pmm.free(a);
+        pmm.free(b);
+        pmm.free(c);
+    }
+
+    // Phase 4: dirty the page and free it, then allocate until it comes back.
+    // It may return via the inline alloc path or via the zeroer thread, but
+    // every page handed out along the way must be zeroed. Recycled pages sit
+    // ahead of pre-zeroed region tails in alloc order, so the bound only needs
+    // to clear the small pool of pages recycled since boot plus the handful
+    // the earlier phases cycled through.
+    {
+        KTEST_REQUIRE_VALUE(addr, pmm.alloc());
+        dirty_page(addr);
+        pmm.free(addr);
+
+        constexpr size_t MAX_ALLOCS = 256;
+        kernel::mm::vm_paddr_t taken[MAX_ALLOCS];
+        size_t taken_count = 0;
+        bool found         = false;
+        while (taken_count < MAX_ALLOCS) {
+            auto p = pmm.alloc();
+            KTEST_REQUIRE_TRUE(p.has_value());
+            KTEST_EXPECT_TRUE(page_is_zeroed(p.value()));
+            taken[taken_count++] = p.value();
+            if (p.value() == addr) {
+                found = true;
+                break;
+            }
+        }
+        KTEST_REQUIRE_TRUE(found);
+
+        for (size_t i = 0; i < taken_count; ++i) { pmm.free(taken[i]); }
+    }
 }
 
-KTEST_INTEGRATION(pmm_consecutive_allocs_are_distinct, "mm/pmm") {
-    auto a = kernel::mm::g_page_frame_allocator.alloc();
-    auto b = kernel::mm::g_page_frame_allocator.alloc();
-    auto c = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(a.has_value());
-    KTEST_REQUIRE_TRUE(b.has_value());
-    KTEST_REQUIRE_TRUE(c.has_value());
+// Story: the zeroer and the statistics counters. Draining the zeroer reaches
+// the half-of-free-memory target with descriptors in agreement, a dirtied
+// freed page drained through zero_one_page comes back actually clean, and the
+// stats counters track alloc/free and the low-water mark.
+KTEST_CASE_INTEGRATION(pmm_zeroer_and_stats) {
+    auto& pmm = kernel::mm::g_page_frame_allocator;
 
-    KTEST_EXPECT_NOT_EQUAL(a.value(), b.value());
-    KTEST_EXPECT_NOT_EQUAL(b.value(), c.value());
-    KTEST_EXPECT_NOT_EQUAL(a.value(), c.value());
+    // Phase 1: drive the zeroer's work loop to quiescence; the background
+    // thread may do any share of the work, both paths funnel through
+    // zero_one_page.
+    {
+        while (pmm.zero_one_page()) {}
+        KTEST_EXPECT_TRUE(pmm.zeroed_pages() >= pmm.free_pages() / 2);
 
-    kernel::mm::g_page_frame_allocator.free(a.value());
-    kernel::mm::g_page_frame_allocator.free(b.value());
-    kernel::mm::g_page_frame_allocator.free(c.value());
-}
+        // Page descriptor states must track the allocator's own accounting.
+        KTEST_EXPECT_EQUAL(kernel::mm::g_page_descriptors.count(kernel::mm::page_state::ZEROED), pmm.zeroed_pages());
 
-KTEST_INTEGRATION(pmm_zeroer_prezeroes_half_of_free_memory, "mm/pmm") {
-    // Drive the zeroer's work loop to quiescence; the background thread may do
-    // any share of the work, both paths funnel through zero_one_page.
-    while (kernel::mm::g_page_frame_allocator.zero_one_page()) {}
-    KTEST_EXPECT_TRUE(kernel::mm::g_page_frame_allocator.zeroed_pages() >=
-                      kernel::mm::g_page_frame_allocator.free_pages() / 2);
+        // A pre-zeroed page skips alloc's inline memset, so it must already be
+        // clean.
+        KTEST_REQUIRE_VALUE(page, pmm.alloc());
+        KTEST_EXPECT_TRUE(page_is_zeroed(page));
+        pmm.free(page);
+    }
 
-    // Page descriptor states must track the allocator's own accounting.
-    KTEST_EXPECT_EQUAL(kernel::mm::g_page_descriptors.count(kernel::mm::page_state::ZEROED),
-                       kernel::mm::g_page_frame_allocator.zeroed_pages());
+    // Phase 2: a dirtied, freed page drained through zero_one_page must come
+    // back from the zeroed pool actually clean; alloc does not re-zero pool
+    // pages, so a missed memset in zero_one_page shows up as a dirty
+    // allocation here.
+    {
+        KTEST_REQUIRE_VALUE(addr, pmm.alloc());
+        dirty_page(addr);
+        pmm.free(addr);
 
-    // A pre-zeroed page skips alloc's inline memset, so it must already be
-    // clean.
-    auto page = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
-    KTEST_EXPECT_TRUE(page_is_zeroed(page.value()));
-    kernel::mm::g_page_frame_allocator.free(page.value());
-}
+        // Stop once the page is clean rather than draining to full quiescence;
+        // dirty pages drain ahead of region pre-zeroing, so this stays short.
+        while (!page_is_zeroed(addr) && pmm.zero_one_page()) {}
+        KTEST_EXPECT_TRUE(page_is_zeroed(addr));
+    }
 
-KTEST_INTEGRATION(pmm_dirty_page_repooled_zeroed, "mm/pmm") {
-    // A dirtied, freed page drained through zero_one_page must come back from
-    // the zeroed pool actually clean; alloc does not re-zero pool pages, so a
-    // missed memset in zero_one_page shows up as a dirty allocation here.
-    auto page = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
-    kernel::mm::vm_paddr_t addr = page.value();
-    dirty_page(addr);
-    kernel::mm::g_page_frame_allocator.free(addr);
+    // Phase 3: stats track alloc/free counts and the low-water mark. All
+    // comparisons are deltas against the snapshot taken here; low_water is
+    // monotone since boot, so it is at most this phase's starting free count.
+    {
+        auto before = pmm.stats();
+        KTEST_EXPECT_TRUE(before.free_pages + before.reserved_pages <= before.total_pages);
+        // Zeroed pages are a subset of free pages within any one snapshot.
+        KTEST_EXPECT_TRUE(before.zeroed_pooled + before.zeroed_region_tail <= before.free_pages);
 
-    // Stop once the page is clean rather than draining to full quiescence;
-    // dirty pages drain ahead of region pre-zeroing, so this stays short.
-    while (!page_is_zeroed(addr) && kernel::mm::g_page_frame_allocator.zero_one_page()) {}
-    KTEST_EXPECT_TRUE(page_is_zeroed(addr));
-}
+        KTEST_REQUIRE_VALUE(page, pmm.alloc());
+        auto during = pmm.stats();
+        KTEST_EXPECT_EQUAL(during.alloc_count, before.alloc_count + 1);
+        KTEST_EXPECT_TRUE(during.low_water <= during.free_pages);
+        KTEST_EXPECT_TRUE(during.low_water <= before.free_pages - 1);
 
-KTEST_INTEGRATION(pmm_stats_track_alloc_free_and_low_water, "mm/pmm") {
-    auto before = kernel::mm::g_page_frame_allocator.stats();
-    KTEST_EXPECT_TRUE(before.free_pages + before.reserved_pages <= before.total_pages);
-    // Zeroed pages are a subset of free pages within any one snapshot.
-    KTEST_EXPECT_TRUE(before.zeroed_pooled + before.zeroed_region_tail <= before.free_pages);
-
-    auto page = kernel::mm::g_page_frame_allocator.alloc();
-    KTEST_REQUIRE_TRUE(page.has_value());
-    auto during = kernel::mm::g_page_frame_allocator.stats();
-    KTEST_EXPECT_EQUAL(during.alloc_count, before.alloc_count + 1);
-    KTEST_EXPECT_TRUE(during.low_water <= during.free_pages);
-    KTEST_EXPECT_TRUE(during.low_water <= before.free_pages - 1);
-
-    kernel::mm::g_page_frame_allocator.free(page.value());
-    auto after = kernel::mm::g_page_frame_allocator.stats();
-    KTEST_EXPECT_EQUAL(after.free_count, before.free_count + 1);
-    KTEST_EXPECT_EQUAL(after.free_pages, before.free_pages);
+        pmm.free(page);
+        auto after = pmm.stats();
+        KTEST_EXPECT_EQUAL(after.free_count, before.free_count + 1);
+        KTEST_EXPECT_EQUAL(after.free_pages, before.free_pages);
+    }
 }

@@ -36,9 +36,24 @@ KTEST(name, module)                                // Standard test
 KTEST_WITH_INIT(name, module, init_fn)             // With setup function
 KTEST_INTEGRATION(name, module)                    // Requires a fresh VM
 KTEST_WITH_INIT_INTEGRATION(name, module, init_fn) // Fresh VM + setup
+KTEST_CRASH_TEST(name, module)                     // Expected to crash the kernel
 ```
 
 Integration tests tell the harness to restart QEMU before and after the test, ensuring a clean environment.
+
+Most test files cover a single module, so the preferred style declares the module (and optional shared init) once and defines each test with `KTEST_CASE`:
+
+```cpp
+KTEST_MODULE_WITH_INIT("obj/object", obj_object_init);  // or KTEST_MODULE("obj/object");
+
+static void obj_object_init() { register_all_test_types(); }
+
+KTEST_CASE(obj_object_signal_set_and_clear) { ... }
+KTEST_CASE_INTEGRATION(...) { ... }  // fresh VM, as KTEST_INTEGRATION
+KTEST_CASE_CRASH(...) { ... }        // expected crash, as KTEST_CRASH_TEST
+```
+
+Prefer fewer tests with more assertions: one test per behavior story over one fixture, using the phase-reporting `EXPECT` forms below. Keep a test separate when it pins a specific past bug, needs a virgin VM, or crashes the kernel.
 
 ### Assertions
 **REQUIRE** -- abort the test on failure:

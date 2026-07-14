@@ -11,6 +11,8 @@
 
 using namespace kernel::testing;
 
+KTEST_MODULE("ktl/deque");
+
 namespace {
 
 template <size_t Max> struct simple_int_deque {
@@ -42,7 +44,7 @@ template <size_t Max> struct simple_int_deque {
 
 }  // namespace
 
-KTEST(ktl_deque_push_front_back_order, "ktl/deque") {
+KTEST_CASE(ktl_deque_push_front_back_order) {
     ktl::deque<int> dq;
     KTEST_REQUIRE_TRUE(dq.empty());
 
@@ -61,7 +63,7 @@ KTEST(ktl_deque_push_front_back_order, "ktl/deque") {
     KTEST_EXPECT_VALUE(dq.back(), 3);
 }
 
-KTEST(ktl_deque_pop_front_back, "ktl/deque") {
+KTEST_CASE(ktl_deque_pop_front_back) {
     ktl::deque<int> dq;
     for (int i = 0; i < 5; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i)); }
 
@@ -80,7 +82,7 @@ KTEST(ktl_deque_pop_front_back, "ktl/deque") {
     KTEST_EXPECT_FALSE(dq.pop_front().has_value());
 }
 
-KTEST(ktl_deque_move_semantics, "ktl/deque") {
+KTEST_CASE(ktl_deque_move_semantics) {
     ktl::deque<tracking_value> dq;
 
     tracking_value front_value{10};
@@ -101,7 +103,7 @@ KTEST(ktl_deque_move_semantics, "ktl/deque") {
     KTEST_EXPECT_EQUAL(remaining.value, 20);
 }
 
-KTEST(ktl_deque_iterator_and_reserve, "ktl/deque") {
+KTEST_CASE(ktl_deque_iterator_and_reserve) {
     ktl::deque<int> dq;
     KTEST_REQUIRE_TRUE(dq.reserve(64));
     KTEST_EXPECT_TRUE(dq.capacity() >= 64);
@@ -136,7 +138,7 @@ KTEST(ktl_deque_iterator_and_reserve, "ktl/deque") {
     KTEST_EXPECT_EQUAL(*(dq.begin() + 20), 20);
 }
 
-KTEST(ktl_deque_stress_front_back_mixed, "ktl/deque") {
+KTEST_CASE(ktl_deque_stress_front_back_mixed) {
     ktl::deque<int> dq;
 
     constexpr size_t total_ops = 384;
@@ -179,7 +181,7 @@ KTEST(ktl_deque_stress_front_back_mixed, "ktl/deque") {
     KTEST_EXPECT_TRUE(dq.empty());
 }
 
-KTEST(ktl_deque_stress_block_reuse, "ktl/deque") {
+KTEST_CASE(ktl_deque_stress_block_reuse) {
     ktl::deque<int> dq;
 
     constexpr size_t passes     = 64;
@@ -213,7 +215,7 @@ KTEST(ktl_deque_stress_block_reuse, "ktl/deque") {
     }
 }
 
-KTEST(ktl_deque_range_for, "ktl/deque") {
+KTEST_CASE(ktl_deque_range_for) {
     ktl::deque<int> dq;
     for (int i = 0; i < 16; ++i) {
         if ((i % 2) == 0) {
@@ -238,7 +240,7 @@ KTEST(ktl_deque_range_for, "ktl/deque") {
     KTEST_EXPECT_EQUAL(verify_sum, total_sum);
 }
 
-KTEST(ktl_deque_index_across_blocks, "ktl/deque") {
+KTEST_CASE(ktl_deque_index_across_blocks) {
     // Spans several 16-element blocks so operator[] has to walk past block 0.
     constexpr int element_count = 50;
 

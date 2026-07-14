@@ -6,7 +6,9 @@
 
 using namespace kernel::sched;
 
-KTEST(task_lifecycle_states, "sched/task") {
+KTEST_MODULE("sched/task");
+
+KTEST_CASE(task_lifecycle_states) {
     auto task = ktl::make_ref<Task>();
     KTEST_REQUIRE_TRUE(static_cast<bool>(task));
     KTEST_EXPECT_TRUE(task->state() == task_state::NEW);
@@ -17,7 +19,7 @@ KTEST(task_lifecycle_states, "sched/task") {
     KTEST_EXPECT_TRUE(task->aspace() == nullptr);
 }
 
-KTEST(task_registry_snapshot, "sched/task") {
+KTEST_CASE(task_registry_snapshot) {
     ktl::vector<ktl::ref<Task>> before;
     KTEST_REQUIRE_TRUE(snapshot_tasks(before));
     auto task = ktl::make_ref<Task>();

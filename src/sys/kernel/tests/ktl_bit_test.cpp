@@ -10,14 +10,14 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_bit_popcount, "ktl/bit") {
+KTEST_MODULE("ktl/bit");
+
+KTEST_CASE(ktl_bit_counting_and_width) {
     EXPECT(ktl::popcount(uint32_t{0}) == 0);
     EXPECT(ktl::popcount(uint32_t{0xFFFFFFFF}) == 32);
     EXPECT(ktl::popcount(uint8_t{0b10110010}) == 4);
     static_assert(ktl::popcount(uint64_t{0xF}) == 4);
-}
 
-KTEST(ktl_bit_count_zeros, "ktl/bit") {
     // countl/countr on the full-width zero report the type width.
     EXPECT(ktl::countl_zero(uint32_t{0}) == 32);
     EXPECT(ktl::countr_zero(uint32_t{0}) == 32);
@@ -29,16 +29,14 @@ KTEST(ktl_bit_count_zeros, "ktl/bit") {
     EXPECT(ktl::countl_zero(uint8_t{1}) == 7);
     EXPECT(ktl::countr_zero(uint32_t{0x80}) == 7);
     EXPECT(ktl::countl_zero(uint16_t{0x8000}) == 0);
-}
 
-KTEST(ktl_bit_width, "ktl/bit") {
     EXPECT(ktl::bit_width(uint32_t{0}) == 0);
     EXPECT(ktl::bit_width(uint32_t{1}) == 1);
     EXPECT(ktl::bit_width(uint32_t{0xFF}) == 8);
     EXPECT(ktl::bit_width(uint32_t{0x100}) == 9);
 }
 
-KTEST(ktl_bit_single_bit, "ktl/bit") {
+KTEST_CASE(ktl_bit_power_of_two_queries_and_rounding) {
     EXPECT(ktl::has_single_bit(uint32_t{1}));
     EXPECT(ktl::has_single_bit(uint32_t{0x4000}));
     EXPECT(!ktl::has_single_bit(uint32_t{0}));
@@ -48,9 +46,7 @@ KTEST(ktl_bit_single_bit, "ktl/bit") {
     EXPECT(ktl::is_power_of_two(size_t{4096}));
     EXPECT(!ktl::is_power_of_two(size_t{4095}));
     static_assert(ktl::is_power_of_two(uint64_t{1} << 47));
-}
 
-KTEST(ktl_bit_floor_ceil, "ktl/bit") {
     EXPECT(ktl::bit_floor(uint32_t{0}) == uint32_t{0});
     EXPECT(ktl::bit_floor(uint32_t{1}) == uint32_t{1});
     EXPECT(ktl::bit_floor(uint32_t{100}) == uint32_t{64});
@@ -62,7 +58,7 @@ KTEST(ktl_bit_floor_ceil, "ktl/bit") {
     EXPECT(ktl::bit_ceil(uint32_t{128}) == uint32_t{128});
 }
 
-KTEST(ktl_bit_rotate, "ktl/bit") {
+KTEST_CASE(ktl_bit_rotate) {
     EXPECT(ktl::rotl(uint8_t{0b00010000}, 1) == uint8_t{0b00100000});
     EXPECT(ktl::rotl(uint8_t{0b10000000}, 1) == uint8_t{0b00000001});
     EXPECT(ktl::rotr(uint8_t{0b00000001}, 1) == uint8_t{0b10000000});
@@ -71,7 +67,7 @@ KTEST(ktl_bit_rotate, "ktl/bit") {
     EXPECT(ktl::rotl(uint32_t{0xDEADBEEF}, 32) == uint32_t{0xDEADBEEF});
 }
 
-KTEST(ktl_bit_align, "ktl/bit") {
+KTEST_CASE(ktl_bit_align) {
     EXPECT(ktl::align_up(uintptr_t{0x1000}, 0x1000) == uintptr_t{0x1000});
     EXPECT(ktl::align_up(uintptr_t{0x1001}, 0x1000) == uintptr_t{0x2000});
     EXPECT(ktl::align_up(uintptr_t{0x1FFF}, 0x1000) == uintptr_t{0x2000});

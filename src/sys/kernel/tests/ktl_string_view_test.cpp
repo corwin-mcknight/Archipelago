@@ -7,93 +7,15 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_string_view_default_safe_accessors, "ktl/string_view") {
+KTEST_MODULE("ktl/string_view");
+
+KTEST_CASE(ktl_string_view_default_safe_accessors) {
     ktl::string_view view;
 
     KTEST_EXPECT_ALL(view.empty(), view.size() == 0, view.data() == nullptr, view.find('a') == ktl::string_view::npos);
 }
 
-KTEST(ktl_string_view_find_respects_bounds, "ktl/string_view") {
-    ktl::string_view view("safety");
-
-    size_t first   = view.find('f');
-    size_t missing = view.find('s', view.size());
-
-    KTEST_EXPECT_TRUE(first == 2);
-    KTEST_EXPECT_TRUE(missing == ktl::string_view::npos);
-}
-
-KTEST(ktl_string_view_rfind_single_character, "ktl/string_view") {
-    ktl::string_view view("a");
-
-    size_t index = view.rfind('a');
-
-    KTEST_EXPECT_TRUE(index == 0);
-}
-
-KTEST(ktl_string_view_copy_does_not_overrun, "ktl/string_view") {
-    ktl::string_view view("kernel");
-
-    char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
-    size_t copied  = view.copy(buffer, 3);
-
-    KTEST_EXPECT_TRUE(copied == 3);
-    KTEST_EXPECT_EQUAL(buffer[0], 'k');
-    KTEST_EXPECT_EQUAL(buffer[1], 'e');
-    KTEST_EXPECT_EQUAL(buffer[2], 'r');
-    KTEST_EXPECT_EQUAL(buffer[3], 'x');
-
-    copied = view.copy(buffer, sizeof(buffer), view.size());
-    KTEST_EXPECT_TRUE(copied == 0);
-    KTEST_EXPECT_EQUAL(buffer[0], 'k');
-}
-
-KTEST(ktl_string_view_substr_clamps_count, "ktl/string_view") {
-    ktl::string_view view("archipelago");
-
-    ktl::string_view sub = view.substr(4, 50);
-
-    KTEST_EXPECT_TRUE(sub.size() == 7);
-    KTEST_EXPECT_EQUAL(sub[0], 'i');
-    KTEST_EXPECT_EQUAL(sub[6], 'o');
-}
-
-KTEST(ktl_string_view_starts_with_length_check, "ktl/string_view") {
-    ktl::string_view view("arch");
-
-    KTEST_EXPECT_FALSE(view.starts_with("archipelago"));
-    KTEST_EXPECT_TRUE(view.starts_with("ar"));
-}
-
-KTEST(ktl_string_view_compare_lexicographic, "ktl/string_view") {
-    ktl::string_view view("kernel");
-
-    KTEST_EXPECT_EQUAL(view.compare("kernel"), 0);
-    KTEST_EXPECT_TRUE(view.compare("kern") > 0);
-    KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
-}
-
-KTEST(ktl_string_view_equality_with_view, "ktl/string_view") {
-    ktl::string_view a("kernel");
-    ktl::string_view b("kernel");
-    ktl::string_view prefix("kern");
-
-    KTEST_EXPECT_TRUE(a == b);
-    KTEST_EXPECT_TRUE(a != prefix);
-    KTEST_EXPECT_TRUE(a.substr(0, 4) == prefix);
-    KTEST_EXPECT_TRUE(ktl::string_view() == ktl::string_view());
-}
-
-KTEST(ktl_string_view_equality_ignores_terminator, "ktl/string_view") {
-    // Views over the middle of a buffer are not NUL-terminated; equality must only read size() chars.
-    const char buffer[] = "kernelspace";
-    ktl::string_view middle(buffer + 3, 3);  // "nel"
-
-    KTEST_EXPECT_TRUE(middle == ktl::string_view("nel"));
-    KTEST_EXPECT_TRUE(middle != ktl::string_view("nels"));
-}
-
-KTEST(ktl_string_view_at_in_range, "ktl/string_view") {
+KTEST_CASE(ktl_string_view_element_access_and_iteration) {
     ktl::string_view view("kernel");
 
     KTEST_EXPECT_EQUAL(view.at(0), 'k');
@@ -103,11 +25,9 @@ KTEST(ktl_string_view_at_in_range, "ktl/string_view") {
 
     // The in-range path stays constant-evaluable.
     static_assert(ktl::string_view("abc").at(1) == 'b');
-}
 
-KTEST(ktl_string_view_iteration_and_misses, "ktl/string_view") {
-    ktl::string_view sv("abc");
     // begin()/end() drive range-for.
+    ktl::string_view sv("abc");
     int n     = 0;
     char last = 0;
     for (char c : sv) {
@@ -115,9 +35,74 @@ KTEST(ktl_string_view_iteration_and_misses, "ktl/string_view") {
         ++n;
     }
     KTEST_EXPECT_ALL(n == 3, last == 'c');
+}
 
-    KTEST_EXPECT_TRUE(sv.find('z', 0) == ktl::string_view::npos);
-    KTEST_EXPECT_TRUE(sv != "abd");
+KTEST_CASE(ktl_string_view_find_and_rfind) {
+    ktl::string_view view("safety");
+
+    KTEST_EXPECT_TRUE(view.find('f') == 2);
+    // A start position at or past size() finds nothing, even for a present character.
+    KTEST_EXPECT_TRUE(view.find('s', view.size()) == ktl::string_view::npos);
+    KTEST_EXPECT_TRUE(ktl::string_view("abc").find('z', 0) == ktl::string_view::npos);
+
+    KTEST_EXPECT_TRUE(ktl::string_view("a").rfind('a') == 0);
+}
+
+KTEST_CASE(ktl_string_view_copy_and_substr_clamp) {
+    ktl::string_view view("kernel");
+
+    // copy stops at the requested count and never overruns the destination.
+    char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+    size_t copied  = view.copy(buffer, 3);
+
+    KTEST_EXPECT_TRUE(copied == 3);
+    KTEST_EXPECT_EQUAL(buffer[0], 'k');
+    KTEST_EXPECT_EQUAL(buffer[1], 'e');
+    KTEST_EXPECT_EQUAL(buffer[2], 'r');
+    KTEST_EXPECT_EQUAL(buffer[3], 'x');
+
+    // A copy starting at size() writes nothing.
+    copied = view.copy(buffer, sizeof(buffer), view.size());
+    KTEST_EXPECT_TRUE(copied == 0);
+    KTEST_EXPECT_EQUAL(buffer[0], 'k');
+
+    // substr clamps an oversized count to the remaining length.
+    ktl::string_view sub = ktl::string_view("archipelago").substr(4, 50);
+    KTEST_EXPECT_TRUE(sub.size() == 7);
+    KTEST_EXPECT_EQUAL(sub[0], 'i');
+    KTEST_EXPECT_EQUAL(sub[6], 'o');
+}
+
+KTEST_CASE(ktl_string_view_compare_and_starts_with) {
+    ktl::string_view view("kernel");
+
+    KTEST_EXPECT_EQUAL(view.compare("kernel"), 0);
+    KTEST_EXPECT_TRUE(view.compare("kern") > 0);
+    KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
+
+    // starts_with must reject a prefix longer than the view.
+    ktl::string_view arch("arch");
+    KTEST_EXPECT_FALSE(arch.starts_with("archipelago"));
+    KTEST_EXPECT_TRUE(arch.starts_with("ar"));
+}
+
+KTEST_CASE(ktl_string_view_equality) {
+    ktl::string_view a("kernel");
+    ktl::string_view b("kernel");
+    ktl::string_view prefix("kern");
+
+    KTEST_EXPECT_TRUE(a == b);
+    KTEST_EXPECT_TRUE(a != prefix);
+    KTEST_EXPECT_TRUE(a.substr(0, 4) == prefix);
+    KTEST_EXPECT_TRUE(ktl::string_view() == ktl::string_view());
+    KTEST_EXPECT_TRUE(ktl::string_view("abc") != "abd");
+
+    // Views over the middle of a buffer are not NUL-terminated; equality must only read size() chars.
+    const char buffer[] = "kernelspace";
+    ktl::string_view middle(buffer + 3, 3);  // "nel"
+
+    KTEST_EXPECT_TRUE(middle == ktl::string_view("nel"));
+    KTEST_EXPECT_TRUE(middle != ktl::string_view("nels"));
 }
 
 #endif  // CONFIG_KERNEL_TESTING

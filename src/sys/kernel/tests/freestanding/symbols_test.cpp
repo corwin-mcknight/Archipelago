@@ -10,6 +10,8 @@
 #include "kernel/symbols.h"
 #include "kernel/testing/testing.h"
 
+KTEST_MODULE("symbols");
+
 namespace {
 
 [[gnu::noinline]] int symbols_test_anchor_fn() {
@@ -19,9 +21,10 @@ namespace {
 
 }  // namespace
 
-KTEST(symbols_available, "symbols") { KTEST_EXPECT_TRUE(kernel::symbols::available()); }
-
-KTEST(symbols_resolve_self, "symbols") {
+// One lookup story over the anchor function: the table is available, an exact function start
+// resolves at offset 0 with the right name, an interior address reports its offset, and
+// addresses outside the kernel image are rejected.
+KTEST_CASE(symbols_lookup_resolves_and_rejects) {
     KTEST_REQUIRE_TRUE(kernel::symbols::available());
 
     uintptr_t addr = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
@@ -47,53 +50,36 @@ KTEST(symbols_resolve_self, "symbols") {
         }
     }
     KTEST_EXPECT_TRUE(found);
-}
 
-KTEST(symbols_resolve_interior_offset, "symbols") {
-    KTEST_REQUIRE_TRUE(kernel::symbols::available());
-
-    uintptr_t base = reinterpret_cast<uintptr_t>(&symbols_test_anchor_fn);
-    auto sym       = kernel::symbols::lookup(base + 2);
-
-    KTEST_REQUIRE_TRUE(sym.has_value());
-    KTEST_EXPECT_EQUAL(sym->offset, static_cast<size_t>(2));
-}
-
-KTEST(symbols_lookup_garbage_address, "symbols") {
-    KTEST_REQUIRE_TRUE(kernel::symbols::available());
+    // An interior address resolves to the containing symbol with the right offset.
+    auto interior = kernel::symbols::lookup(addr + 2);
+    KTEST_REQUIRE_TRUE(interior.has_value());
+    KTEST_EXPECT_EQUAL(interior->offset, static_cast<size_t>(2));
 
     // Userspace-shaped address: nothing there.
-    auto sym = kernel::symbols::lookup(0x1000);
-    KTEST_EXPECT_FALSE(sym.has_value());
+    KTEST_EXPECT_FALSE(kernel::symbols::lookup(0x1000).has_value());
 }
 
-KTEST(symbols_demangle_nested, "symbols") {
+// The supported mangled-name forms: nested namespaces, anonymous namespaces, and unscoped names.
+KTEST_CASE(symbols_demangle_supported_forms) {
     char buf[128];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle("_ZN6kernel5shell10shell_mainEv", ktl::span(buf)));
     KTEST_EXPECT_TRUE(ktl::string_view(buf) == "kernel::shell::shell_main()");
-}
 
-KTEST(symbols_demangle_anonymous_namespace, "symbols") {
-    char buf[128];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle(
         "_ZN12_GLOBAL__N_112execute_testERN6kernel5shell11ShellOutputERNS0_7testing5ktestE", ktl::span(buf)));
     KTEST_EXPECT_TRUE(ktl::string_view(buf) == "(anonymous namespace)::execute_test()");
-}
 
-KTEST(symbols_demangle_unscoped, "symbols") {
-    char buf[64];
     KTEST_REQUIRE_TRUE(kernel::symbols::demangle("_Z9vsnprintfPcmPKc", ktl::span(buf)));
     KTEST_EXPECT_TRUE(ktl::string_view(buf) == "vsnprintf()");
 }
 
-KTEST(symbols_demangle_rejects_non_mangled, "symbols") {
+// Unsupported inputs must fail gracefully rather than emit garbage.
+KTEST_CASE(symbols_demangle_rejects_unsupported) {
     char buf[64];
+    // Plain (non-mangled) symbols.
     KTEST_EXPECT_FALSE(kernel::symbols::demangle("_start", ktl::span(buf)));
     KTEST_EXPECT_FALSE(kernel::symbols::demangle("init_global_constructors_array", ktl::span(buf)));
-}
-
-KTEST(symbols_demangle_rejects_complex, "symbols") {
-    char buf[64];
     // Contains a destructor token (`D1`) we don't support; expect graceful fail.
     KTEST_EXPECT_FALSE(kernel::symbols::demangle("_ZN6kernelD1Ev", ktl::span(buf)));
 }

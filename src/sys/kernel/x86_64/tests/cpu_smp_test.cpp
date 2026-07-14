@@ -10,6 +10,8 @@ extern volatile struct limine_mp_request mp_request;
 
 using namespace kernel::testing;
 
+KTEST_MODULE("x86/cpu");
+
 // Regression guard for F005: the per-core tables (g_cpu_cores[], gdts[]) must be keyed on the dense
 // logical core index -- the bootloader CPU-list position -- with the hardware LAPIC id stored as data
 // rather than used as a subscript. After boot, every core in [0, min(cpu_count, CONFIG_MAX_CORES))
@@ -18,7 +20,7 @@ using namespace kernel::testing;
 // Note: QEMU hands out dense LAPIC ids 0..N-1, so this cannot reproduce the sparse/>=16-id boot panic
 // that F005 describes; it locks the index<->lapic_id mapping and confirms every core completed
 // bring-up. Run under `-smp >1` to exercise the AP startup path as well as the boot processor.
-KTEST(cpu_smp_cores_initialized, "x86/cpu") {
+KTEST_CASE(cpu_smp_cores_initialized) {
     KTEST_REQUIRE(mp_request.response != nullptr);
 
     uint64_t count = mp_request.response->cpu_count;

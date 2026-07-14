@@ -10,8 +10,10 @@ using kernel::synchronization::critical_irq_lock_guard;
 using kernel::synchronization::critical_lock_guard;
 using kernel::synchronization::spinlock;
 
+KTEST_MODULE("kernel/spinlock");
+
 // A critical guard acquires/releases the underlying lock without masking IRQs.
-KTEST(spinlock_lock_guard_acquires, "kernel/spinlock") {
+KTEST_CASE(spinlock_lock_guard_acquires) {
     spinlock lock;
     KTEST_REQUIRE_TRUE(!lock.is_locked());
     {
@@ -21,23 +23,18 @@ KTEST(spinlock_lock_guard_acquires, "kernel/spinlock") {
     KTEST_EXPECT_TRUE(!lock.is_locked());
 }
 
-// IRQ-critical guards mask interrupts while the lock is held and restore the prior state after.
-KTEST(spinlock_lock_guard_is_irqsave, "kernel/spinlock") {
-    spinlock lock;
+// IRQ-critical guards mask interrupts while the lock is held and restore the prior state after,
+// including across nesting: interrupts stay masked until the OUTERMOST guard releases.
+KTEST_CASE(spinlock_irq_lock_guard_masks_and_nests) {
+    spinlock a;
+    spinlock b;
     kernel::arch::enable_interrupts();  // establish IF=1 going in (the normal post-boot state)
     KTEST_REQUIRE_TRUE(kernel::arch::interrupts_enabled());
     {
-        critical_irq_lock_guard guard(lock);
+        critical_irq_lock_guard guard(a);
         KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());  // masked while held
     }
     KTEST_EXPECT_TRUE(kernel::arch::interrupts_enabled());  // restored to prior (enabled) state
-}
-
-// Nested guards keep interrupts masked until the OUTERMOST guard releases, then restore.
-KTEST(spinlock_lock_guard_irqsave_nests, "kernel/spinlock") {
-    spinlock a;
-    spinlock b;
-    kernel::arch::enable_interrupts();
     {
         critical_irq_lock_guard ga(a);
         KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());
@@ -51,7 +48,7 @@ KTEST(spinlock_lock_guard_irqsave_nests, "kernel/spinlock") {
 }
 
 // save_and_disable / restore round-trips the interrupt-enable flag.
-KTEST(interrupts_save_restore_roundtrip, "kernel/spinlock") {
+KTEST_CASE(interrupts_save_restore_roundtrip) {
     kernel::arch::enable_interrupts();
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());  // disabled by the save

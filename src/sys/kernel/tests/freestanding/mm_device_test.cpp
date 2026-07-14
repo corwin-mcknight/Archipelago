@@ -12,9 +12,15 @@
 #include "kernel/testing/testing.h"
 
 // Device-pager tests wrap a PMM-carved scratch range as an MMIO-style window
-// and fault it into the kernel aspace. Integration-tier: fresh VM per test.
+// and fault it into the kernel aspace. One integration story against a single
+// fresh VM: the window maps uncached without allocating backing frames, and a
+// binding's cache request can only degrade, never upgrade, the pager's mode.
+// The free-page delta check runs in the first phase, while MAP_BASE's corner
+// of the address space is still untouched by any page tables.
 
 extern uintptr_t g_hhdm_offset;
+
+KTEST_MODULE("mm/device");
 
 namespace {
 using namespace kernel::mm;
@@ -25,70 +31,75 @@ constexpr uintptr_t MAP_BASE = 0x10000000000;  // above the 4 GiB boot identity 
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace
 
-KTEST_INTEGRATION(device_vmo_maps_window_uncached, "mm/device") {
-    // A wired scratch window standing in for MMIO.
-    auto window = kernel::mm::g_page_frame_allocator.alloc_contiguous(PAGES);
-    KTEST_REQUIRE_TRUE(window.has_value());
-    vm_paddr_t phys = window.value();
+KTEST_CASE_INTEGRATION(device_vmo_window_and_cache_mode) {
+    // Phase 1: a device VMO maps its window uncached, allocating no data frames.
+    {
+        // A wired scratch window standing in for MMIO.
+        auto window = kernel::mm::g_page_frame_allocator.alloc_contiguous(PAGES);
+        KTEST_REQUIRE_TRUE(window.has_value());
+        vm_paddr_t phys = window.value();
 
-    auto v          = create_device_vmo(phys, PAGES, vm_cache_mode::DEVICE);
-    KTEST_REQUIRE_TRUE(v.get() != nullptr);
+        auto v          = create_device_vmo(phys, PAGES, vm_cache_mode::DEVICE);
+        KTEST_REQUIRE_TRUE(v.get() != nullptr);
 
-    // Window frames are pinned.
-    page_descriptor* desc = g_page_descriptors.lookup(phys);
-    KTEST_REQUIRE_TRUE(desc != nullptr);
-    KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
+        // Window frames are pinned.
+        page_descriptor* desc = g_page_descriptors.lookup(phys);
+        KTEST_REQUIRE_TRUE(desc != nullptr);
+        KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
 
-    KTEST_REQUIRE_TRUE(kernel_aspace().root().map(MAP_BASE, PAGES * PAGE, v, 0, RW).is_ok());
+        KTEST_REQUIRE_TRUE(kernel_aspace().root().map(MAP_BASE, PAGES * PAGE, v, 0, RW).is_ok());
 
-    size_t free_before                                     = kernel::mm::g_page_frame_allocator.free_pages();
+        size_t free_before                                     = kernel::mm::g_page_frame_allocator.free_pages();
 
-    // Touch both pages: fills translate, they must not allocate frames.
-    *reinterpret_cast<volatile uint64_t*>(MAP_BASE)        = 0x11D0'11CE'0000'0001ull;
-    *reinterpret_cast<volatile uint64_t*>(MAP_BASE + PAGE) = 0x11D0'11CE'0000'0002ull;
-    KTEST_EXPECT_EQUAL(v->resident_pages(), PAGES);
-    KTEST_EXPECT_EQUAL(v->fill_count(), static_cast<uint64_t>(PAGES));
-    // No data frames were allocated: the delta is bookkeeping only -- one
-    // residency chunk plus up to three intermediate page-table frames for a
-    // previously untouched corner of the address space. Two more would mean
-    // the pager allocated backing frames.
-    KTEST_EXPECT_TRUE(free_before - kernel::mm::g_page_frame_allocator.free_pages() <= 4u);
+        // Touch both pages: fills translate, they must not allocate frames.
+        *reinterpret_cast<volatile uint64_t*>(MAP_BASE)        = 0x11D0'11CE'0000'0001ull;
+        *reinterpret_cast<volatile uint64_t*>(MAP_BASE + PAGE) = 0x11D0'11CE'0000'0002ull;
+        KTEST_EXPECT_EQUAL(v->resident_pages(), PAGES);
+        KTEST_EXPECT_EQUAL(v->fill_count(), static_cast<uint64_t>(PAGES));
+        // No data frames were allocated: the delta is bookkeeping only -- one
+        // residency chunk plus up to three intermediate page-table frames for a
+        // previously untouched corner of the address space. Two more would mean
+        // the pager allocated backing frames.
+        KTEST_EXPECT_TRUE(free_before - kernel::mm::g_page_frame_allocator.free_pages() <= 4u);
 
-    // Translations point straight into the window and carry the uncached
-    // attribute end-to-end.
-    auto t0 = kernel_aspace().walk_ext(MAP_BASE);
-    auto t1 = kernel_aspace().walk_ext(MAP_BASE + PAGE);
-    KTEST_REQUIRE_TRUE(t0.has_value() && t1.has_value());
-    KTEST_EXPECT_EQUAL(t0.value().paddr, phys);
-    KTEST_EXPECT_EQUAL(t1.value().paddr, phys + PAGE);
-    KTEST_EXPECT_TRUE(t0.value().cache == vm_cache_mode::DEVICE);
-    KTEST_EXPECT_TRUE(t1.value().cache == vm_cache_mode::DEVICE);
+        // Translations point straight into the window and carry the uncached
+        // attribute end-to-end.
+        auto t0 = kernel_aspace().walk_ext(MAP_BASE);
+        auto t1 = kernel_aspace().walk_ext(MAP_BASE + PAGE);
+        KTEST_REQUIRE_TRUE(t0.has_value() && t1.has_value());
+        KTEST_EXPECT_EQUAL(t0.value().paddr, phys);
+        KTEST_EXPECT_EQUAL(t1.value().paddr, phys + PAGE);
+        KTEST_EXPECT_TRUE(t0.value().cache == vm_cache_mode::DEVICE);
+        KTEST_EXPECT_TRUE(t1.value().cache == vm_cache_mode::DEVICE);
 
-    // Writes went to the caller's physical range.
-    KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
-    KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + PAGE + g_hhdm_offset), 0x11D0'11CE'0000'0002ull);
+        // Writes went to the caller's physical range.
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + PAGE + g_hhdm_offset),
+                           0x11D0'11CE'0000'0002ull);
 
-    // Teardown: the binding unmaps; window frames stay wired and intact.
-    KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());
-    KTEST_EXPECT_FALSE(kernel_aspace().walk(MAP_BASE).has_value());
-    v = ktl::ref<vmo>{};
-    KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
-    KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
-}
+        // Teardown: the binding unmaps; window frames stay wired and intact.
+        KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGES * PAGE).is_ok());
+        KTEST_EXPECT_FALSE(kernel_aspace().walk(MAP_BASE).has_value());
+        v = ktl::ref<vmo>{};
+        KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
+    }
 
-KTEST_INTEGRATION(device_binding_degrades_cache_mode, "mm/device") {
-    auto window = kernel::mm::g_page_frame_allocator.alloc_contiguous(1);
-    KTEST_REQUIRE_TRUE(window.has_value());
+    // Phase 2: a binding can only degrade the cache mode.
+    {
+        auto window = kernel::mm::g_page_frame_allocator.alloc_contiguous(1);
+        KTEST_REQUIRE_TRUE(window.has_value());
 
-    auto v = create_device_vmo(window.value(), 1, vm_cache_mode::DEVICE);
-    KTEST_REQUIRE_TRUE(v.get() != nullptr);
+        auto v = create_device_vmo(window.value(), 1, vm_cache_mode::DEVICE);
+        KTEST_REQUIRE_TRUE(v.get() != nullptr);
 
-    // Caller asked for CACHED; the pager's DEVICE mode wins (stricter-only).
-    KTEST_REQUIRE_TRUE(kernel_aspace().root().map(MAP_BASE, PAGE, v, 0, RW, vm_cache_mode::CACHED).is_ok());
-    *reinterpret_cast<volatile uint32_t*>(MAP_BASE) = 1;
-    auto t                                          = kernel_aspace().walk_ext(MAP_BASE);
-    KTEST_REQUIRE_TRUE(t.has_value());
-    KTEST_EXPECT_TRUE(t.value().cache == vm_cache_mode::DEVICE);
+        // Caller asked for CACHED; the pager's DEVICE mode wins (stricter-only).
+        KTEST_REQUIRE_TRUE(kernel_aspace().root().map(MAP_BASE, PAGE, v, 0, RW, vm_cache_mode::CACHED).is_ok());
+        *reinterpret_cast<volatile uint32_t*>(MAP_BASE) = 1;
+        auto t                                          = kernel_aspace().walk_ext(MAP_BASE);
+        KTEST_REQUIRE_TRUE(t.has_value());
+        KTEST_EXPECT_TRUE(t.value().cache == vm_cache_mode::DEVICE);
 
-    KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGE).is_ok());
+        KTEST_REQUIRE_TRUE(kernel_aspace().root().unmap(MAP_BASE, PAGE).is_ok());
+    }
 }

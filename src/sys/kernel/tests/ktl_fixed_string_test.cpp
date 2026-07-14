@@ -7,7 +7,9 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_fixed_string_view_fills_buffer_keeps_terminator, "ktl/fixed_string") {
+KTEST_MODULE("ktl/fixed_string");
+
+KTEST_CASE(ktl_fixed_string_view_fills_buffer_keeps_terminator) {
     // A view as long as the buffer must be truncated to leave room for the NUL,
     // so length()/c_str() never read past the array.
     ktl::fixed_string<4> s(ktl::string_view("abcd", 4));

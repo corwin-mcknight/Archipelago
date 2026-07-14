@@ -9,7 +9,9 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_vector_push_and_index, "ktl/vector") {
+KTEST_MODULE("ktl/vector");
+
+KTEST_CASE(ktl_vector_push_and_index) {
     ktl::vector<int> vec;
     KTEST_REQUIRE_TRUE(vec.empty());
 
@@ -27,7 +29,7 @@ KTEST(ktl_vector_push_and_index, "ktl/vector") {
     KTEST_EXPECT_FALSE(vec.at(10).has_value());
 }
 
-KTEST(ktl_vector_pop_and_clear, "ktl/vector") {
+KTEST_CASE(ktl_vector_pop_and_clear) {
     ktl::vector<int> vec;
     for (int i = 0; i < 5; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
 
@@ -39,7 +41,7 @@ KTEST(ktl_vector_pop_and_clear, "ktl/vector") {
     KTEST_EXPECT_FALSE(vec.pop_back().has_value());
 }
 
-KTEST(ktl_vector_reserve_grows, "ktl/vector") {
+KTEST_CASE(ktl_vector_reserve_grows) {
     ktl::vector<int> vec;
     KTEST_REQUIRE_TRUE(vec.reserve(16));
     KTEST_EXPECT_TRUE(vec.capacity() >= 16);
@@ -48,7 +50,7 @@ KTEST(ktl_vector_reserve_grows, "ktl/vector") {
     KTEST_EXPECT_ALL(vec.size() == 10, vec.capacity() >= 16);
 }
 
-KTEST(ktl_vector_move_semantics, "ktl/vector") {
+KTEST_CASE(ktl_vector_move_semantics) {
     ktl::vector<tracking_value> vec;
     tracking_value original{42};
 
@@ -61,7 +63,7 @@ KTEST(ktl_vector_move_semantics, "ktl/vector") {
     KTEST_EXPECT_TRUE(moved[0].move_observed);
 }
 
-KTEST(ktl_vector_iterators, "ktl/vector") {
+KTEST_CASE(ktl_vector_iterators) {
     ktl::vector<int> vec;
     for (int i = 0; i < 8; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
 
@@ -81,7 +83,7 @@ KTEST(ktl_vector_iterators, "ktl/vector") {
     KTEST_EXPECT_ALL(const_ref.cbegin() == const_ref.begin(), const_ref.cend() == const_ref.end());
 }
 
-KTEST(ktl_vector_range_for, "ktl/vector") {
+KTEST_CASE(ktl_vector_range_for) {
     ktl::vector<int> vec;
     for (int i = 0; i < 6; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
 
@@ -101,7 +103,7 @@ KTEST(ktl_vector_range_for, "ktl/vector") {
     KTEST_EXPECT_EQUAL(static_cast<size_t>(expected), const_ref.size());
 }
 
-KTEST(ktl_vector_growth_preserves_elements, "ktl/vector") {
+KTEST_CASE(ktl_vector_growth_preserves_elements) {
     // Push far past the initial capacity so several reallocations happen mid-fill.
     ktl::vector<int> vec;
     for (int i = 0; i < 100; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
@@ -110,7 +112,7 @@ KTEST(ktl_vector_growth_preserves_elements, "ktl/vector") {
     for (int i = 0; i < 100; ++i) { KTEST_EXPECT_EQUAL(vec[static_cast<size_t>(i)], i); }
 }
 
-KTEST(ktl_vector_non_default_constructible, "ktl/vector") {
+KTEST_CASE(ktl_vector_non_default_constructible) {
     struct wrapped {
         explicit wrapped(int v) : value(v) {}
         int value;
@@ -123,7 +125,7 @@ KTEST(ktl_vector_non_default_constructible, "ktl/vector") {
     KTEST_EXPECT_EQUAL(vec[9].value, 9);
 }
 
-KTEST(ktl_vector_const_index, "ktl/vector") {
+KTEST_CASE(ktl_vector_const_index) {
     ktl::vector<int> vec;
     KTEST_REQUIRE_TRUE(vec.push_back(7));
     const ktl::vector<int>& cref = vec;

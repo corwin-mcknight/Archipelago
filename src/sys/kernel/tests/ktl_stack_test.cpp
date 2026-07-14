@@ -10,7 +10,9 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_stack_push_pop_top, "ktl/stack") {
+KTEST_MODULE("ktl/stack");
+
+KTEST_CASE(ktl_stack_push_pop_top) {
     ktl::stack<int> values;
     KTEST_EXPECT_ALL(values.empty(), values.size() == 0);
 
@@ -27,7 +29,7 @@ KTEST(ktl_stack_push_pop_top, "ktl/stack") {
     KTEST_EXPECT_TRUE(values.empty());
 }
 
-KTEST(ktl_stack_move_and_alternate_container, "ktl/stack") {
+KTEST_CASE(ktl_stack_move_and_alternate_container) {
     ktl::stack<tracking_value> default_stack;
     tracking_value val{42};
 

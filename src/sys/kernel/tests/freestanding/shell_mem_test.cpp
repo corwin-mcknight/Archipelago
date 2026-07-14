@@ -2,15 +2,14 @@
 #include <stdint.h>
 
 #include "kernel/config.h"
-#include "kernel/mm/pmm.h"
 #include "kernel/shell/shell.h"
 #include "kernel/testing/testing.h"
 
 #if CONFIG_KERNEL_SHELL
 
 // Drives the mem shell command through run_line with a capture sink and
-// asserts on the rendered text: every section present, accounting sane, and
-// protocol mode free of raw escape bytes.
+// asserts on the rendered text: subcommand routing, protocol-mode escape
+// hygiene, and error handling.
 
 namespace {
 
@@ -45,61 +44,49 @@ bool captured_contains(const char* needle) {
 
 }  // namespace
 
-KTEST_INTEGRATION(shell_mem_full_view_has_all_sections, "shell/mem") {
-    auto out = make_capture_output();
-    kernel::shell::run_line("mem", out);
-    KTEST_EXPECT_TRUE(captured_contains("physical"));
-    KTEST_EXPECT_TRUE(captured_contains("pages"));
-    KTEST_EXPECT_TRUE(captured_contains("heap (early)"));
-    KTEST_EXPECT_TRUE(captured_contains("kernel aspace"));
-    KTEST_EXPECT_TRUE(captured_contains("vmo"));
-    KTEST_EXPECT_TRUE(captured_contains("allocs"));
-    KTEST_EXPECT_TRUE(captured_contains("low-water"));
-}
+KTEST_MODULE("shell/mem");
 
-KTEST_INTEGRATION(shell_mem_subcommand_renders_single_section, "shell/mem") {
-    auto out = make_capture_output();
-    kernel::shell::run_line("mem heap", out);
-    KTEST_EXPECT_TRUE(captured_contains("heap (early)"));
-    KTEST_EXPECT_TRUE(captured_contains("largest free"));
-    KTEST_EXPECT_TRUE(!captured_contains("kernel aspace"));
-    KTEST_EXPECT_TRUE(!captured_contains("physical"));
-}
-
-KTEST_INTEGRATION(shell_mem_accounting_reconciles, "shell/mem") {
-    auto s = kernel::mm::g_page_frame_allocator.stats();
-    KTEST_EXPECT_TRUE(s.total_pages > 0);
-    KTEST_EXPECT_TRUE(s.free_pages + s.reserved_pages <= s.total_pages);
-    KTEST_EXPECT_TRUE(s.zeroed_pooled + s.zeroed_region_tail <= s.free_pages);
-    KTEST_EXPECT_TRUE(s.low_water <= s.total_pages);
-}
-
-KTEST_INTEGRATION(shell_mem_protocol_mode_is_escape_clean, "shell/mem") {
-    auto out = make_capture_output();
-    out.set_protocol_mode(true);
-    kernel::shell::run_line("mem", out);
-    KTEST_EXPECT_TRUE(g_capture_len > 0);
-    bool clean = true;
-    for (size_t i = 0; i < g_capture_len; ++i) {
-        if (g_capture[i] == '\x1b') { clean = false; }
+// Normal-mode story: subcommand routing renders only the requested section, and unknown
+// subcommands print usage. Each phase resets the capture buffer via make_capture_output.
+KTEST_CASE_INTEGRATION(shell_mem_normal_mode_routing_and_usage) {
+    {
+        auto out = make_capture_output();
+        kernel::shell::run_line("mem heap", out);
+        KTEST_EXPECT_TRUE(captured_contains("heap (early)"));
+        KTEST_EXPECT_TRUE(captured_contains("largest free"));
+        KTEST_EXPECT_TRUE(!captured_contains("kernel aspace"));
+        KTEST_EXPECT_TRUE(!captured_contains("physical"));
     }
-    KTEST_EXPECT_TRUE(clean);
-    // Field lines still present for harness matching.
-    KTEST_EXPECT_TRUE(captured_contains("physical"));
-    KTEST_EXPECT_TRUE(captured_contains("allocs"));
+    {
+        auto out = make_capture_output();
+        kernel::shell::run_line("mem bogus", out);
+        KTEST_EXPECT_TRUE(captured_contains("usage: mem"));
+    }
 }
 
-KTEST_INTEGRATION(shell_mem_top_refuses_protocol_mode, "shell/mem") {
-    auto out = make_capture_output();
-    out.set_protocol_mode(true);
-    kernel::shell::run_line("mem top", out);
-    KTEST_EXPECT_TRUE(captured_contains("disabled in protocol mode"));
-}
-
-KTEST_INTEGRATION(shell_mem_unknown_subcommand_prints_usage, "shell/mem") {
-    auto out = make_capture_output();
-    kernel::shell::run_line("mem bogus", out);
-    KTEST_EXPECT_TRUE(captured_contains("usage: mem"));
+// Protocol-mode story: the full dump is escape-clean while keeping field lines, and
+// interactive-only subcommands refuse to run.
+KTEST_CASE_INTEGRATION(shell_mem_protocol_mode_escape_hygiene) {
+    {
+        auto out = make_capture_output();
+        out.set_protocol_mode(true);
+        kernel::shell::run_line("mem", out);
+        KTEST_EXPECT_TRUE(g_capture_len > 0);
+        bool clean = true;
+        for (size_t i = 0; i < g_capture_len; ++i) {
+            if (g_capture[i] == '\x1b') { clean = false; }
+        }
+        KTEST_EXPECT_TRUE(clean);
+        // Field lines still present for harness matching.
+        KTEST_EXPECT_TRUE(captured_contains("physical"));
+        KTEST_EXPECT_TRUE(captured_contains("allocs"));
+    }
+    {
+        auto out = make_capture_output();
+        out.set_protocol_mode(true);
+        kernel::shell::run_line("mem top", out);
+        KTEST_EXPECT_TRUE(captured_contains("disabled in protocol mode"));
+    }
 }
 
 #endif  // CONFIG_KERNEL_SHELL

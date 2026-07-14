@@ -11,7 +11,11 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_algorithm_find_if_returns_reference, "ktl/algorithm") {
+KTEST_MODULE("ktl/algorithm");
+
+// The find family: find_if / find / find_index_if all return an empty maybe on a
+// miss or an empty range, and a hit that refers back into the searched range.
+KTEST_CASE(ktl_algorithm_find_family) {
     int values[4] = {2, 4, 7, 8};
 
     auto found    = ktl::find_if(values, values + 4, [](int v) { return v > 5; });
@@ -24,19 +28,17 @@ KTEST(ktl_algorithm_find_if_returns_reference, "ktl/algorithm") {
 
     auto missing = ktl::find_if(values, values + 4, [](int v) { return v > 100; });
     KTEST_EXPECT_FALSE(missing.has_value());
-}
 
-KTEST(ktl_algorithm_find_by_value, "ktl/algorithm") {
-    const int values[3] = {1, 2, 3};
+    // find by value returns a reference to the matching element.
+    const int by_value[3] = {1, 2, 3};
 
-    auto found          = ktl::find(values, values + 3, 2);
-    KTEST_REQUIRE_TRUE(found.has_value());
-    KTEST_EXPECT_TRUE(&found.value() == &values[1]);
+    auto hit              = ktl::find(by_value, by_value + 3, 2);
+    KTEST_REQUIRE_TRUE(hit.has_value());
+    KTEST_EXPECT_TRUE(&hit.value() == &by_value[1]);
 
-    KTEST_EXPECT_FALSE(ktl::find(values, values + 3, 99).has_value());
-}
+    KTEST_EXPECT_FALSE(ktl::find(by_value, by_value + 3, 99).has_value());
 
-KTEST(ktl_algorithm_find_index_if_chains, "ktl/algorithm") {
+    // find_index_if yields the position, and chains through maybe.
     const uint32_t ids[4] = {10, 20, 30, 40};
 
     auto idx              = ktl::find_index_if(ids, ids + 4, [](uint32_t id) { return id == 30; });
@@ -49,9 +51,14 @@ KTEST(ktl_algorithm_find_index_if_chains, "ktl/algorithm") {
     KTEST_EXPECT_VALUE(doubled, (size_t)6);
 
     KTEST_EXPECT_FALSE(ktl::find_index_if(ids, ids + 4, [](uint32_t id) { return id == 99; }).has_value());
+
+    // Empty ranges find nothing.
+    int* none = nullptr;
+    KTEST_EXPECT_FALSE(ktl::find_if(none, none, [](int) { return true; }).has_value());
+    KTEST_EXPECT_FALSE(ktl::find_index_if(none, none, [](int) { return true; }).has_value());
 }
 
-KTEST(ktl_algorithm_size, "ktl/algorithm") {
+KTEST_CASE(ktl_algorithm_size) {
     // Built-in arrays report their extent, usable at compile time.
     static constexpr int values[5] = {1, 2, 3, 4, 5};
     static_assert(ktl::size(values) == 5);
@@ -62,12 +69,6 @@ KTEST(ktl_algorithm_size, "ktl/algorithm") {
     vec.push_back(10);
     vec.push_back(20);
     KTEST_EXPECT_EQUAL(ktl::size(vec), (size_t)2);
-}
-
-KTEST(ktl_algorithm_find_if_empty_range, "ktl/algorithm") {
-    int* none = nullptr;
-    KTEST_EXPECT_FALSE(ktl::find_if(none, none, [](int) { return true; }).has_value());
-    KTEST_EXPECT_FALSE(ktl::find_index_if(none, none, [](int) { return true; }).has_value());
 }
 
 #endif  // CONFIG_KERNEL_TESTING

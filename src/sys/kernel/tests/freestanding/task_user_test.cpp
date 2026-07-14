@@ -10,7 +10,9 @@
 
 using namespace kernel::sched;
 
-KTEST_INTEGRATION(user_task_lifecycle, "kernel/task") {
+KTEST_MODULE("kernel/task");
+
+KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     auto created = create_user_task("utest");
     KTEST_REQUIRE_TRUE(created.is_ok());
     ktl::ref<Task> task = created.unwrap();

@@ -22,35 +22,37 @@ fp_walk_result walk_frame_pointers(uintptr_t start_rbp);
 
 namespace { uint64_t g_probe_anchor = 0xa5a5'a5a5'a5a5'a5a5ULL; }  // namespace
 
-KTEST(crash_probe_mapped_global, "crash_probe") {
+KTEST_MODULE("crash_probe");
+
+KTEST_CASE(crash_probe_mapped_global) {
     KTEST_EXPECT_TRUE(kernel::crash::arch::probe_readable(reinterpret_cast<uintptr_t>(&g_probe_anchor)));
 }
 
-KTEST(crash_probe_mapped_stack, "crash_probe") {
+KTEST_CASE(crash_probe_mapped_stack) {
     volatile uint64_t local = 1;
     KTEST_EXPECT_TRUE(kernel::crash::arch::probe_readable(reinterpret_cast<uintptr_t>(&local)));
 }
 
-KTEST(crash_probe_rejects_non_canonical, "crash_probe") {
+KTEST_CASE(crash_probe_rejects_non_canonical) {
     KTEST_EXPECT_FALSE(kernel::crash::arch::probe_readable(0xdead'beef'dead'beefULL));
 }
 
-KTEST(crash_probe_rejects_null, "crash_probe") { KTEST_EXPECT_FALSE(kernel::crash::arch::probe_readable(0)); }
+KTEST_CASE(crash_probe_rejects_null) { KTEST_EXPECT_FALSE(kernel::crash::arch::probe_readable(0)); }
 
-KTEST(crash_probe_rejects_far_unmapped, "crash_probe") {
+KTEST_CASE(crash_probe_rejects_far_unmapped) {
     // 64 GiB past the HHDM base: canonical higher-half, but far beyond the test
     // VM's RAM and Limine's 4 GiB direct map, so provably unmapped.
     KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
     KTEST_EXPECT_FALSE(kernel::crash::arch::probe_readable(g_hhdm_offset + (64ull << 30)));
 }
 
-KTEST(crash_walk_rejects_wrapping_rbp, "crash_probe") {
+KTEST_CASE(crash_walk_rejects_wrapping_rbp) {
     // Canonical, higher-half, 8-aligned -- but rbp+8 would wrap to 0 (F022).
     auto bt = kernel::crash::arch::walk_frame_pointers(0xffff'ffff'ffff'fff8ULL);
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
-KTEST(crash_walk_rejects_unmapped_rbp, "crash_probe") {
+KTEST_CASE(crash_walk_rejects_unmapped_rbp) {
     // Plausible-looking rbp pointing into provably unmapped higher-half memory:
     // must terminate the walk instead of dereferencing (F022).
     KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
@@ -58,7 +60,7 @@ KTEST(crash_walk_rejects_unmapped_rbp, "crash_probe") {
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
-KTEST(crash_walk_fake_chain, "crash_probe") {
+KTEST_CASE(crash_walk_fake_chain) {
     // Build a two-frame fp chain on the (mapped, higher-half) stack using the
     // architecture's frame-record layout.
     uintptr_t ret1 = reinterpret_cast<uintptr_t>(&g_probe_anchor);

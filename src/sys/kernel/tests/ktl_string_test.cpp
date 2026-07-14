@@ -8,27 +8,21 @@
 
 using namespace kernel::testing;
 
-KTEST(ktl_strlen_empty_string, "ktl/string") {
-    const char buffer[] = "";
-    KTEST_EXPECT_TRUE(ktl::strlen(buffer) == 0);
-}
+KTEST_MODULE("ktl/string");
 
-KTEST(ktl_strlen_stops_at_first_null, "ktl/string") {
+KTEST_CASE(ktl_strlen_counts_to_first_null) {
+    const char empty[] = "";
+    KTEST_EXPECT_TRUE(ktl::strlen(empty) == 0);
+
+    // Counting stops at the first NUL and never reads or touches the bytes after it.
     char buffer[] = {'k', 'e', 'r', '\0', 'X', 'Y'};
-
-    size_t len    = ktl::strlen(buffer);
-
-    KTEST_EXPECT_TRUE(len == 3);
+    KTEST_EXPECT_TRUE(ktl::strlen(buffer) == 3);
     KTEST_EXPECT_EQUAL(buffer[4], 'X');
     KTEST_EXPECT_EQUAL(buffer[5], 'Y');
-}
 
-KTEST(ktl_strlen_supports_wide_char_type, "ktl/string") {
-    const char16_t buffer[] = {u'A', u'B', u'C', u'\0', u'Z'};
-
-    size_t len              = ktl::strlen(buffer);
-
-    KTEST_EXPECT_TRUE(len == 3);
+    // The template works over wider character types too.
+    const char16_t wide[] = {u'A', u'B', u'C', u'\0', u'Z'};
+    KTEST_EXPECT_TRUE(ktl::strlen(wide) == 3);
 }
 
 #endif  // CONFIG_KERNEL_TESTING

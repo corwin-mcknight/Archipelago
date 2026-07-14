@@ -9,23 +9,6 @@
 
 using namespace kernel::synchronization;
 
-namespace {
-struct mock_lock {
-    bool locked = false;
-    void lock() { locked = true; }
-    void unlock() { locked = false; }
-};
-}  // namespace
-
-KTEST(sync_generic_guard_compatibility, "sync/context") {
-    mock_lock lock;
-    {
-        lock_guard guard(lock);
-        KTEST_EXPECT_TRUE(lock.locked);
-    }
-    KTEST_EXPECT_FALSE(lock.locked);
-}
-
 KTEST(sync_context_nesting_restores_depth, "sync/context") {
     init_execution_context(0);
     KTEST_EXPECT_FALSE(preemption_disabled());

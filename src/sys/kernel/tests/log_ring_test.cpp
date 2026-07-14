@@ -13,8 +13,12 @@ using kernel::log_level;
 using kernel::log_message;
 using kernel::log_ring;
 
-// A reserved-then-published message drains in sequence order.
-KTEST(log_ring_reserve_publish_drain_order, "kernel/log_ring") {
+KTEST_MODULE("kernel/log_ring");
+
+// One ring through its basic lifecycle: reserved-then-published messages drain in sequence
+// order; a full ring fails to log without consuming a sequence and counts every drop; and
+// draining frees slots so reservation succeeds again with the accumulated drop count intact.
+KTEST_CASE(log_ring_write_full_drop_reuse_lifecycle) {
     log_ring<int, 4> ring;
     for (int i = 0; i < 3; i++) {
         uint64_t seq;
@@ -23,16 +27,12 @@ KTEST(log_ring_reserve_publish_drain_order, "kernel/log_ring") {
         *p = i * 10;
         ring.publish(seq);
     }
-
     int out[4];
     int n = 0;
     ring.drain([&](const int& v) { out[n++] = v; });
     KTEST_EXPECT_ALL(n == 3, out[0] == 0, out[1] == 10, out[2] == 20);
-}
 
-// A full ring fails to log without consuming a sequence, and counts the drop.
-KTEST(log_ring_fail_to_log_when_full, "kernel/log_ring") {
-    log_ring<int, 4> ring;
+    // Fill the drained ring back to capacity, then overflow it repeatedly.
     for (int i = 0; i < 4; i++) {
         uint64_t s;
         int* p = ring.reserve(s);
@@ -40,31 +40,19 @@ KTEST(log_ring_fail_to_log_when_full, "kernel/log_ring") {
         *p = i;
         ring.publish(s);
     }
-
     uint64_t s;
     int* p = ring.reserve(s);  // ring full
     KTEST_EXPECT_ALL(p == nullptr, ring.dropped() == 1, ring.size() == 4);
-}
+    for (int i = 0; i < 2; i++) { KTEST_REQUIRE_TRUE(ring.reserve(s) == nullptr); }
+    KTEST_EXPECT_EQUAL((int)ring.dropped(), 3);  // dropped accumulates per failed reservation
 
-// Draining frees slots so reservation succeeds again; the earlier drop still counts.
-KTEST(log_ring_reuse_after_drain, "kernel/log_ring") {
-    log_ring<int, 2> ring;
-    uint64_t s;
-    int* p = ring.reserve(s);
-    *p     = 1;
-    ring.publish(s);
-    p  = ring.reserve(s);
-    *p = 2;
-    ring.publish(s);
-    KTEST_REQUIRE_TRUE(ring.reserve(s) == nullptr);  // full
-
-    int sum = 0;
-    ring.drain([&](const int& v) { sum += v; });
-    KTEST_REQUIRE_TRUE(sum == 3);
-
+    // Draining frees slots so reservation succeeds again; the earlier drops still count.
+    int drained = 0;
+    ring.drain([&](const int&) { drained++; });
+    KTEST_REQUIRE_TRUE(drained == 4);
     p = ring.reserve(s);  // space again
     KTEST_REQUIRE_TRUE(p != nullptr);
-    KTEST_EXPECT_EQUAL((int)ring.dropped(), 1);
+    KTEST_EXPECT_EQUAL((int)ring.dropped(), 3);
     *p = 9;
     ring.publish(s);
 
@@ -75,7 +63,7 @@ KTEST(log_ring_reuse_after_drain, "kernel/log_ring") {
 
 // The ordered drain stops at an in-progress (reserved-but-unpublished) slot and resumes once
 // it is published.
-KTEST(log_ring_drain_stops_at_in_progress, "kernel/log_ring") {
+KTEST_CASE(log_ring_drain_stops_at_in_progress) {
     log_ring<int, 4> ring;
     uint64_t s0, s1;
     int* p0 = ring.reserve(s0);
@@ -95,8 +83,10 @@ KTEST(log_ring_drain_stops_at_in_progress, "kernel/log_ring") {
     KTEST_EXPECT_ALL(k == 2, out[0] == 100, out[1] == 200);
 }
 
-// After wrap, the history scan returns only the retained window, in order, with no stale entries.
-KTEST(log_ring_for_each_history_window, "kernel/log_ring") {
+// After wrap, the history scan returns only the retained window, in order, with no stale
+// entries -- and a crash scan over the same wrapped ring reconstructs sequence order while
+// flagging the in-progress slot.
+KTEST_CASE(log_ring_wrap_history_and_crash_scan) {
     log_ring<int, 4> ring;
     for (int i = 0; i < 6; i++) {
         uint64_t s;
@@ -116,10 +106,27 @@ KTEST(log_ring_for_each_history_window, "kernel/log_ring") {
     KTEST_REQUIRE_TRUE(n >= 1 && n <= 4);
     for (int i = 1; i < n; i++) { KTEST_REQUIRE_TRUE(vals[i] > vals[i - 1]); }  // strictly increasing
     KTEST_EXPECT_EQUAL(vals[n - 1], 5);                                         // newest message retained
+
+    uint64_t sw;
+    int* pw       = ring.reserve(sw);  // WRITING, not published
+    *pw           = 99;
+
+    int committed = 0;
+    int inprog    = 0;
+    int last      = -1;
+    ring.crash_scan([&](const int& v, bool in_progress) {
+        if (in_progress) {
+            inprog++;
+        } else {
+            committed++;
+            last = v;
+        }
+    });
+    KTEST_EXPECT_ALL(inprog == 1, committed >= 1, last == 5);
 }
 
 // The crash scan emits committed slots and flags in-progress ones.
-KTEST(log_ring_crash_scan_flags_in_progress, "kernel/log_ring") {
+KTEST_CASE(log_ring_crash_scan_flags_in_progress) {
     log_ring<int, 4> ring;
     uint64_t s0, s1;
     int* p0 = ring.reserve(s0);
@@ -142,7 +149,7 @@ KTEST(log_ring_crash_scan_flags_in_progress, "kernel/log_ring") {
 
 // Headline migration property: flushed slots are RETAINED as history, not discarded. A drained
 // (all-FLUSHED) ring must still replay the last Capacity messages in order via for_each.
-KTEST(log_ring_retains_flushed_history, "kernel/log_ring") {
+KTEST_CASE(log_ring_retains_flushed_history) {
     log_ring<int, 4> ring;
     for (int i = 0; i < 4; i++) {
         uint64_t s;
@@ -161,7 +168,7 @@ KTEST(log_ring_retains_flushed_history, "kernel/log_ring") {
 }
 
 // for_each(min_seq) filters below min_seq and returns the one-past-highest cursor.
-KTEST(log_ring_for_each_min_seq_and_cursor, "kernel/log_ring") {
+KTEST_CASE(log_ring_for_each_min_seq_and_cursor) {
     log_ring<int, 8> ring;
     for (int i = 0; i < 5; i++) {
         uint64_t s;
@@ -183,53 +190,8 @@ KTEST(log_ring_for_each_min_seq_and_cursor, "kernel/log_ring") {
     KTEST_EXPECT_EQUAL((int)c3, 100);
 }
 
-// dropped() accumulates across multiple full-ring reservation failures.
-KTEST(log_ring_dropped_accumulates, "kernel/log_ring") {
-    log_ring<int, 2> ring;
-    uint64_t s;
-    int* p = ring.reserve(s);
-    *p     = 1;
-    ring.publish(s);
-    p  = ring.reserve(s);
-    *p = 2;
-    ring.publish(s);  // full
-    for (int i = 0; i < 3; i++) { KTEST_REQUIRE_TRUE(ring.reserve(s) == nullptr); }
-    KTEST_EXPECT_EQUAL((int)ring.dropped(), 3);
-}
-
-// crash_scan reconstructs sequence order across a wrap and flags the in-progress slot.
-KTEST(log_ring_crash_scan_after_wrap, "kernel/log_ring") {
-    log_ring<int, 4> ring;
-    for (int i = 0; i < 6; i++) {
-        uint64_t s;
-        int* p = ring.reserve(s);
-        if (p == nullptr) {
-            ring.drain([](const int&) {});
-            p = ring.reserve(s);
-        }
-        *p = i;
-        ring.publish(s);
-    }
-    uint64_t sw;
-    int* pw       = ring.reserve(sw);  // WRITING, not published
-    *pw           = 99;
-
-    int committed = 0;
-    int inprog    = 0;
-    int last      = -1;
-    ring.crash_scan([&](const int& v, bool in_progress) {
-        if (in_progress) {
-            inprog++;
-        } else {
-            committed++;
-            last = v;
-        }
-    });
-    KTEST_EXPECT_ALL(inprog == 1, committed >= 1, last == 5);
-}
-
 // The history scan skips an in-progress slot but still shows committed neighbors in order.
-KTEST(log_ring_for_each_skips_in_progress, "kernel/log_ring") {
+KTEST_CASE(log_ring_for_each_skips_in_progress) {
     log_ring<int, 4> ring;
     uint64_t s0, s1, s2;
     int* p0 = ring.reserve(s0);

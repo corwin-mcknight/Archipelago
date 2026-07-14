@@ -7,6 +7,8 @@
 
 using namespace kernel::sched;
 
+KTEST_MODULE("sched/trace");
+
 static trace_record rec(uint64_t ts) {
     trace_record r;
     r.timestamp = ts;
@@ -17,7 +19,9 @@ static trace_record rec(uint64_t ts) {
     return r;
 }
 
-KTEST(sched_trace_ring_fills_and_orders, "sched/trace") {
+// One ring through partial fill then overfill: newest-first ordering, then wrap
+// overwriting the oldest entries.
+KTEST_CASE(sched_trace_ring_orders_and_wraps) {
     trace_ring<4> ring;
     KTEST_EXPECT_EQUAL(ring.size(), 0u);
     for (uint64_t i = 1; i <= 3; ++i) { ring.push(rec(i)); }
@@ -26,20 +30,16 @@ KTEST(sched_trace_ring_fills_and_orders, "sched/trace") {
     KTEST_REQUIRE_EQUAL(n, 3u);
     KTEST_EXPECT_EQUAL(out[0].timestamp, 3u);  // newest first
     KTEST_EXPECT_EQUAL(out[2].timestamp, 1u);
-}
 
-KTEST(sched_trace_ring_wraps_overwriting_oldest, "sched/trace") {
-    trace_ring<4> ring;
-    for (uint64_t i = 1; i <= 6; ++i) { ring.push(rec(i)); }
+    for (uint64_t i = 4; i <= 6; ++i) { ring.push(rec(i)); }
     KTEST_EXPECT_EQUAL(ring.size(), 4u);
-    trace_record out[4];
-    size_t n = ring.copy_newest(out, 4);
+    n = ring.copy_newest(out, 4);
     KTEST_REQUIRE_EQUAL(n, 4u);
     KTEST_EXPECT_EQUAL(out[0].timestamp, 6u);
     KTEST_EXPECT_EQUAL(out[3].timestamp, 3u);  // 1 and 2 overwritten
 }
 
-KTEST(sched_trace_ring_copy_caps_and_clear, "sched/trace") {
+KTEST_CASE(sched_trace_ring_copy_caps_and_clear) {
     trace_ring<4> ring;
     for (uint64_t i = 1; i <= 4; ++i) { ring.push(rec(i)); }
     trace_record out[2];
@@ -50,7 +50,7 @@ KTEST(sched_trace_ring_copy_caps_and_clear, "sched/trace") {
     KTEST_EXPECT_EQUAL(ring.copy_newest(out, 2), 0u);
 }
 
-KTEST(sched_cycles_to_human_units, "sched/trace") {
+KTEST_CASE(sched_cycles_to_human_units) {
     // hz=0: uncalibrated fallback, raw cycles
     KTEST_EXPECT_TRUE(cycles_to_human(1234, 0).unit[0] == 'c');
     KTEST_EXPECT_EQUAL(cycles_to_human(1234, 0).whole, 1234u);

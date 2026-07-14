@@ -10,19 +10,21 @@
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 
 // These tests deliberately crash the kernel to exercise the crash dump
-// pipeline. Marked KTEST_CRASH_TEST: the harness inverts the outcome
-// (a crash is pass; a clean exit is fail).
+// pipeline. Marked KTEST_CASE_CRASH: the harness inverts the outcome
+// (a crash is pass; a clean exit is fail). One VM death per test.
 
-KTEST_CRASH_TEST(crash_dump_panic, "crash") { panic("crash_dump_panic: induced panic"); }
+KTEST_MODULE("crash");
 
-KTEST_CRASH_TEST(crash_dump_pagefault, "crash") {
+KTEST_CASE_CRASH(crash_dump_panic) { panic("crash_dump_panic: induced panic"); }
+
+KTEST_CASE_CRASH(crash_dump_pagefault) {
     // Non-canonical address: bits 48..63 don't sign-extend bit 47.
     // Guarantees #GP regardless of paging (Limine identity-maps low memory).
     volatile int* p = reinterpret_cast<int*>(0xdead'beef'dead'beefULL);
     *p              = 0;
 }
 
-KTEST_CRASH_TEST(crash_dump_invalid_opcode, "crash") { kernel::arch::trigger_invalid_opcode(); }
+KTEST_CASE_CRASH(crash_dump_invalid_opcode) { kernel::arch::trigger_invalid_opcode(); }
 
 #pragma clang diagnostic pop
 

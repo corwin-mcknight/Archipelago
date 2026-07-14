@@ -29,26 +29,33 @@ struct counting_handler : kernel::hal::IInterruptHandler {
 };
 }  // namespace
 
-static void InterruptManagerTestInit() {
+KTEST_MODULE_WITH_INIT("x86_64/interrupts", interrupt_manager_test_init);
+
+static void interrupt_manager_test_init() {
     g_interrupt_manager.initialize();
     g_function_handler_calls     = 0;
     g_function_handler_last_regs = nullptr;
 }
 
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesFunctionHandler, "x86_64/interrupts", InterruptManagerTestInit) {
+// Function-handler lifecycle over one vector: register routes dispatch to the handler with the
+// right frame, and clear_handler stops further delivery.
+KTEST_CASE_INTEGRATION(interrupt_manager_function_handler_dispatch_and_clear) {
     register_frame_t frame{};
     frame.int_no = kernel_test_interrupt_no;
 
     g_interrupt_manager.register_interrupt(kernel_test_interrupt_no, &interrupt_test_function, 0);
     g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
 
-    KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
+    KTEST_REQUIRE_EQUAL(g_function_handler_calls, 1);
     KTEST_EXPECT_TRUE(g_function_handler_last_regs == &frame);
 
     g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
+    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
+
+    KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
 }
 
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/interrupts", InterruptManagerTestInit) {
+KTEST_CASE_INTEGRATION(interrupt_manager_dispatches_object_handler) {
     counting_handler handler{};
     register_frame_t frame{};
     frame.int_no = kernel_test_interrupt_no;
@@ -60,21 +67,6 @@ KTEST_WITH_INIT_INTEGRATION(InterruptManagerDispatchesObjectHandler, "x86_64/int
     KTEST_EXPECT_TRUE(handler.last_regs == &frame);
 
     g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
-}
-
-KTEST_WITH_INIT_INTEGRATION(InterruptManagerClearDisablesHandler, "x86_64/interrupts", InterruptManagerTestInit) {
-    register_frame_t frame{};
-    frame.int_no = kernel_test_interrupt_no;
-
-    g_interrupt_manager.register_interrupt(kernel_test_interrupt_no, &interrupt_test_function, 0);
-    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
-
-    KTEST_REQUIRE_EQUAL(g_function_handler_calls, 1);
-
-    g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
-    g_interrupt_manager.dispatch_interrupt(kernel_test_interrupt_no, &frame);
-
-    KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
 }
 
 #endif  // CONFIG_KERNEL_TESTING
