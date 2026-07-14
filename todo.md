@@ -30,7 +30,6 @@
 - rb_tree has no reverse iteration or predecessor query; find_le covers the interval-lookup need for now.
 
 ## Memory Management
-- Background page-zeroing worker thread.
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Implement NUMA awareness and reserved region handling.
 - Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
@@ -61,11 +60,13 @@
 - Implement handle transfer between tables for cross-process capability passing.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
-- Define the syscall ABI, establish the userspace entry stub, and implement dispatch plumbing.
+- Add user-pointer copy-in/copy-out before the first buffer-taking syscall.
+- Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
 ## Task & Thread Lifecycle
-- Introduce task and thread creation, teardown, and exception/fault propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
-- Implement the ELF loader, user-mode transition path, and privilege boundary verification.
+- Terminate only the faulting user task for unresolved user-mode faults; the current path panics the kernel until task-kill machinery exists.
+- Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
+- Implement the ELF loader; fixed embedded payload addresses currently exercise the user-mode transition and lifecycle.
 - Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
 
 ## IPC & Services

@@ -50,6 +50,28 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
     return ktl::result<HandleId>::ok(id);
 }
 
+ktl::result<HandleId> HandleTable::insert(ktl::ref<Object> object, Rights rights) {
+    return create_handle(ktl::move(object), rights);
+}
+
+void HandleTable::clear() {
+    kernel::synchronization::lock_guard guard(m_lock);
+    m_free_head = -1;
+    for (size_t i = m_entries.size(); i-- > 0;) {
+        auto& entry = m_entries[i];
+        entry.object.reset();
+        entry.rights = 0;
+        if (entry.generation == UINT32_MAX) {
+            entry.next_free = -1;
+            continue;
+        }
+        entry.generation++;
+        entry.next_free = m_free_head;
+        m_free_head     = static_cast<int32_t>(i);
+    }
+    m_count = 0;
+}
+
 ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask) {
     ktl::ref<Object> obj_copy;
     Rights new_rights;

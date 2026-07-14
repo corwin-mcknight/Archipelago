@@ -130,11 +130,17 @@ class system_log {
 
     uint64_t dropped() const { return m_ring.dropped(); }
 
+    // ANSI color in flushed output. Defaults to the build-time CONFIG_KERNEL_LOG_COLORS
+    // but is togglable at runtime (e.g. `log color on|off`).
+    void set_colors(bool on) { m_colors = on; }
+    bool colors() const { return m_colors; }
+
    private:
     static constexpr uint64_t k_sequence_mask = (static_cast<uint64_t>(1) << log_message::sequence_bits) - 1;
 
     log_ring<log_message, max_messages> m_ring;
     bool m_autoflush = true;
+    bool m_colors    = CONFIG_KERNEL_LOG_COLORS;
 };
 
 };  // namespace kernel

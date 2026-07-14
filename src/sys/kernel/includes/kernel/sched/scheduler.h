@@ -9,6 +9,8 @@
 
 namespace kernel::sched {
 
+class Task;
+
 // Bring the scheduler online on the boot core: the calling context becomes the idle thread and
 // the reaper is spawned. Requires obj_init() and a ticking timer.
 void init(uint32_t boot_core_index);
@@ -21,6 +23,7 @@ bool current_is_idle();
 
 // Create a kernel thread under task zero and make it runnable. name must be a string literal.
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg);
+ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg);
 
 void yield();
 // Block the current thread until at least `ticks` kernel ticks have elapsed. The idle thread
@@ -59,10 +62,14 @@ global_stats stats_snapshot();
 size_t trace_copy_newest(trace_record* out, size_t max);
 void trace_clear();
 
-// Lifecycle log stream (spawn/block/sleep/wake/exit/reap through g_log.debug). Default off.
-// Emit sites are interrupt-enabled contexts only -- never the switch path or tick handler.
+// Lifecycle log stream through g_log.debug. Creation/destruction events (spawn/exit/reap,
+// task create/teardown) are on by default; per-scheduling events (sleep/block/woke) flood
+// the log and additionally need verbose. Emit sites are interrupt-enabled contexts only --
+// never the switch path or tick handler.
 void set_lifecycle_log(bool enabled);
 bool lifecycle_log_enabled();
+void set_lifecycle_log_verbose(bool enabled);
+bool lifecycle_log_verbose_enabled();
 
 }  // namespace kernel::sched
 

@@ -1,8 +1,8 @@
 # Task Model
 
 > [!info] Partial Implementation
-> The kernel runs today as task zero, with its own handle table and threads.
-> Userspace tasks, ELF loading, and task creation and teardown are not yet implemented; the rest of this page describes the planned design.
+> Task creation, ring-3/U-mode entry, scheduling, and last-thread teardown are implemented for an embedded payload on x86_64 and riscv64.
+> ELF loading, region delegation, general task termination, and the broader syscall surface remain planned.
 
 A task is the unit of isolation in Archipelago.
 It is deliberately not called a "process" -- there is no UNIX lineage here.

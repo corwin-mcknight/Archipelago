@@ -47,6 +47,11 @@ uint64_t timestamp_hz();
 /// called once from late boot before the scheduler starts.
 void timestamp_calibrate();
 
+/// Publish the current kernel stack top for user-to-kernel transitions.
+void set_kernel_stack(uintptr_t top);
+/// Enter user mode at entry with the supplied user and kernel stacks. Never returns.
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top);
+
 }  // namespace kernel::arch
 
 /// Callee-saved context switch: pushes callee-saved registers on the current stack, stores the

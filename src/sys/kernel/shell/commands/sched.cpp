@@ -78,6 +78,17 @@ void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t h
     output.print("{0}", human_str(buf, sizeof(buf), cycles, hz));
 }
 
+// Threads live in their owning task since spawn_into; gather them across every task so
+// user threads show up alongside kernel ones.
+bool snapshot_all_threads(ktl::vector<ktl::ref<Thread>>& out) {
+    ktl::vector<ktl::ref<Task>> tasks;
+    if (!snapshot_tasks(tasks)) { return false; }
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        if (!tasks[i]->snapshot_threads(out)) { return false; }
+    }
+    return true;
+}
+
 // Resolve an id through a threads snapshot; reaped threads print as bare ids.
 const char* name_of(const ktl::vector<ktl::ref<Thread>>& threads, uint64_t id) {
     for (size_t i = 0; i < threads.size(); ++i) {
@@ -89,7 +100,7 @@ const char* name_of(const ktl::vector<ktl::ref<Thread>>& threads, uint64_t id) {
 void cmd_threads(kernel::shell::ShellOutput& output, bool top) {
     uint64_t hz = kernel::arch::timestamp_hz();
     ktl::vector<ktl::ref<Thread>> threads;
-    if (!kernel_task()->snapshot_threads(threads)) {
+    if (!snapshot_all_threads(threads)) {
         output.print("snapshot failed (oom)\n");
         return;
     }
@@ -154,7 +165,7 @@ void cmd_trace_dump(kernel::shell::ShellOutput& output, size_t n) {
     uint64_t hz = kernel::arch::timestamp_hz();
     auto s      = stats_snapshot();
     ktl::vector<ktl::ref<Thread>> threads;
-    kernel_task()->snapshot_threads(threads);
+    snapshot_all_threads(threads);
     output.print("trace: {0} records (newest first, capacity {1})\n", got, CONFIG_SCHED_TRACE_EVENTS);
     for (size_t i = 0; i < got; ++i) {
         auto& r = recs[i];
@@ -174,7 +185,7 @@ void cmd_trace_dump(kernel::shell::ShellOutput& output, size_t n) {
 
 void sched_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     if (argc < 2) {
-        output.print("usage: sched threads|top|stats|trace dump [n]|trace clear|log on|off\n");
+        output.print("usage: sched threads|top|stats|trace dump [n]|trace clear|log on|off|verbose\n");
         return;
     }
     if (argv[1] == "threads") {
@@ -204,12 +215,18 @@ void sched_handler(int argc, const ktl::string_view argv[], kernel::shell::Shell
     } else if (argv[1] == "log") {
         if (argc >= 3 && argv[2] == "on") {
             set_lifecycle_log(true);
+            set_lifecycle_log_verbose(false);
             output.print("lifecycle log on\n");
+        } else if (argc >= 3 && argv[2] == "verbose") {
+            set_lifecycle_log(true);
+            set_lifecycle_log_verbose(true);
+            output.print("lifecycle log verbose\n");
         } else if (argc >= 3 && argv[2] == "off") {
             set_lifecycle_log(false);
+            set_lifecycle_log_verbose(false);
             output.print("lifecycle log off\n");
         } else {
-            output.print("usage: sched log on|off\n");
+            output.print("usage: sched log on|off|verbose\n");
         }
     } else {
         output.print("unknown subcommand: {0}\n", argv[1]);

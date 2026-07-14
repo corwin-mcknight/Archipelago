@@ -130,14 +130,16 @@
 
 #else  // CONFIG_KERNEL_TESTING
 
-#define KTEST(name_sym, module_literal) \
-    static void name_sym##_body();      \
-    static void name_sym##_body()
+// Test bodies are dead code when testing is off; [[maybe_unused]] keeps the
+// forward-declaration + definition pair from tripping -Wunused-function.
+#define KTEST(name_sym, module_literal)        \
+    [[maybe_unused]] static void name_sym##_body(); \
+    [[maybe_unused]] static void name_sym##_body()
 
 #define KTEST_WITH_INIT(name_sym, module_literal, init_sym) \
-    static void name_sym##_body();                          \
-    static void init_sym();                                 \
-    static void name_sym##_body()
+    [[maybe_unused]] static void name_sym##_body();         \
+    [[maybe_unused]] static void init_sym();                \
+    [[maybe_unused]] static void name_sym##_body()
 
 #define KTEST_WITH_FLAGS(name_sym, module_literal, flags_value) KTEST(name_sym, module_literal)
 
@@ -149,9 +151,9 @@
 #define KTEST_WITH_INIT_INTEGRATION(name_sym, module_literal, init_sym) \
     KTEST_WITH_INIT(name_sym, module_literal, init_sym)
 
-#define KTEST_NOINIT(name_sym, module_literal) \
-    static void name_sym##_body();             \
-    static void name_sym##_body()
+#define KTEST_CRASH_TEST(name_sym, module_literal) KTEST(name_sym, module_literal)
+
+#define KTEST_NOINIT(name_sym, module_literal) KTEST(name_sym, module_literal)
 
 #define KTEST_EXPECT(condition) ((void)0)
 #define KTEST_EXPECT_EQUAL(actual, expected) ((void)0)

@@ -35,14 +35,14 @@ void kernel::system_log::flush() {
         // Render the front string
         ktl::fixed_string<32> front;
 
-#if CONFIG_KERNEL_LOG_COLORS
-        const char* color = log_level_data[ktl::max(clamped_level, 1)].color;
-        ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:s}{1:03d}.{2:03d} {3:1c} | ", color,
-                                          time_seconds, time_ms, status);
-#else
-        ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:03d}.{1:03d} {2:1c} | ", time_seconds,
-                                          time_ms, status);
-#endif
+        if (m_colors) {
+            const char* color = log_level_data[ktl::max(clamped_level, 1)].color;
+            ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:s}{1:03d}.{2:03d} {3:1c} | ", color,
+                                              time_seconds, time_ms, status);
+        } else {
+            ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:03d}.{1:03d} {2:1c} | ", time_seconds,
+                                              time_ms, status);
+        }
         for (auto dev : devices) {
             dev->write_string(front);
             message.text.for_each([&](char c) {
@@ -50,9 +50,7 @@ void kernel::system_log::flush() {
                 if (c == '\n') { dev->write_string("..........| "); }
             });
 
-#if CONFIG_KERNEL_LOG_COLORS
-            dev->write_string("\033[0m");
-#endif
+            if (m_colors) { dev->write_string("\033[0m"); }
             dev->write_byte('\n');
         }
     });

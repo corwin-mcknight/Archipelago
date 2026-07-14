@@ -1,6 +1,8 @@
 # MILESTONES
 
 ## Milestone 1 -- User-mode Hello World
+Task lifecycle, per-task address spaces, privilege transitions, `yield`, and `exit` are implemented on x86_64 and riscv64 using an embedded validation payload. ELF loading, serial output, and handle-based operation dispatch remain to complete this milestone.
+
 An initial user program is loaded and run by the kernel.
 It outputs "hello world" to the serial console via a syscall.
 The program's ELF binary is loaded by the kernel's built-in ELF loader, mapped with VMOs into the task's virtual address space.

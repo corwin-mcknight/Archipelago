@@ -81,6 +81,7 @@ struct idt_ptr {
 
 void init_gdt(int corenum);
 void init_idt();
+void set_tss_rsp0(uintptr_t top);
 
 void idt_set_gate(unsigned char num, uintptr_t base, unsigned short sel, unsigned char flags);
 

@@ -1,30 +1,42 @@
 // Supervisor trap entry: build a register_frame_t on the kernel stack and hand
 // it to riscv_trap_handler. Byte offsets must match the field order in
-// includes/kernel/riscv/registers.h exactly. Kernel-mode only for now -- traps
-// are taken on the current stack (no sscratch swap until user mode exists).
+// includes/kernel/riscv/registers.h exactly. sscratch is zero in supervisor
+// mode and holds the current kernel stack top while user mode is running.
 
 .section .text
 .global riscv_trap_entry
 .align 2
 riscv_trap_entry:
-    // Reentrancy backstop: a stack overflow re-faults on the first frame
-    // store below, which would recurse here forever. If sp has fallen below
-    // the boot stack's low-water mark, divert to the emergency stack and
-    // panic instead of corrupting whatever mapping sp lands on. Floor is 0
-    // until trap_init runs, which keeps the check inert.
+    csrrw sp, sscratch, sp
+    bnez sp, .Lfrom_user
+    csrrw sp, sscratch, sp
+    // Check the tripwire before touching memory: a stack overflow re-faults on the
+    // first frame store below, which would recurse here forever. t0 is stashed
+    // register-only in sscratch (zero in supervisor mode) across the check.
     csrw sscratch, t0
     la   t0, g_kstack_floor
     ld   t0, 0(t0)
     bltu sp, t0, trap_sp_overflow
-    csrr t0, sscratch
-
+    csrrw t0, sscratch, zero
     addi sp, sp, -288
+    sd t0, 32(sp)
+    sd t1, 40(sp)
+    addi t1, sp, 288
+    sd t1, 8(sp)
+    j .Lsave_frame
 
+.Lfrom_user:
+    addi sp, sp, -288
+    sd t0, 32(sp)
+    sd t1, 40(sp)
+    csrr t0, sscratch
+    sd t0, 8(sp)
+    csrw sscratch, zero
+
+.Lsave_frame:
     sd ra, 0(sp)
     sd gp, 16(sp)
     sd tp, 24(sp)
-    sd t0, 32(sp)
-    sd t1, 40(sp)
     sd t2, 48(sp)
     sd s0, 56(sp)
     sd s1, 64(sp)
@@ -51,9 +63,6 @@ riscv_trap_entry:
     sd t5, 232(sp)
     sd t6, 240(sp)
 
-    addi t0, sp, 288        // pre-trap stack pointer
-    sd t0, 8(sp)
-
     csrr t0, sepc
     sd t0, 248(sp)
     csrr t0, sstatus
@@ -72,7 +81,12 @@ riscv_trap_entry:
     csrw sepc, t0
     ld t0, 256(sp)
     csrw sstatus, t0
+    andi t0, t0, 256
+    bnez t0, .Lrestore_frame
+    addi t0, sp, 288
+    csrw sscratch, t0
 
+.Lrestore_frame:
     ld ra, 0(sp)
     ld gp, 16(sp)
     ld tp, 24(sp)
@@ -103,8 +117,7 @@ riscv_trap_entry:
     ld t5, 232(sp)
     ld t6, 240(sp)
     ld t0, 32(sp)
-
-    addi sp, sp, 288
+    ld sp, 8(sp)
     sret
 
 // Registers are unrecoverable here (the faulting context already lost sp);

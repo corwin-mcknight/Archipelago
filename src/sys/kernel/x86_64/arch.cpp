@@ -3,7 +3,19 @@
 #include "kernel/log.h"
 #include "kernel/panic.h"
 #include "kernel/time.h"
+#include "kernel/x86/cpu.h"
+#include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/ioport.h"
+
+extern "C" uint64_t g_syscall_kernel_rsp;
+extern "C" void syscall_entry();
+
+namespace {
+constexpr uint32_t MSR_EFER  = 0xC0000080;
+constexpr uint32_t MSR_STAR  = 0xC0000081;
+constexpr uint32_t MSR_LSTAR = 0xC0000082;
+constexpr uint32_t MSR_FMASK = 0xC0000084;
+}  // namespace
 
 [[noreturn]] void hcf() {
     asm volatile("cli");
@@ -11,6 +23,32 @@
 }
 
 namespace kernel::arch {
+
+void set_kernel_stack(uintptr_t top) {
+    kernel::x86::set_tss_rsp0(top);
+    g_syscall_kernel_rsp = top;
+}
+
+void syscall_init() {
+    x86::wrmsr(MSR_EFER, x86::rdmsr(MSR_EFER) | 1);
+    x86::wrmsr(MSR_STAR, (0x13ULL << 48) | (0x08ULL << 32));
+    x86::wrmsr(MSR_LSTAR, reinterpret_cast<uint64_t>(&syscall_entry));
+    x86::wrmsr(MSR_FMASK, (1u << 8) | (1u << 9) | (1u << 10) | (1u << 18));
+}
+
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top) {
+    disable_interrupts();
+    set_kernel_stack(kstack_top);
+    asm volatile(
+        "movq %0, %%rcx\n"
+        "movq $0x202, %%r11\n"
+        "movq %1, %%rsp\n"
+        "sysretq\n"
+        :
+        : "r"(entry), "r"(user_sp)
+        : "rcx", "r11", "memory");
+    __builtin_unreachable();
+}
 
 void enable_interrupts() { asm volatile("sti"); }
 void disable_interrupts() { asm volatile("cli"); }

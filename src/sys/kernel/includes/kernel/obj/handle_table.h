@@ -40,6 +40,11 @@ class HandleTable {
 
     template <typename T, typename... Args> ktl::result<HandleId> emplace(Rights rights, Args&&... args);
 
+    // Share an already-existing object into this table.
+    ktl::result<HandleId> insert(ktl::ref<Object> object, Rights rights);
+    // Close every live handle and rebuild the free list.
+    void clear();
+
     ktl::result<HandleId> duplicate(HandleId source, Rights rights_mask);
     ktl::result<void> close(HandleId id);
 

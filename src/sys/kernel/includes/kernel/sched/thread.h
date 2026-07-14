@@ -5,6 +5,7 @@
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
 
+#include <ktl/ref>
 #include <ktl/result>
 
 namespace kernel::sched {
@@ -40,7 +41,8 @@ class Thread : public kernel::obj::Object {
     Thread(uintptr_t kstack_phys, uintptr_t kstack_virt_base)
         : Object(TYPE_ID),
           m_kstack_phys(kstack_phys),
-          m_kstack_floor(kstack_virt_base + CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN) {}
+          m_kstack_floor(kstack_virt_base + CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN),
+          m_kstack_top(kstack_virt_base + CONFIG_KERNEL_STACK_SIZE) {}
 
     thread_state state() const { return m_state; }
     void set_state(thread_state s) { m_state = s; }
@@ -48,6 +50,10 @@ class Thread : public kernel::obj::Object {
     uintptr_t kstack_phys() const { return m_kstack_phys; }
     uintptr_t kstack_floor() const { return m_kstack_floor; }
     void set_kstack_floor(uintptr_t floor) { m_kstack_floor = floor; }
+    uintptr_t kstack_top() const { return m_kstack_top; }
+
+    ktl::ref<kernel::obj::Object>& owner() { return m_owner; }
+    void set_owner(ktl::ref<kernel::obj::Object> owner) { m_owner = ktl::move(owner); }
 
     uintptr_t saved_sp() const { return m_saved_sp; }
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
@@ -79,8 +85,10 @@ class Thread : public kernel::obj::Object {
     thread_state m_state     = thread_state::READY;
     uintptr_t m_kstack_phys  = 0;
     uintptr_t m_kstack_floor = 0;
+    uintptr_t m_kstack_top   = 0;
     uintptr_t m_saved_sp     = 0;
-    uint32_t m_slice         = CONFIG_SCHED_TIMESLICE_TICKS;
+    ktl::ref<kernel::obj::Object> m_owner;
+    uint32_t m_slice = CONFIG_SCHED_TIMESLICE_TICKS;
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
 };

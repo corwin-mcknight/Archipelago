@@ -1,4 +1,5 @@
 #include <kernel/cpu.h>
+#include <kernel/x86/cpu.h>
 #include <kernel/x86/descriptor_tables.h>
 #include <kernel/x86/ioport.h>
 #include <string.h>
@@ -37,8 +38,8 @@ void kernel::x86::init_gdt(int corenum) {
     gdts[corenum].entries[0]     = {0x0000, 0x00, 0x00, 0x00, 0x00, 0x00};  // Null Entry
     gdts[corenum].entries[1]     = {0xFFFF, 0x00, 0x00, 0x9A, 0xAF, 0x00};  // Kernel Code
     gdts[corenum].entries[2]     = {0xFFFF, 0x00, 0x00, 0x92, 0xAF, 0x00};  // Kernel Data
-    gdts[corenum].entries[3]     = {0xFFFF, 0x00, 0x00, 0xFA, 0xAF, 0x00};  // User Code
-    gdts[corenum].entries[4]     = {0xFFFF, 0x00, 0x00, 0xF2, 0xAF, 0x00};  // User Data
+    gdts[corenum].entries[3]     = {0xFFFF, 0x00, 0x00, 0xF2, 0xAF, 0x00};  // User Data
+    gdts[corenum].entries[4]     = {0xFFFF, 0x00, 0x00, 0xFA, 0xAF, 0x00};  // User Code
 
     // TSS
     uintptr_t tss_addr           = (uintptr_t)&gdts[corenum].tss;
@@ -57,6 +58,8 @@ void kernel::x86::init_gdt(int corenum) {
 
     kernel_x86_install_gdt((uintptr_t)&gdts[corenum].pointer);
 }
+
+void kernel::x86::set_tss_rsp0(uintptr_t top) { gdts[kernel::x86::current_core_index()].tss.rsp[0] = top; }
 
 void kernel::x86::idt_set_gate(unsigned char num, uintptr_t base, unsigned short sel, unsigned char flags) {
     idt[num].base_lo   = base & 0xFFFF;

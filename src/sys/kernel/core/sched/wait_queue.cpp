@@ -12,7 +12,7 @@ namespace kernel::sched {
 
 void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx) {
     assert(!current_is_idle(), "block_if: idle thread cannot block");
-    if (lifecycle_log_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
+    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     m_lock.lock();
     if (should_block != nullptr && !should_block(ctx)) {
@@ -30,7 +30,7 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
     // can run and wake us in that window.
     schedule_out(switch_reason::BLOCK);
     kernel::arch::restore_interrupts(flags);
-    if (lifecycle_log_enabled()) { g_log.debug("sched: woke id={0}", current()->id()); }
+    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: woke id={0}", current()->id()); }
 }
 
 namespace {

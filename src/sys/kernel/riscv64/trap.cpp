@@ -3,6 +3,7 @@
 #include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/registers.h>
+#include <kernel/syscall.h>
 
 #include "kernel/mm/vm_aspace.h"
 
@@ -47,6 +48,7 @@ namespace kernel::riscv {
 void trap_init() {
     // Direct mode: all traps vector to one entry (address low bits 00).
     asm volatile("csrw stvec, %0" ::"r"(&riscv_trap_entry));
+    asm volatile("csrw sscratch, zero");
 
     // Limine guarantees at least 64 KiB of boot stack below the entry sp;
     // trap_init runs near the top of it, so 48 KiB down is legitimately
@@ -74,6 +76,13 @@ extern "C" void riscv_trap_handler(register_frame_t* regs) {
     // Page faults get one shot at demand-paging resolution before the crash
     // path; an unresolvable fault falls through with diagnostics intact.
     if (is_page_fault(regs->scause) && try_resolve_page_fault(regs)) { return; }
+
+    constexpr uint64_t CAUSE_ECALL_U = 8;
+    if (regs->scause == CAUSE_ECALL_U) {
+        regs->a0 = syscall_dispatch(regs->a7, regs->a0);
+        regs->sepc += 4;
+        return;
+    }
 
     kernel::crash::dispatch(kernel::crash::trigger_kind::exception, regs);
 }

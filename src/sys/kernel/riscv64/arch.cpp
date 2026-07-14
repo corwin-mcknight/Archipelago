@@ -1,5 +1,7 @@
 #include "kernel/arch.h"
 
+#include "kernel/panic.h"
+
 // MMIO devices are reached through the HHDM (Limine maps at least the first
 // 4 GiB of physical space there); published by riscv64/main.cpp at boot.
 extern uintptr_t g_hhdm_offset;
@@ -21,6 +23,26 @@ constexpr uint32_t FINISHER_FAIL      = 0x3333;
 }
 
 namespace kernel::arch {
+
+// The trap return path republishes the frame's kernel stack top in sscratch.
+void set_kernel_stack(uintptr_t) {}
+
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top) {
+    disable_interrupts();
+    constexpr uint64_t SSTATUS_SPP  = 1ull << 8;
+    constexpr uint64_t SSTATUS_SPIE = 1ull << 5;
+    asm volatile(
+        "csrw sscratch, %0\n"
+        "csrc sstatus, %1\n"
+        "csrs sstatus, %2\n"
+        "csrw sepc, %3\n"
+        "mv sp, %4\n"
+        "sret\n"
+        :
+        : "r"(kstack_top), "r"(SSTATUS_SPP), "r"(SSTATUS_SPIE), "r"(entry), "r"(user_sp)
+        : "memory");
+    __builtin_unreachable();
+}
 
 void enable_interrupts() { asm volatile("csrsi sstatus, %0" ::"i"(SSTATUS_SIE)); }
 void disable_interrupts() { asm volatile("csrci sstatus, %0" ::"i"(SSTATUS_SIE)); }

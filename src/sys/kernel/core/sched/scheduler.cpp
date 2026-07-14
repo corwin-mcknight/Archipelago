@@ -4,9 +4,11 @@
 #include <kernel/config.h>
 #include <kernel/log.h>
 #include <kernel/mm/pmm.h>
+#include <kernel/mm/vm_aspace.h>
 #include <kernel/panic.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
+#include <kernel/sched/user_task.h>
 #include <kernel/sched/wait_queue.h>
 #include <kernel/time.h>
 
@@ -57,8 +59,10 @@ ktl::vector<sleeper> g_sleepers;
 
 trace_ring<CONFIG_SCHED_TRACE_EVENTS> g_trace;
 global_stats g_stats;
-uint64_t g_last_switch_ts = 0;
-bool g_lifecycle_log      = false;
+uint64_t g_last_switch_ts    = 0;
+bool g_lifecycle_log         = true;
+// Per-scheduling-event messages (sleep/block/woke) flood the log; opt in via `sched log verbose`.
+bool g_lifecycle_log_verbose = false;
 
 void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t to) {
     trace_record r;
@@ -104,9 +108,15 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
     next->set_state(thread_state::RUNNING);
     next->reset_slice();
     assert(c.previous.get() == nullptr, "switch_to: unfinished previous switch");
-    c.previous     = ktl::move(c.current);
-    c.current      = ktl::move(next);
-    g_kstack_floor = c.current->kstack_floor();
+    c.previous      = ktl::move(c.current);
+    c.current       = ktl::move(next);
+    g_kstack_floor  = c.current->kstack_floor();
+    auto* next_task = static_cast<Task*>(c.current->owner().get());
+    if (next_task != nullptr && next_task->aspace() != nullptr &&
+        kernel::mm::vm_aspace::active() != next_task->aspace()) {
+        next_task->aspace()->activate();
+    }
+    if (c.current->kstack_top() != 0) { kernel::arch::set_kernel_stack(c.current->kstack_top()); }
     arch_context_switch(outgoing->saved_sp_slot(), c.current->saved_sp());
     sched_finish_switch();
 }
@@ -121,8 +131,13 @@ void release_stack(kernel::mm::vm_paddr_t phys) {
 
 void reap(ktl::ref<Thread> zombie) {
     if (lifecycle_log_enabled()) { g_log.debug("sched: reap id={0}", zombie->id()); }
-    kernel_task()->remove_thread(zombie->id());
+    auto task = ktl::static_ref_cast<Task>(zombie->owner());
+    // Threads built without set_owner() (tests construct Thread directly) still reap
+    // safely: fall back to kernel_task, where remove_thread is a harmless no-op.
+    if (!task) { task = kernel_task(); }
+    task->remove_thread(zombie->id());
     if (zombie->kstack_phys() != 0) { release_stack(zombie->kstack_phys()); }
+    if (task.get() != kernel_task().get() && task->thread_count() == 0) { teardown_user_task(ktl::move(task)); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     g_stats.reaped += 1;
     kernel::arch::restore_interrupts(flags);
@@ -208,7 +223,7 @@ void sleep_ticks(uint64_t ticks) {
         yield();
         return;
     }
-    if (lifecycle_log_enabled()) { g_log.debug("sched: sleep id={0} ticks={1}", current()->id(), ticks); }
+    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: sleep id={0} ticks={1}", current()->id(), ticks); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto& c        = cur_cpu();
     assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
@@ -248,7 +263,7 @@ void on_tick() {
     switch_to(ktl::move(*next), switch_reason::PREEMPT);
 }
 
-ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
+ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg) {
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
     uint64_t flags                          = kernel::arch::save_and_disable_interrupts();
@@ -264,9 +279,10 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
         return ktl::err(ktl::errc::oom);
     }
     thread->set_name(name);
+    thread->set_owner(task);
     thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
 
-    auto added = kernel_task()->add_thread(thread);
+    auto added = task->add_thread(thread);
     if (added.is_err()) {
         release_stack(*phys);
         return ktl::err(added.unwrap_err());
@@ -279,12 +295,16 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
     bool ok = cur_cpu().run_queue.push_back(thread);
     kernel::arch::restore_interrupts(flags);
     if (!ok) {
-        kernel_task()->remove_thread(thread->id());
+        task->remove_thread(thread->id());
         release_stack(*phys);
         return ktl::err(ktl::errc::oom);
     }
     if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", name, thread->id()); }
     return ktl::result<ktl::ref<Thread>>::ok(thread);
+}
+
+ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
+    return spawn_into(kernel_task(), name, entry, arg);
 }
 
 [[noreturn]] void exit_current() {
@@ -307,6 +327,7 @@ void init(uint32_t boot_core_index) {
     auto idle   = ktl::make_ref<Thread>();
     assert(static_cast<bool>(idle), "sched: idle thread allocation failed");
     idle->set_name("idle0");
+    idle->set_owner(kernel_task());
     idle->set_state(thread_state::RUNNING);
     // The boot stack keeps whatever tripwire the arch established (riscv trap_init; 0 on x86).
     idle->set_kstack_floor(g_kstack_floor);
@@ -365,6 +386,8 @@ void trace_clear() {
 
 void set_lifecycle_log(bool enabled) { g_lifecycle_log = enabled; }
 bool lifecycle_log_enabled() { return g_lifecycle_log; }
+void set_lifecycle_log_verbose(bool enabled) { g_lifecycle_log_verbose = enabled; }
+bool lifecycle_log_verbose_enabled() { return g_lifecycle_log && g_lifecycle_log_verbose; }
 
 }  // namespace kernel::sched
 

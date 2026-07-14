@@ -172,7 +172,7 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 // memset. Paced in small batches so the initial climb to the pre-zero target
 // trickles out over tens of seconds instead of monopolizing the CPU.
 [[noreturn]] static void zeroer_thread_main(void*) {
-    constexpr size_t BATCH_PAGES    = 32;
+    constexpr size_t BATCH_PAGES    = 16;
     constexpr uint64_t PERIOD_TICKS = 50;  // 1 tick = 1 ms
     while (true) {
         for (size_t i = 0; i < BATCH_PAGES; ++i) {

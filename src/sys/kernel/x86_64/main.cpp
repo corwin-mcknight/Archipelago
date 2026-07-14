@@ -27,10 +27,8 @@ extern "C" void init_global_constructors_array(void);
 // Must run on every CPU before any NX mapping is installed; with NXE clear that
 // bit is reserved and faults. EFER is MSR 0xC0000080, NXE is bit 11.
 static void enable_nxe() {
-    uint32_t lo, hi;
-    asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000080u));
-    lo |= (1u << 11);
-    asm volatile("wrmsr" ::"a"(lo), "d"(hi), "c"(0xC0000080u));
+    constexpr uint32_t MSR_EFER = 0xC0000080;
+    kernel::x86::wrmsr(MSR_EFER, kernel::x86::rdmsr(MSR_EFER) | (1u << 11));
 }
 
 __attribute__((used, section(".limine_requests"))) volatile struct limine_mp_request mp_request = {
@@ -50,6 +48,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     g_log.debug("cpu{0} (lapic {1}): Initializing", core_index, lapic_id);
     kernel::x86::init_gdt((int)core_index);
     kernel::x86::init_idt();
+    kernel::arch::syscall_init();
 
     if (is_boot_processor) { g_interrupt_manager.initialize(); }
 
