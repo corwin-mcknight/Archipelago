@@ -5,7 +5,7 @@
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
 #include <kernel/sched/thread.h>
-#include <kernel/synchronization/spinlock.h>
+#include <kernel/synchronization/mutex.h>
 
 #include <ktl/ref>
 #include <ktl/result>
@@ -51,7 +51,7 @@ class Task : public kernel::obj::Object {
    private:
     kernel::obj::HandleTable m_handles;
     ktl::vector<ktl::ref<Thread>> m_threads;
-    kernel::synchronization::spinlock m_lock;
+    kernel::synchronization::mutex m_lock;
     kernel::mm::vm_aspace* m_aspace      = nullptr;
     task_state m_state                   = task_state::NEW;
     kernel::obj::HandleId m_owner_handle = kernel::obj::HandleId::invalid();

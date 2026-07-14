@@ -8,6 +8,7 @@
 #include <kernel/sched/task.h>
 #include <kernel/sched/trace.h>
 #include <kernel/shell/output.h>
+#include <kernel/shell/render.h>
 
 #include <ktl/fmt>
 #include <ktl/ref>
@@ -17,16 +18,8 @@
 namespace {
 
 using namespace kernel::sched;
-
-const char* state_name(thread_state s) {
-    switch (s) {
-        case thread_state::READY: return "READY";
-        case thread_state::RUNNING: return "RUNNING";
-        case thread_state::BLOCKED: return "BLOCKED";
-        case thread_state::DEAD: return "DEAD";
-        default: return "?";
-    }
-}
+using kernel::shell::human_str;
+using kernel::shell::state_name;
 
 const char* kind_name(trace_kind k) {
     switch (k) {
@@ -59,18 +52,6 @@ ktl::maybe<size_t> parse_size(ktl::string_view sv) {
         v = v * 10 + static_cast<size_t>(sv[i] - '0');
     }
     return v;
-}
-
-// Renders a cycle count into buf ("1.71s", "454us", "123cyc") and returns buf for inline use.
-const char* human_str(char* buf, size_t len, uint64_t cycles, uint64_t hz) {
-    auto h = cycles_to_human(cycles, hz);
-    if (h.unit[0] == 'c' || h.unit[0] == 'u') {
-        ktl::format::format_to_buffer_raw(buf, len, "{0}{1}", h.whole, h.unit);
-    } else {
-        ktl::format::format_to_buffer_raw(buf, len, "{0}.{1}{2}{3}", h.whole, h.hundredths / 10, h.hundredths % 10,
-                                          h.unit);
-    }
-    return buf;
 }
 
 void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t hz) {

@@ -51,8 +51,7 @@
 - Per-CPU trace rings and accounting once AP scheduling lands (today's ring and stats assume a single scheduling core).
 - Latency percentiles and richer `sched` shell views if thread counts grow beyond what the flat per-thread tables can show at a glance.
 - Cross-CPU load balancing, once multi-core scheduling lands.
-- Add a kernel mutex (blocking lock) and contention diagnostics; spinlocks and a blocking Semaphore object already exist.
-- Back per-core identity with a GS-based per-CPU pointer -- a prerequisite for AP scheduling (interrupt and scheduler code need to know the calling core); the CPUID-based current_core_index() is currently dead code with no callers; make per-core lapic_id atomic to close the bring-up read/write race.
+- Back per-core identity with a GS-based per-CPU pointer before AP scheduling replaces the current x86 CPUID/dense-index lookup; make per-core lapic_id atomic to close the bring-up read/write race.
 - VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
 - IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 

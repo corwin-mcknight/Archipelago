@@ -3,7 +3,7 @@
 #include <kernel/config.h>
 #include <kernel/obj/type_descriptor.h>
 #include <kernel/obj/types.h>
-#include <kernel/synchronization/spinlock.h>
+#include <kernel/synchronization/mutex.h>
 
 #include <ktl/atomic>
 #include <ktl/maybe>
@@ -27,7 +27,7 @@ class TypeRegistry {
     TypeDescriptor m_types[MAX_TYPES]                  = {};
     ktl::atomic<uint32_t> m_instance_counts[MAX_TYPES] = {};
     size_t m_count                                     = 0;
-    kernel::synchronization::spinlock m_lock;
+    kernel::synchronization::mutex m_lock;
 
     ktl::maybe<size_t> index_for_id(TypeId id) const;
 };

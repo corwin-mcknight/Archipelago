@@ -5,7 +5,7 @@ Scheduling policy is not exposed to userspace and is not pluggable.
 
 ## Current Design
 The scheduler uses round-robin rotation across all runnable threads.
-On each timer tick or voluntary yield, the kernel picks the next runnable thread and switches to it.
+On each timer tick or voluntary yield, the kernel picks the next runnable thread. A timer-driven switch is deferred while preemption is disabled or a trap context is active.
 There is no priority system, no fairness weights, and no scheduling classes.
 
 This is intentionally minimal.
@@ -29,7 +29,7 @@ Context switches occur at two points today:
 - **Preemption** -- when the timer fires and the scheduler selects a different thread
 
 A syscall boundary becomes a third context switch point once userspace exists.
-Preemption is tick-driven: each timer interrupt decrements the running thread's remaining timeslice, and the thread is switched out once it reaches zero.
+Preemption is tick-driven: each timer interrupt performs wakeups and decrements the running thread's remaining timeslice. Once it reaches zero, the CPU records a pending preemption. Trap exit switches immediately when eligible; a protected critical section delays the switch until its outermost exit without losing tick accounting.
 
 ## Task Zero
 The kernel itself is [[Task Model#The Kernel as Task Zero|task zero]].
@@ -50,6 +50,10 @@ Blocking is built on a single primitive: a wait queue that holds threads until w
 Sleeping for a fixed number of ticks and waiting on an object's signals are both built on top of this primitive.
 Kernel objects expose signals as waitable conditions -- a thread can block until a specific signal becomes set rather than polling.
 Thread join is an instance of this: waiting for a thread's termination signal.
+The same primitive backs kernel mutex contention, with the acquisition predicate evaluated while the queue lock is held to close the failed-acquire/enqueue/unlock race.
+
+## Execution Context
+Per-CPU execution context distinguishes preemption control from local IRQ masking and tracks interrupt, fault, and syscall nesting. Blocking and voluntary scheduling are valid only in preemptible thread context and while holding no locks. See [[../Kernel/Locking|Kernel Locking]] for guard selection, mutex semantics, and debug lock dependency checking.
 
 ## Stack Overflow Protection
 Each thread runs on a fixed-size kernel stack.

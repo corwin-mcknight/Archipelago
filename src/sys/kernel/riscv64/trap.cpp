@@ -3,6 +3,7 @@
 #include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/registers.h>
+#include <kernel/synchronization/execution_context.h>
 #include <kernel/syscall.h>
 
 #include "kernel/mm/vm_aspace.h"
@@ -67,15 +68,23 @@ extern "C" [[noreturn]] void riscv_trap_stack_overflow(uintptr_t sepc, uintptr_t
 
 extern "C" void riscv_trap_handler(register_frame_t* regs) {
     if (regs->scause & SCAUSE_INTERRUPT) {
+        kernel::synchronization::interrupt_enter();
         // CLINT/PLIC routing is future work; hand the cause code to the
         // dispatcher so registered handlers (e.g. the SBI timer) can claim it.
         g_interrupt_manager.dispatch_interrupt(static_cast<unsigned int>(regs->scause & ~SCAUSE_INTERRUPT), regs);
+        kernel::synchronization::interrupt_exit();
         return;
     }
 
     // Page faults get one shot at demand-paging resolution before the crash
     // path; an unresolvable fault falls through with diagnostics intact.
-    if (is_page_fault(regs->scause) && try_resolve_page_fault(regs)) { return; }
+    if (is_page_fault(regs->scause)) {
+        kernel::synchronization::fault_enter();
+        if (try_resolve_page_fault(regs)) {
+            kernel::synchronization::fault_exit();
+            return;
+        }
+    }
 
     constexpr uint64_t CAUSE_ECALL_U = 8;
     if (regs->scause == CAUSE_ECALL_U) {

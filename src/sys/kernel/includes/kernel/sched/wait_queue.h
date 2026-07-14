@@ -50,6 +50,7 @@ class wait_queue {
     void wake_all();
     // Wake every waiter whose nonzero mask intersects signals. Returns the number woken.
     size_t wake_matching(uint32_t signals);
+    bool has_waiters();
 
    private:
     kernel::synchronization::spinlock m_lock;

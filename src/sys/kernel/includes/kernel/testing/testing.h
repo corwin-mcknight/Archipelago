@@ -132,7 +132,7 @@
 
 // Test bodies are dead code when testing is off; [[maybe_unused]] keeps the
 // forward-declaration + definition pair from tripping -Wunused-function.
-#define KTEST(name_sym, module_literal)        \
+#define KTEST(name_sym, module_literal)             \
     [[maybe_unused]] static void name_sym##_body(); \
     [[maybe_unused]] static void name_sym##_body()
 

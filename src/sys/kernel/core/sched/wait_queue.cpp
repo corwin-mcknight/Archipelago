@@ -14,9 +14,11 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
     assert(!current_is_idle(), "block_if: idle thread cannot block");
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    kernel::synchronization::preempt_disable();
     m_lock.lock();
     if (should_block != nullptr && !should_block(ctx)) {
         m_lock.unlock();
+        kernel::synchronization::preempt_enable();
         kernel::arch::restore_interrupts(flags);
         return;
     }
@@ -26,6 +28,7 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
     bool pushed = m_nodes.push_back(wait_node{ktl::move(self), mask});
     assert(pushed, "wait_queue: waiter allocation failed");
     m_lock.unlock();
+    kernel::synchronization::preempt_enable();
     // Interrupts stay off between unlock and the switch: on the single scheduling core nothing
     // can run and wake us in that window.
     schedule_out(switch_reason::BLOCK);
@@ -42,7 +45,7 @@ void drain(ktl::vector<ktl::ref<Thread>>& threads) {
 void wait_queue::wake_one() {
     ktl::ref<Thread> woken;
     {
-        kernel::synchronization::lock_guard guard(m_lock);
+        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
         for (size_t i = 0; i < m_nodes.size(); ++i) {
             if (m_nodes[i].mask != 0) { continue; }  // signal waiters are woken by wake_matching
             woken        = ktl::move(m_nodes[i].thread);
@@ -57,7 +60,7 @@ void wait_queue::wake_one() {
 void wait_queue::wake_all() {
     ktl::vector<ktl::ref<Thread>> woken;
     {
-        kernel::synchronization::lock_guard guard(m_lock);
+        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
         for (size_t i = 0; i < m_nodes.size();) {
             if (m_nodes[i].mask != 0) {
                 ++i;
@@ -75,7 +78,7 @@ void wait_queue::wake_all() {
 size_t wait_queue::wake_matching(uint32_t signals) {
     ktl::vector<ktl::ref<Thread>> woken;
     {
-        kernel::synchronization::lock_guard guard(m_lock);
+        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
         for (size_t i = 0; i < m_nodes.size();) {
             if (m_nodes[i].mask == 0 || (m_nodes[i].mask & signals) == 0) {
                 ++i;
@@ -90,6 +93,11 @@ size_t wait_queue::wake_matching(uint32_t signals) {
     size_t n = woken.size();
     drain(woken);
     return n;
+}
+
+bool wait_queue::has_waiters() {
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+    return m_nodes.size() != 0;
 }
 
 }  // namespace kernel::sched

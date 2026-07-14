@@ -6,27 +6,28 @@
 #include <kernel/synchronization/spinlock.h>
 
 using namespace kernel::testing;
-using kernel::synchronization::lock_guard;
+using kernel::synchronization::critical_irq_lock_guard;
+using kernel::synchronization::critical_lock_guard;
 using kernel::synchronization::spinlock;
 
-// lock_guard acquires/releases the underlying lock.
+// A critical guard acquires/releases the underlying lock without masking IRQs.
 KTEST(spinlock_lock_guard_acquires, "kernel/spinlock") {
     spinlock lock;
     KTEST_REQUIRE_TRUE(!lock.is_locked());
     {
-        lock_guard guard(lock);
+        critical_lock_guard guard(lock);
         KTEST_EXPECT_TRUE(lock.is_locked());
     }
     KTEST_EXPECT_TRUE(!lock.is_locked());
 }
 
-// F012: lock_guard disables interrupts while the lock is held and restores the prior state after.
+// IRQ-critical guards mask interrupts while the lock is held and restore the prior state after.
 KTEST(spinlock_lock_guard_is_irqsave, "kernel/spinlock") {
     spinlock lock;
     kernel::arch::enable_interrupts();  // establish IF=1 going in (the normal post-boot state)
     KTEST_REQUIRE_TRUE(kernel::arch::interrupts_enabled());
     {
-        lock_guard guard(lock);
+        critical_irq_lock_guard guard(lock);
         KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());  // masked while held
     }
     KTEST_EXPECT_TRUE(kernel::arch::interrupts_enabled());  // restored to prior (enabled) state
@@ -38,10 +39,10 @@ KTEST(spinlock_lock_guard_irqsave_nests, "kernel/spinlock") {
     spinlock b;
     kernel::arch::enable_interrupts();
     {
-        lock_guard ga(a);
+        critical_irq_lock_guard ga(a);
         KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());
         {
-            lock_guard gb(b);
+            critical_irq_lock_guard gb(b);
             KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());
         }
         KTEST_EXPECT_TRUE(!kernel::arch::interrupts_enabled());  // inner restore keeps IF masked (outer holds)

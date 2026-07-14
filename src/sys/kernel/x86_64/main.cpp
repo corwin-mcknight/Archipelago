@@ -13,6 +13,7 @@
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
+#include "kernel/synchronization/execution_context.h"
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/drivers/pit.h"
@@ -41,6 +42,7 @@ __attribute__((used, section(".limine_requests"))) volatile struct limine_mp_req
 void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     assert(core_index < CONFIG_MAX_CORES, "Logical core index exceeds maximum cores");
     g_cpu_cores[core_index].lapic_id = lapic_id;
+    kernel::synchronization::init_execution_context(core_index);
 
     enable_nxe();
 

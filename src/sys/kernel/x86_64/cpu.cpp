@@ -5,6 +5,7 @@
 #include <ktl/ranges>
 #include <ktl/span>
 
+#include "kernel/arch.h"
 #include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/x86/cpu.h"
@@ -28,6 +29,8 @@ size_t kernel::x86::current_core_index() {
     }
     return 0;
 }
+
+size_t kernel::arch::current_core_index() { return kernel::x86::current_core_index(); }
 
 void kernel::cpu_init_cores() {
     for (auto& core : ktl::span(g_cpu_cores)) {

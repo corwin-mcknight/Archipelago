@@ -31,6 +31,8 @@ void yield();
 void sleep_ticks(uint64_t ticks);
 // Timer-tick hook: slice accounting and preemption. Interrupt context only.
 void on_tick();
+// Consume a timer preemption request after the outermost protected/trap context exits.
+void service_pending_preemption();
 [[noreturn]] void exit_current();
 [[noreturn]] void idle_loop();
 

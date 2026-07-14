@@ -88,7 +88,7 @@ ktl::result<vm_paddr_t> vmo::get_or_fill_page(uint64_t page) {
 
 ktl::result<void> vmo::commit(uint64_t page, size_t count) {
     if (page + count < page || page + count > m_pages) { return ktl::err(ktl::errc::out_of_range); }
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     for (uint64_t p = page; p < page + count; ++p) {
         auto res = fill_page(p);
         if (res.is_err()) { return res; }
@@ -126,7 +126,7 @@ void vmo::decommit_page(uint64_t page) {
 }
 
 ktl::result<void> vmo::set_size(size_t new_pages) {
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     if (!m_pager->resizable()) { return ktl::err(ktl::errc::invalid_operation); }
 
     if (new_pages < m_pages) {
@@ -154,7 +154,7 @@ ktl::result<void> vmo::set_size(size_t new_pages) {
 
 ktl::result<void> vmo::decommit(uint64_t page, size_t count) {
     if (page + count < page || page + count > m_pages) { return ktl::err(ktl::errc::out_of_range); }
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     for (uint64_t p = page; p < page + count; ++p) { decommit_page(p); }
     return ktl::result<void>::ok();
 }

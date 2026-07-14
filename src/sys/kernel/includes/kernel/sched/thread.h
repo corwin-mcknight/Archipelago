@@ -4,6 +4,7 @@
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
+#include <kernel/synchronization/execution_context.h>
 
 #include <ktl/ref>
 #include <ktl/result>
@@ -68,6 +69,11 @@ class Thread : public kernel::obj::Object {
 
     thread_stats& stats() { return m_stats; }
     const thread_stats& stats() const { return m_stats; }
+#ifndef NDEBUG
+    kernel::synchronization::held_lock* held_locks() { return m_held_locks; }
+    size_t held_lock_count() const { return m_held_lock_count; }
+    void set_held_lock_count(size_t count) { m_held_lock_count = count; }
+#endif
 
     // Timestamp of the last enqueue onto the run queue; 0 when not pending. Set at every
     // enqueue, consumed (and zeroed) when the thread is switched in -- READY latency.
@@ -91,6 +97,10 @@ class Thread : public kernel::obj::Object {
     uint32_t m_slice = CONFIG_SCHED_TIMESLICE_TICKS;
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
+#ifndef NDEBUG
+    kernel::synchronization::held_lock m_held_locks[CONFIG_LOCKDEP_MAX_HELD] = {};
+    size_t m_held_lock_count                                                 = 0;
+#endif
 };
 
 }  // namespace kernel::sched

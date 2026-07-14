@@ -10,6 +10,7 @@
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/sched/wait_queue.h>
+#include <kernel/synchronization/execution_context.h>
 #include <kernel/time.h>
 
 #include <ktl/deque>
@@ -76,6 +77,7 @@ void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t t
 
 // Interrupts must be disabled. Returns when this thread is next switched in.
 void switch_to(ktl::ref<Thread> next, switch_reason reason) {
+    assert(!kernel::synchronization::preemption_disabled(), "switch_to: preemption disabled");
     auto& c      = cur_cpu();
     uint64_t now = kernel::arch::timestamp();
     c.current->stats().cpu_cycles += now - g_last_switch_ts;
@@ -102,14 +104,24 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
     trace_push(trace_kind::SWITCH, reason, c.current->id(), next->id());
 
     Thread* outgoing = c.current.get();
+#ifndef NDEBUG
+    auto& execution = kernel::synchronization::current_execution_context();
+    outgoing->set_held_lock_count(execution.held_count);
+    for (size_t i = 0; i < execution.held_count; ++i) { outgoing->held_locks()[i] = execution.held[i]; }
+#endif
     // Callers park or re-queue the outgoing thread before switching; only the idle handoff paths
     // leave it RUNNING (idle is never re-queued), so demote it here to keep reported state truthful.
     if (outgoing->state() == thread_state::RUNNING) { outgoing->set_state(thread_state::READY); }
     next->set_state(thread_state::RUNNING);
     next->reset_slice();
     assert(c.previous.get() == nullptr, "switch_to: unfinished previous switch");
-    c.previous      = ktl::move(c.current);
-    c.current       = ktl::move(next);
+    c.previous = ktl::move(c.current);
+    c.current  = ktl::move(next);
+    kernel::synchronization::set_current_thread_id(c.current->id());
+#ifndef NDEBUG
+    execution.held_count = c.current->held_lock_count();
+    for (size_t i = 0; i < execution.held_count; ++i) { execution.held[i] = c.current->held_locks()[i]; }
+#endif
     g_kstack_floor  = c.current->kstack_floor();
     auto* next_task = static_cast<Task*>(c.current->owner().get());
     if (next_task != nullptr && next_task->aspace() != nullptr &&
@@ -190,12 +202,16 @@ void make_ready(ktl::ref<Thread> thread) {
 }
 
 void schedule_out(switch_reason reason) {
+    kernel::synchronization::assert_blocking_allowed("schedule_out: scheduling is forbidden in this context");
+    kernel::synchronization::assert_no_locks_held("schedule_out: scheduling while holding a lock");
     auto& c   = cur_cpu();
     auto next = c.run_queue.pop_front();
     switch_to(next.has_value() ? ktl::move(*next) : c.idle, reason);
 }
 
 void yield() {
+    kernel::synchronization::assert_blocking_allowed("yield: scheduling is forbidden in this context");
+    kernel::synchronization::assert_no_locks_held("yield: scheduling while holding a lock");
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto& c        = cur_cpu();
     auto next      = c.run_queue.pop_front();
@@ -219,6 +235,8 @@ void yield() {
 }
 
 void sleep_ticks(uint64_t ticks) {
+    kernel::synchronization::assert_blocking_allowed("sleep_ticks: scheduling is forbidden in this context");
+    kernel::synchronization::assert_no_locks_held("sleep_ticks: scheduling while holding a lock");
     if (ticks == 0) {
         yield();
         return;
@@ -252,7 +270,23 @@ void on_tick() {
     if (c.run_queue.size() == 0) { return; }
     bool idle_running = (c.current.get() == c.idle.get());
     if (!idle_running && c.current->decrement_slice() > 0) { return; }
-    auto next = c.run_queue.pop_front();
+    kernel::synchronization::request_preemption();
+}
+
+void service_pending_preemption() {
+    if (!g_started) { return; }
+    // switch_to must run with interrupts masked (see yield/schedule_out). This hook is reached from
+    // preempt_enable on the plain critical_section path, where interrupts are still enabled, so an
+    // unmasked switch could be re-entered by a timer tick mid-switch. Nesting-safe for the already-
+    // masked interrupt_exit/fault_exit callers.
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    auto& c        = cur_cpu();
+    if (c.run_queue.size() == 0) {
+        kernel::arch::restore_interrupts(flags);
+        return;
+    }
+    auto next         = c.run_queue.pop_front();
+    bool idle_running = (c.current.get() == c.idle.get());
     if (!idle_running) {
         c.current->stats().preemptions += 1;
         c.current->set_state(thread_state::READY);
@@ -261,6 +295,7 @@ void on_tick() {
         assert(ok, "on_tick: run queue allocation failed");
     }
     switch_to(ktl::move(*next), switch_reason::PREEMPT);
+    kernel::arch::restore_interrupts(flags);
 }
 
 ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg) {
@@ -308,6 +343,8 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
 }
 
 [[noreturn]] void exit_current() {
+    kernel::synchronization::assert_blocking_allowed("exit_current: scheduling is forbidden in this context");
+    kernel::synchronization::assert_no_locks_held("exit_current: exiting while holding a lock");
     if (lifecycle_log_enabled()) { g_log.debug("sched: exit id={0}", current()->id()); }
     kernel::arch::disable_interrupts();
     auto& c = cur_cpu();
@@ -332,9 +369,11 @@ void init(uint32_t boot_core_index) {
     // The boot stack keeps whatever tripwire the arch established (riscv trap_init; 0 on x86).
     idle->set_kstack_floor(g_kstack_floor);
     kernel_task()->add_thread(idle).expect("sched: task zero rejected the idle thread");
-    auto& c          = cur_cpu();
-    c.idle           = idle;
-    c.current        = ktl::move(idle);
+    auto& c   = cur_cpu();
+    c.idle    = idle;
+    c.current = ktl::move(idle);
+    kernel::synchronization::set_current_thread_id(c.current->id());
+    kernel::synchronization::set_deferred_preempt_hook(service_pending_preemption);
     g_last_switch_ts = kernel::arch::timestamp();
     g_stats.boot_ts  = g_last_switch_ts;
     g_started        = true;

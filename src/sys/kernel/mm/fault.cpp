@@ -35,7 +35,7 @@ bool vmm_handle_fault(const vm_fault& fault) {
     if (active == nullptr || !active->has_root()) { return false; }
     vm_aspace& aspace = *active;
 
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     aspace.count_fault();
 
     region_child* binding = aspace.root().find_binding(fault.vaddr);

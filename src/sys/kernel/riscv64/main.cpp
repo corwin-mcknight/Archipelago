@@ -9,6 +9,7 @@
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
 #include "kernel/riscv/timer.h"
+#include "kernel/synchronization/execution_context.h"
 #include "vendor/limine.h"
 
 namespace kernel::riscv {
@@ -58,6 +59,8 @@ extern "C" [[noreturn]] void _start(void) {
 
     kernel::boot::snapshot_symbols();
     kernel::boot::init_memory();
+
+    kernel::synchronization::init_execution_context(0);
 
     // Single-hart bring-up: install the trap vector, then let interrupts in.
     // CLINT/PLIC routing for external interrupts is future work.

@@ -1,11 +1,15 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Arch-neutral CPU and platform primitives, implemented by each architecture in its own
 // directory. Generic code (core/, mm/, std/, shell/) must use these instead of inline
 // assembly; the host test runner stubs them, so they must stay out-of-line.
 namespace kernel::arch {
+
+/// Dense logical index of the calling CPU in [0, CONFIG_MAX_CORES).
+size_t current_core_index();
 
 void enable_interrupts();
 void disable_interrupts();

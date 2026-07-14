@@ -51,7 +51,9 @@ HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
 # freestanding helpers only -- anything hardware-coupled must be a freestanding (QEMU-tier) test instead.
 # std/stdlib.cpp also supplies itoa for the formatter the assertion machinery uses.
 SUPPORT_SRCS := $(KSRC)/std/stdlib.cpp $(KSRC)/core/object.cpp $(KSRC)/core/handle_table.cpp \
-	$(KSRC)/core/type_registry.cpp $(KSRC)/core/sched/task.cpp
+	$(KSRC)/core/type_registry.cpp $(KSRC)/core/sched/task.cpp \
+	$(KSRC)/core/synchronization/execution_context.cpp $(KSRC)/core/synchronization/lockdep.cpp \
+	$(KSRC)/core/synchronization/mutex.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))

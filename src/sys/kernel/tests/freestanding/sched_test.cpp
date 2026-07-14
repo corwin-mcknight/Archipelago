@@ -10,6 +10,8 @@
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
 #include <kernel/sched/wait_queue.h>
+#include <kernel/synchronization/execution_context.h>
+#include <kernel/synchronization/mutex.h>
 #include <kernel/time.h>
 
 #include <ktl/ref>
@@ -228,6 +230,56 @@ KTEST(sched_semaphore_blocks_and_wakes, "kernel/sched") {
     KTEST_EXPECT_EQUAL(g_sem_phase, 2);
     uint32_t sig = t->wait_signals(kernel::sched::Thread::SIGNAL_TERMINATED);
     KTEST_EXPECT_TRUE((sig & kernel::sched::Thread::SIGNAL_TERMINATED) != 0);
+}
+
+namespace {
+kernel::synchronization::mutex g_test_mutex;
+volatile int g_mutex_phase;
+void mutex_waiter_thread(void*) {
+    kernel::synchronization::lock_guard guard(g_test_mutex);
+    g_mutex_phase = 2;
+}
+}  // namespace
+
+KTEST(sched_mutex_blocks_and_wakes, "kernel/sched") {
+    g_mutex_phase = 0;
+    g_test_mutex.lock();
+    KTEST_UNWRAP(t, spawn("mutex-waiter", mutex_waiter_thread, nullptr));
+    g_mutex_phase = 1;
+    for (int i = 0; i < 100000; ++i) {
+        if (t->state() == thread_state::BLOCKED) break;
+        yield();
+    }
+    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    KTEST_EXPECT_EQUAL(g_mutex_phase, 1);
+    g_test_mutex.unlock();
+    for (int i = 0; i < 100000 && g_mutex_phase != 2; ++i) { yield(); }
+    KTEST_EXPECT_EQUAL(g_mutex_phase, 2);
+}
+
+namespace {
+volatile uint64_t g_deferred_runs;
+volatile bool g_deferred_stop;
+void deferred_spinner(void*) {
+    while (!g_deferred_stop) { g_deferred_runs = g_deferred_runs + 1; }
+}
+}  // namespace
+
+KTEST(sched_critical_section_defers_preemption, "kernel/sched") {
+    g_deferred_runs = 0;
+    g_deferred_stop = false;
+    KTEST_UNWRAP(t, spawn("deferred-spinner", deferred_spinner, nullptr));
+    {
+        kernel::synchronization::critical_section critical;
+        uint64_t before = g_deferred_runs;
+        ktime_t until   = kernel::time::now() + 2 * CONFIG_SCHED_TIMESLICE_TICKS;
+        while (kernel::time::now() < until) {}
+        KTEST_EXPECT_EQUAL(g_deferred_runs, before);
+        KTEST_EXPECT_TRUE(kernel::synchronization::current_execution_context().preempt_pending);
+    }
+    KTEST_EXPECT_TRUE(g_deferred_runs > 0);
+    g_deferred_stop = true;
+    for (int i = 0; i < 100000 && t->state() != thread_state::DEAD; ++i) { yield(); }
 }
 
 namespace {

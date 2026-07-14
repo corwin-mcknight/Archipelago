@@ -3,6 +3,7 @@
 #include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/registers.h>
+#include <kernel/synchronization/execution_context.h>
 #include <kernel/x86/descriptor_tables.h>
 #include <kernel/x86/ioport.h>
 
@@ -11,9 +12,13 @@ extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
 extern "C" [[noreturn]] void x86_trap_stack_overflow() { panic("kernel stack overflow (trap below stack floor)"); }
 
 extern "C" void k_exception_handler(register_frame_t* regs) {
+    kernel::synchronization::fault_enter();
     // Page faults get one shot at demand-paging resolution before the crash
     // path; an unresolvable fault falls through with diagnostics intact.
-    if (regs->int_no == 14 && x86_try_resolve_page_fault(regs)) { return; }
+    if (regs->int_no == 14 && x86_try_resolve_page_fault(regs)) {
+        kernel::synchronization::fault_exit();
+        return;
+    }
 
     // Vectors 0..31 are real CPU exceptions. The dispatcher never returns;
     // a recursion guard handles secondary faults during the dump itself.
@@ -25,13 +30,16 @@ extern "C" void k_exception_handler(register_frame_t* regs) {
     g_log.error("k_exception_handler: unexpected vector {0} err=0x{1:x}", regs->int_no, regs->err_code);
     if (regs->int_no >= 40) { outb(0xA0, 0x20); }
     outb(0x20, 0x20);
+    kernel::synchronization::fault_exit();
 }
 
 extern "C" void k_irq_handler(register_frame_t* regs) {
+    kernel::synchronization::interrupt_enter();
     // EOI first: the tick handler may switch threads and not return here for a while. PIC lines
     // are edge-triggered, so early EOI cannot re-raise a level.
     if (regs->int_no >= 40) { outb(0xA0, 0x20); }
     outb(0x20, 0x20);
 
     g_interrupt_manager.dispatch_interrupt((unsigned int)regs->int_no, regs);
+    kernel::synchronization::interrupt_exit();
 }

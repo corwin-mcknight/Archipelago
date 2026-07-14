@@ -1,5 +1,6 @@
 #include <kernel/log.h>
 #include <kernel/sched/scheduler.h>
+#include <kernel/synchronization/execution_context.h>
 #include <kernel/syscall.h>
 
 namespace {
@@ -22,11 +23,17 @@ void debug_putc(char c) {
 }  // namespace
 
 extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t arg0) {
+    kernel::synchronization::syscall_enter();
     switch (nr) {
-        case kernel::syscall::SYS_EXIT: kernel::sched::exit_current(); break;  // noreturn; break is unreachable
-        case kernel::syscall::SYS_YIELD: kernel::sched::yield(); return 0;
-        case kernel::syscall::SYS_SLEEP: kernel::sched::sleep_ticks(arg0); return 0;
-        case kernel::syscall::SYS_DEBUG_PUTC: debug_putc(static_cast<char>(arg0)); return 0;
-        default: return static_cast<uint64_t>(-1);
+        case kernel::syscall::SYS_EXIT:
+            kernel::synchronization::syscall_exit();
+            kernel::sched::exit_current();
+            break;
+        case kernel::syscall::SYS_YIELD: kernel::sched::yield(); break;
+        case kernel::syscall::SYS_SLEEP: kernel::sched::sleep_ticks(arg0); break;
+        case kernel::syscall::SYS_DEBUG_PUTC: debug_putc(static_cast<char>(arg0)); break;
+        default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
     }
+    kernel::synchronization::syscall_exit();
+    return 0;
 }

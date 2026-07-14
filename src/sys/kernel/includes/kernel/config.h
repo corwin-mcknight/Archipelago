@@ -18,7 +18,7 @@
 #define KERNEL_ASSERT 1
 
 #define CONFIG_KERNEL_LOG_COLORS 1
-#define CONFIG_KERNEL_TESTING 0
+#define CONFIG_KERNEL_TESTING 1
 #define CONFIG_KERNEL_SHELL 1
 #define CONFIG_MAX_OBJECT_TYPES 64
 
@@ -30,6 +30,9 @@
 #define CONFIG_SCHED_TIMESLICE_TICKS 10
 // Scheduler trace ring capacity in records (~32 bytes each; always-on flight recorder).
 #define CONFIG_SCHED_TRACE_EVENTS 512
+#define CONFIG_LOCKDEP_MAX_HELD 16
+#define CONFIG_LOCKDEP_MAX_LOCKS 128
+#define CONFIG_LOCKDEP_MAX_EDGES 512
 
 // Testing overrides
 #ifndef PRODUCT_DEBUG

@@ -49,7 +49,7 @@ class page_frame_allocator {
     // In-order visit of the remaining regions (shell observability). Runs
     // under the lock; fn must not allocate or re-enter the allocator.
     template <typename F> void for_each_region(F&& fn) {
-        kernel::synchronization::lock_guard guard(m_lock);
+        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
         for (size_t i = 0; i < m_regions.size(); ++i) { fn(m_regions[i]); }
     }
 

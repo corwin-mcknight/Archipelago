@@ -14,7 +14,7 @@ namespace kernel::mm {
 namespace { constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE; }  // namespace
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
-    kernel::synchronization::lock_guard guard(m_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     // Fetch a zeroed page: from the pool, a pre-zeroed region tail, or by
     // zeroing a free page inline as the last resort.
     auto page = m_zeroed.pop()
@@ -36,7 +36,7 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
 }
 
 void page_frame_allocator::free(vm_paddr_t addr) {
-    kernel::synchronization::lock_guard guard(m_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     if (m_dirty.push(addr)) {
         ++m_free_pages;
         ++m_free_count;
@@ -47,7 +47,7 @@ void page_frame_allocator::free(vm_paddr_t addr) {
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {
-    kernel::synchronization::lock_guard guard(m_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     for (size_t i = m_regions.size(); i-- > 0;) {
         auto& region = m_regions[i];
         if (region.count < count) { continue; }
@@ -94,7 +94,7 @@ void page_frame_allocator::zero_page(vm_paddr_t addr) {
 }
 
 bool page_frame_allocator::zero_one_page() {
-    kernel::synchronization::lock_guard guard(m_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     // Zeroing under the lock keeps every page in exactly one place at all
     // times, so allocators never observe an in-flight frame.
 
@@ -130,7 +130,7 @@ bool page_frame_allocator::zero_one_page() {
 }
 
 pmm_stats page_frame_allocator::stats() {
-    kernel::synchronization::lock_guard guard(m_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     return pmm_stats{
         .total_pages        = m_total_pages,
         .free_pages         = m_free_pages,

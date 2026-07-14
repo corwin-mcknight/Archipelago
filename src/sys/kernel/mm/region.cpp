@@ -74,7 +74,7 @@ void Region::zap_range(uintptr_t base, size_t size) {
 }
 
 ktl::result<ktl::ref<Region>> Region::create_child(uintptr_t base, size_t size, vm_prot_t max_prot) {
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     auto slot = insert_slot(base, size, max_prot);
     if (slot.is_err()) { return ktl::err(slot.unwrap_err()); }
 
@@ -89,7 +89,7 @@ ktl::result<ktl::ref<Region>> Region::create_child(uintptr_t base, size_t size, 
 
 ktl::result<void> Region::map(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset, vm_prot_t prot,
                               vm_cache_mode cache) {
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     if (vmo_ref.get() != nullptr) {
         if (!page_aligned(vmo_offset)) { return ktl::err(ktl::errc::invalid_operation); }
         uint64_t end_page = (vmo_offset + size) / PAGE_SIZE;
@@ -112,7 +112,7 @@ ktl::result<void> Region::map(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_re
 }
 
 ktl::result<void> Region::unmap(uintptr_t base, size_t size) {
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     uintptr_t end = base + size;
     if (end < base || base < m_base || end > m_base + m_size) { return ktl::err(ktl::errc::out_of_range); }
 
@@ -135,7 +135,7 @@ ktl::result<void> Region::unmap(uintptr_t base, size_t size) {
 }
 
 ktl::result<void> Region::protect(uintptr_t base, size_t size, vm_prot_t prot) {
-    kernel::synchronization::lock_guard guard(g_vmm_lock);
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
     uintptr_t end = base + size;
     if (end < base || base < m_base || end > m_base + m_size) { return ktl::err(ktl::errc::out_of_range); }
 

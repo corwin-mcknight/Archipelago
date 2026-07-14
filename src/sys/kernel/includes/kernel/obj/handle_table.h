@@ -3,7 +3,7 @@
 #include <kernel/config.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/types.h>
-#include <kernel/synchronization/spinlock.h>
+#include <kernel/synchronization/mutex.h>
 
 #include <ktl/maybe>
 #include <ktl/ref>
@@ -71,7 +71,7 @@ class HandleTable {
     ktl::vector<HandleEntry> m_entries;
     size_t m_count      = 0;
     int32_t m_free_head = -1;
-    kernel::synchronization::spinlock m_lock;
+    kernel::synchronization::mutex m_lock;
 
     static constexpr size_t GROW_BATCH = 32;
 
