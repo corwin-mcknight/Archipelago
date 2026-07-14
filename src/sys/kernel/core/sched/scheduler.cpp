@@ -3,19 +3,13 @@
 #include <kernel/assert.h>
 #include <kernel/config.h>
 #include <kernel/log.h>
-#include <kernel/mm/pmm.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/panic.h>
+#include <kernel/sched/internal.h>
 #include <kernel/sched/reaper.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/synchronization/execution_context.h>
-#include <kernel/time.h>
-
-#include <ktl/deque>
-#include <ktl/vector>
-
-extern uintptr_t g_hhdm_offset;
 
 // Stack tripwire floor for the running thread, consumed by the arch trap entries. Published on
 // every switch. Zero disables the check (x86 idle; pre-scheduler riscv boot writes a real floor
@@ -23,15 +17,6 @@ extern uintptr_t g_hhdm_offset;
 extern "C" uintptr_t g_kstack_floor = 0;
 
 namespace kernel::sched {
-
-struct cpu_sched {
-    ktl::deque<ktl::ref<Thread>> run_queue;
-    ktl::ref<Thread> current;
-    ktl::ref<Thread> idle;
-    // Outgoing thread of the in-flight switch; dropped by sched_finish_switch() on the incoming
-    // thread's stack so a dead thread's final ref never dies on its own stack.
-    ktl::ref<Thread> previous;
-};
 
 // All scheduler state below is guarded by interrupts-off on the single scheduling core.
 cpu_sched g_cpus[CONFIG_MAX_CORES];
@@ -42,29 +27,6 @@ cpu_sched& cur_cpu() { return g_cpus[g_boot_core]; }
 namespace {
 
 bool g_started = false;
-
-struct sleeper {
-    ktime_t wake_at = 0;
-    ktl::ref<Thread> thread;
-};
-ktl::vector<sleeper> g_sleepers;
-
-trace_ring<CONFIG_SCHED_TRACE_EVENTS> g_trace;
-global_stats g_stats;
-uint64_t g_last_switch_ts    = 0;
-bool g_lifecycle_log         = true;
-// Per-scheduling-event messages (sleep/block/woke) flood the log; opt in via `sched log verbose`.
-bool g_lifecycle_log_verbose = false;
-
-void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t to) {
-    trace_record r;
-    r.timestamp = kernel::arch::timestamp();
-    r.kind      = kind;
-    r.reason    = reason;
-    r.from_id   = from;
-    r.to_id     = to;
-    g_trace.push(r);
-}
 
 // Interrupts must be disabled. Returns when this thread is next switched in.
 void switch_to(ktl::ref<Thread> next, switch_reason reason) {
@@ -189,39 +151,11 @@ void yield() {
     kernel::arch::restore_interrupts(flags);
 }
 
-void sleep_ticks(uint64_t ticks) {
-    kernel::synchronization::assert_blocking_allowed("sleep_ticks: scheduling is forbidden in this context");
-    kernel::synchronization::assert_no_locks_held("sleep_ticks: scheduling while holding a lock");
-    if (ticks == 0) {
-        yield();
-        return;
-    }
-    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: sleep id={0} ticks={1}", current()->id(), ticks); }
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    auto& c        = cur_cpu();
-    assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
-    c.current->stats().sleeps += 1;
-    c.current->set_state(thread_state::BLOCKED);
-    bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
-    assert(ok, "sleep_ticks: sleeper allocation failed");
-    schedule_out(switch_reason::SLEEP);
-    kernel::arch::restore_interrupts(flags);
-}
-
 void on_tick() {
     if (!g_started) { return; }
     auto& c = cur_cpu();
     // Wake due sleepers first so a woken thread can be this tick's switch target.
-    for (size_t i = 0; i < g_sleepers.size();) {
-        if (g_sleepers[i].wake_at <= kernel::time::now()) {
-            ktl::ref<Thread> t = ktl::move(g_sleepers[i].thread);
-            g_sleepers[i]      = ktl::move(g_sleepers[g_sleepers.size() - 1]);
-            auto discard       = g_sleepers.pop_back();
-            make_ready(ktl::move(t));
-        } else {
-            ++i;
-        }
-    }
+    wake_due_sleepers();
     if (c.run_queue.size() == 0) { return; }
     bool idle_running = (c.current.get() == c.idle.get());
     if (!idle_running && c.current->decrement_slice() > 0) { return; }
@@ -251,46 +185,6 @@ void service_pending_preemption() {
     }
     switch_to(ktl::move(*next), switch_reason::PREEMPT);
     kernel::arch::restore_interrupts(flags);
-}
-
-ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg) {
-    constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
-
-    ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
-    if (!phys.has_value()) { phys = kernel::mm::g_page_frame_allocator.alloc_contiguous(STACK_PAGES); }
-    if (!phys.has_value()) { return ktl::err(ktl::errc::oom); }
-
-    uintptr_t virt_base = g_hhdm_offset + *phys;
-    auto thread         = ktl::make_ref<Thread>(name, task, *phys, virt_base);
-    if (!thread) {
-        stack_pool_release(*phys);
-        return ktl::err(ktl::errc::oom);
-    }
-    thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
-
-    auto added = task->add_thread(thread);
-    if (added.is_err()) {
-        stack_pool_release(*phys);
-        return ktl::err(added.unwrap_err());
-    }
-
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    thread->set_ready_ts(kernel::arch::timestamp());
-    g_stats.spawned += 1;
-    trace_push(trace_kind::SPAWN, switch_reason::NONE, cur_cpu().current ? cur_cpu().current->id() : 0, thread->id());
-    bool ok = cur_cpu().run_queue.push_back(thread);
-    kernel::arch::restore_interrupts(flags);
-    if (!ok) {
-        task->remove_thread(thread->id());
-        stack_pool_release(*phys);
-        return ktl::err(ktl::errc::oom);
-    }
-    if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", name, thread->id()); }
-    return ktl::result<ktl::ref<Thread>>::ok(thread);
-}
-
-ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
-    return spawn_into(kernel_task(), name, entry, arg);
 }
 
 [[noreturn]] void exit_current() {
@@ -337,43 +231,6 @@ void init(uint32_t boot_core_index) {
         kernel::arch::wait_for_interrupt();
     }
 }
-
-global_stats stats_snapshot() {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    global_stats s = g_stats;
-    auto& c        = cur_cpu();
-    s.runq_depth   = c.run_queue.size();
-    s.sleepers     = g_sleepers.size();
-    s.zombies      = reaper_zombie_count();
-    s.reaped       = reaper_reaped_count();
-    // Charge the running thread's in-progress slice so idle/busy shares are current.
-    if (c.current) {
-        uint64_t now = kernel::arch::timestamp();
-        c.current->stats().cpu_cycles += now - g_last_switch_ts;
-        g_last_switch_ts = now;
-    }
-    if (c.idle) { s.idle_cycles = c.idle->stats().cpu_cycles; }
-    kernel::arch::restore_interrupts(flags);
-    return s;
-}
-
-size_t trace_copy_newest(trace_record* out, size_t max) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    size_t n       = g_trace.copy_newest(out, max);
-    kernel::arch::restore_interrupts(flags);
-    return n;
-}
-
-void trace_clear() {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    g_trace.clear();
-    kernel::arch::restore_interrupts(flags);
-}
-
-void set_lifecycle_log(bool enabled) { g_lifecycle_log = enabled; }
-bool lifecycle_log_enabled() { return g_lifecycle_log; }
-void set_lifecycle_log_verbose(bool enabled) { g_lifecycle_log_verbose = enabled; }
-bool lifecycle_log_verbose_enabled() { return g_lifecycle_log && g_lifecycle_log_verbose; }
 
 }  // namespace kernel::sched
 
