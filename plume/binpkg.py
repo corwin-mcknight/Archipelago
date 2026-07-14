@@ -72,7 +72,6 @@ def extract_binpkg(archive_path: str, sysroot: str) -> dict:
     Extracts data/ contents into sysroot and returns the manifest dict.
     """
     with tarfile.open(archive_path, "r:xz") as tar:
-        # Read manifest
         mf = tar.extractfile("manifest.json")
         if mf is None:
             raise ValueError(f"No manifest.json in {archive_path}")
@@ -99,7 +98,6 @@ def extract_binpkg(archive_path: str, sysroot: str) -> dict:
                 if src is not None:
                     with open(dst_path, "wb") as dst:
                         shutil.copyfileobj(src, dst)
-                    # Preserve permissions
                     os.chmod(dst_path, member.mode)
 
     return manifest

@@ -21,11 +21,9 @@ def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str
     by_name = {p.full_name: p for p in packages}
 
     for pkg in packages:
-        # Check name format
         if not re.match(r"^[a-z0-9_-]+/[a-z0-9_-]+-[a-zA-Z0-9._]+$", pkg.full_name):
             errors.append(f"{pkg}: invalid package name format (expected category/name-version)")
 
-        # Check Makefile exists
         makefile = os.path.join(config.get("repo_path"), "packages", pkg.category, pkg.name, "Makefile")
         if not os.path.exists(makefile):
             errors.append(f"{pkg}: no Makefile at {makefile}")
@@ -37,7 +35,6 @@ def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str
             elif pkg.supported and not by_name[dep].supported:
                 errors.append(f"{pkg}: dependency '{dep}' is not available for {pkg.arch}")
 
-        # Check live source path exists
         if pkg.supports_live_sources and pkg.live_source_path:
             live_path = os.path.join(config.get("source_dir"), pkg.live_source_path)
             if not os.path.isdir(live_path):

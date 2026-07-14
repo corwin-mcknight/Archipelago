@@ -199,7 +199,7 @@ KTEST_CASE_INTEGRATION(vmo_resize) {
     // Phase 1: grow, fault into a grown page, then shrink below it.
     {
         // Growth: mapped in the kernel aspace so real faults fill the new
-        // pages. Above 4 GiB -- the boot identity map covers lower addresses.
+        // pages, at an address in the aspace's empty low half.
         constexpr uintptr_t FAULT_BASE = 0x18000000000;
         auto v                         = create_anonymous_vmo(2);
         KTEST_REQUIRE_TRUE(v.get() != nullptr);

@@ -50,11 +50,9 @@ int tokenize(const char* buffer, ktl::string_view argv[], size_t max_args) {
     int argc      = 0;
     const char* p = buffer;
     while (*p && static_cast<size_t>(argc) < max_args) {
-        // skip whitespace
         while (*p == ' ' || *p == '\t') { ++p; }
         if (*p == '\0') { break; }
         const char* start = p;
-        // advance to next whitespace or end
         while (*p && *p != ' ' && *p != '\t') { ++p; }
         argv[argc++] = ktl::string_view(start, static_cast<size_t>(p - start));
     }

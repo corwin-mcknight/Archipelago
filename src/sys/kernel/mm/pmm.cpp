@@ -113,7 +113,7 @@ bool page_frame_allocator::zero_one_page() {
     }
 
     // Pre-zero untouched region tails in place -- a counter per region, no
-    // pool entries -- until half of free memory is zeroed.
+    // pool entries -- until all free memory is zeroed.
     if (zeroed_pages() >= m_free_pages) { return false; }
     for (size_t i = m_regions.size(); i-- > 0;) {
         auto& region = m_regions[i];

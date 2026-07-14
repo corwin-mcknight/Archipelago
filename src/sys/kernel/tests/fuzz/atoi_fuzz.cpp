@@ -1,4 +1,4 @@
-// libFuzzer target for atoi (host fuzz lane, step 6).
+// libFuzzer target for atoi (host fuzz lane).
 //
 // atoi is a hand-written decimal parser with explicit INT_MAX/INT_MIN clamping. It reads a
 // NUL-terminated string; ASan (no over-read past the terminator) and UBSan (no signed overflow in

@@ -47,14 +47,14 @@ KTEST_CASE(crash_probe_rejects_far_unmapped) {
 }
 
 KTEST_CASE(crash_walk_rejects_wrapping_rbp) {
-    // Canonical, higher-half, 8-aligned -- but rbp+8 would wrap to 0 (F022).
+    // Canonical, higher-half, 8-aligned -- but rbp+8 would wrap to 0.
     auto bt = kernel::crash::arch::walk_frame_pointers(0xffff'ffff'ffff'fff8ULL);
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
 KTEST_CASE(crash_walk_rejects_unmapped_rbp) {
     // Plausible-looking rbp pointing into provably unmapped higher-half memory:
-    // must terminate the walk instead of dereferencing (F022).
+    // must terminate the walk instead of dereferencing.
     KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
     auto bt = kernel::crash::arch::walk_frame_pointers(g_hhdm_offset + (64ull << 30));
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));

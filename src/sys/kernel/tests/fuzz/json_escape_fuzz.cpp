@@ -1,4 +1,4 @@
-// libFuzzer target for kernel::write_json_escaped (host fuzz lane, step 6).
+// libFuzzer target for kernel::write_json_escaped (host fuzz lane).
 //
 // write_json_escaped is an output function -- it reads a NUL-terminated string and emits an escaped
 // JSON string body. Two properties are checked here under mutated input:

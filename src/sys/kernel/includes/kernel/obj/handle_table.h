@@ -55,7 +55,7 @@ class HandleTable {
     size_t count();
 
 #if CONFIG_KERNEL_TESTING
-    // Test-only seam: force a slot's generation so generation-wrap retirement (F021) can be
+    // Test-only seam: force a slot's generation so generation-wrap retirement can be
     // exercised without 2^32 close/reopen cycles. Returns the updated id for the live handle.
     ktl::maybe<HandleId> testing_set_generation(HandleId id, uint32_t generation);
 #endif

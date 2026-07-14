@@ -37,10 +37,7 @@ class World:
         """
         entries = self.read()
 
-        # Strip version (and arch) to get "category/name" prefix
         prefix = _name_prefix(name)
-
-        # Remove any existing entry for this package (possibly older version)
         entries = [e for e in entries if _name_prefix(e) != prefix]
         entries.append(name)
         entries.sort()
@@ -63,7 +60,6 @@ class World:
 
 def _name_prefix(entry: str) -> str:
     """Extract 'category/name' from 'category/name-version[~arch]'."""
-    # Strip ~arch if present
     if "~" in entry:
         entry = entry.rsplit("~", 1)[0]
     dash = entry.rfind("-")

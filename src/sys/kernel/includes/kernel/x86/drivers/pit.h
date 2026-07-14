@@ -3,13 +3,12 @@
 #include "kernel/interrupt.h"
 #include "kernel/time.h"
 
-/// Represents a timer
 namespace kernel::x86::drivers {
 
 class pit_timer : public kernel::hal::IInterruptHandler {
    public:
-    void init();                //< Initialise
-    time_ns_t resolution_ns();  //< Resolution in Nanoseconds
+    void init();
+    time_ns_t resolution_ns();
     bool handle_interrupt(register_frame_t* regs);
 
    private:

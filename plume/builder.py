@@ -86,7 +86,6 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
     if force and os.path.isdir(env["D"]):
         shutil.rmtree(env["D"])
 
-    # Create working directories
     for d in [env["WORKDIR"], env["S"], env["D"]]:
         os.makedirs(d, exist_ok=True)
 
@@ -193,7 +192,6 @@ def uninstall_package(config: Config, package: Package) -> bool:
 
     manifest = read_manifest(manifest_path)
 
-    # Remove files
     removed_dirs: set[str] = set()
     for entry in manifest.get("files", []):
         fpath = os.path.join(sysroot, entry["path"])
@@ -207,7 +205,6 @@ def uninstall_package(config: Config, package: Package) -> bool:
             os.rmdir(d)
             d = os.path.dirname(d)
 
-    # Remove manifest and world entry
     os.remove(manifest_path)
     World(sysroot).remove(package.qualified_name)
 

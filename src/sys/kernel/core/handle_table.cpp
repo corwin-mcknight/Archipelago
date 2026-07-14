@@ -27,7 +27,7 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
 ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
     if (!object) { return ktl::err(ktl::errc::null_argument); }
 
-    // F033: requested rights must stay within the contract registered for this object's type.
+    // Requested rights must stay within the contract registered for this object's type.
     // Out-of-contract bits are rejected outright rather than silently clamped.
     auto descriptor = g_type_registry.lookup(object->type_id());
     if (!descriptor.has_value()) { return ktl::err(ktl::errc::wrong_type); }
@@ -100,7 +100,7 @@ ktl::result<void> HandleTable::close(HandleId id) {
     entry->rights = 0;
     m_count--;
 
-    // F021: if the generation counter is saturated, incrementing would wrap to 0 and let a stale
+    // If the generation counter is saturated, incrementing would wrap to 0 and let a stale
     // (index, generation) HandleId revalidate against a recycled slot. Retire the slot permanently
     // instead of returning it to the free list.
     if (entry->generation == UINT32_MAX) {

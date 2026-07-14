@@ -50,15 +50,12 @@ struct log_message {
                          const ktl::fixed_string<max_message_size> message)
         : timestamp(time), level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence), text(message) {}
 
-    // Move constructor
     log_message(log_message&& other) noexcept
         : timestamp(other.timestamp), level_seq(other.level_seq), text(ktl::move(other.text)) {}
 
-    // Copy constructor
     log_message(const log_message& other) noexcept
         : timestamp(other.timestamp), level_seq(other.level_seq), text(other.text) {}
 
-    // Copy assignment operator
     log_message& operator=(const log_message& other) noexcept {
         timestamp = other.timestamp;
         level_seq = other.level_seq;
@@ -66,7 +63,6 @@ struct log_message {
         return *this;
     }
 
-    // Move assignment operator
     log_message& operator=(log_message&& other) noexcept {
         timestamp = other.timestamp;
         level_seq = other.level_seq;
@@ -101,7 +97,6 @@ class system_log {
         if (this->m_autoflush) { flush(); }
     }
 
-// Specialize for log_level::debug
 #define LOG_LEVEL_HELPER(thelevel)                                                                            \
     template <typename... Args> INLINE_RELEASE_ONLY void thelevel(const ktl::string_view fmt, Args... args) { \
         log<log_level::thelevel>(fmt, args...);                                                               \

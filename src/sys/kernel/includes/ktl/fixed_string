@@ -21,7 +21,6 @@ template <size_t N> class fixed_string {
         str.copy(m_buffer, N - 1);  // leave room for the terminator zeroed above
     }
 
-    // Convert to string view
     operator ktl::string_view() const { return ktl::string_view(m_buffer, length()); }
 
     operator const char*() const { return m_buffer; }

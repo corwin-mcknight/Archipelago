@@ -20,7 +20,7 @@ struct ref_control_block_base {
     virtual ~ref_control_block_base() = default;
 };
 
-// Bump the strong count, guarding against wrap-around (F047). A saturated count
+// Bump the strong count, guarding against wrap-around. A saturated count
 // would wrap to 0 and trigger premature destruction, so treat it as fatal.
 inline void ref_acquire(ref_control_block_base* block) {
     if (!block) { return; }
@@ -118,7 +118,7 @@ template <typename T> class ref {
     detail::ref_control_block_base* m_block;
 };
 
-// Returns an empty ref<T>() if either allocation fails (F032). The nothrow new form is
+// Returns an empty ref<T>() if either allocation fails. The nothrow new form is
 // required here: the ordinary form is assumed non-null by the compiler, which would elide
 // these checks entirely. Today the underlying allocator panics on OOM, so the null paths
 // are forward-proofing for a failing allocator.

@@ -38,7 +38,7 @@ isr_common:
     call k_exception_handler
     rframe_load
     add rsp, 16                 ; Error Code + IRQ number cleanup
-    iretq                       ; Return
+    iretq
 
 irq_common:
     cmp rsp, [rel g_kstack_floor]
@@ -50,7 +50,7 @@ irq_common:
     call k_irq_handler
     rframe_load
     add rsp, 16                 ; Error Code + IRQ number cleanup
-    iretq                       ; Return
+    iretq
 
 isr_handler         interrupt_isr0,  0
 isr_handler         interrupt_isr1,  1

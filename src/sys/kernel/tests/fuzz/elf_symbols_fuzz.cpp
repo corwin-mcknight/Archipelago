@@ -1,4 +1,4 @@
-// libFuzzer target for the ELF symbol-table locator (host fuzz lane, step 6).
+// libFuzzer target for the ELF symbol-table locator (host fuzz lane).
 //
 // locate_symbol_tables validates an ELF64 blob and returns pointers to its .symtab and string table.
 // It is pure (no global state) and does heavy offset/count/index arithmetic on attacker-controlled

@@ -1,4 +1,4 @@
-// libFuzzer target for the Itanium demangler (host fuzz lane, step 6).
+// libFuzzer target for the Itanium demangler (host fuzz lane).
 //
 // The demangler is a hand-written length-prefixed parser; this drives it with mutated bytes under
 // ASan/UBSan. Input and output live in exactly-sized heap allocations so that any over-read past the

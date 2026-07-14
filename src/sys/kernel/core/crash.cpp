@@ -192,7 +192,7 @@ void emit_log_drain(bool harness) {
     // The producer path holds no lock; force the flush flag (its holder may be the flush that
     // just faulted) and scan the retained window. In-progress slots are shown as a placeholder
     // since their bytes may be torn. SMP: a peer core mid-log during the dump races this scan;
-    // that quiescing is deferred (best-effort dump) -- see the spec. Single-core (the only
+    // that quiescing is deferred (best-effort dump). Single-core (the only
     // configuration today) has no such peer.
     g_log.crash_for_each([&](const kernel::log_message* msg, bool in_progress) {
         if (in_progress) {

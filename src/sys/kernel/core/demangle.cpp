@@ -1,7 +1,7 @@
 // Itanium C++ ABI demangler -- split out of symbols.cpp so it can be linked and fuzzed on its own.
 // This translation unit has no dependency on the embedded symbol table or any hardware state: it is a
 // pure function over a mangled string and a caller-provided output buffer, which is exactly what lets
-// the host fuzz lane target it (see the two-tier test system, step 6).
+// the host fuzz lane target it.
 
 #include <stddef.h>
 

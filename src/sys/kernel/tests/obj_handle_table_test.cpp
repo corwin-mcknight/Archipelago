@@ -108,7 +108,7 @@ KTEST_CASE(obj_handle_table_global_emplace) {
     KTEST_EXPECT_TRUE(handles.count() == before);
 }
 
-// F033: rights outside the type's registered valid_rights contract are rejected, not clamped --
+// Rights outside the type's registered valid_rights contract are rejected, not clamped --
 // whether entirely out-of-contract or a mix of in-contract and out-of-contract bits -- while
 // rights within the contract still work, including duplicate (whose rights are a masked subset).
 KTEST_CASE(obj_handle_table_enforces_rights_contract) {
@@ -125,14 +125,14 @@ KTEST_CASE(obj_handle_table_enforces_rights_contract) {
     KTEST_EXPECT_ALL(dup_info.rights == RIGHT_READ, table.count() == 2);
 }
 
-// F033: objects whose type was never registered cannot be given handles at all.
+// Objects whose type was never registered cannot be given handles at all.
 KTEST_CASE(obj_handle_table_rejects_unregistered_type) {
     HandleTable table;
     auto bad = table.emplace<TestObjUnregistered>(RIGHT_READ);
     KTEST_EXPECT_ALL(bad.is_err(), bad.unwrap_err() == ktl::errc::wrong_type, table.count() == 0);
 }
 
-// F021: a slot whose generation counter saturates is retired on close instead of being recycled,
+// A slot whose generation counter saturates is retired on close instead of being recycled,
 // so a stale HandleId can never revalidate after the counter would have wrapped.
 KTEST_CASE(obj_handle_table_generation_wrap_retires_slot) {
     HandleTable table;

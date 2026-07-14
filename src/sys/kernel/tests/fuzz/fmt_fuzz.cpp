@@ -1,4 +1,4 @@
-// libFuzzer target for the ktl::format brace parser (host fuzz lane, step 6).
+// libFuzzer target for the ktl::format brace parser (host fuzz lane).
 //
 // format_to_buffer_raw walks the format string with unchecked string_view::operator[] and, in the
 // ":<spec>" branch, does several bare ++format_index reads (alignment/pad/width/specifier). A format

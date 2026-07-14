@@ -1,4 +1,4 @@
-// ThreadSanitizer stress harness for kernel::log_ring (host TSan lane, step 6).
+// ThreadSanitizer stress harness for kernel::log_ring (host TSan lane).
 //
 // log_ring is a lock-free multi-producer/single-consumer bounded ring. Its correctness rests on the
 // producer's publish() (release store of the slot state) synchronizing-with the flusher's drain()

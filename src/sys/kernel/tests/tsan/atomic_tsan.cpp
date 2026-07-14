@@ -1,4 +1,4 @@
-// ThreadSanitizer stress harness for ktl::atomic (host TSan lane, step 6).
+// ThreadSanitizer stress harness for ktl::atomic (host TSan lane).
 //
 // The fork-per-test host runner is single-threaded, so it structurally cannot exercise a data race;
 // this is a separate binary that drives ktl::atomic from real pthreads under TSan. TSan models the

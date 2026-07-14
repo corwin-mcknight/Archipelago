@@ -10,7 +10,7 @@ using namespace kernel::testing;
 
 KTEST_MODULE("kernel/uart");
 
-// F039: the boot-time loopback self-test must leave the console UART marked healthy. QEMU's
+// The boot-time loopback self-test must leave the console UART marked healthy. QEMU's
 // emulated 16550 always passes loopback, so this verifies init() records the echo result instead
 // of discarding it. The dead-port paths (failed loopback, transmit timeout) are not exercisable
 // under QEMU.

@@ -1,8 +1,6 @@
-/* Tell the linker that we want a riscv64 ELF64 output file */
 OUTPUT_FORMAT(elf64-littleriscv)
 OUTPUT_ARCH(riscv)
 
-/* We want the symbol _start to be our entry point */
 ENTRY(_start)
 
 /* Define the program headers we want so the bootloader gives us the right */

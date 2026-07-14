@@ -11,7 +11,6 @@ typedef struct register_frame register_frame_t;
 namespace kernel {
 namespace hal {
 
-/// @brief The IInterruptHandler class is an interface for handling interrupts.
 class IInterruptHandler {
    public:
     virtual bool handle_interrupt(register_frame_t* regs) = 0;
@@ -25,7 +24,6 @@ struct InterruptHandlerEntry {
         Handler() : function(nullptr) {}
     } handler;
 
-    // Flags store information about this interrupt.
     constexpr static uint64_t ENABLED_MASK      = 0b01;
     const static uint64_t OBJECT_HANDLER_MASK   = 0b10;
     const static uint64_t FUNCTION_HANDLER_MASK = ~OBJECT_HANDLER_MASK;

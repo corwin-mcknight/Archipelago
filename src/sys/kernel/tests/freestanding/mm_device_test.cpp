@@ -27,7 +27,7 @@ using namespace kernel::mm;
 
 constexpr size_t PAGES       = 2;
 constexpr size_t PAGE        = 0x1000;
-constexpr uintptr_t MAP_BASE = 0x10000000000;  // above the 4 GiB boot identity map
+constexpr uintptr_t MAP_BASE = 0x10000000000;  // in the kernel aspace's empty low half
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace
 

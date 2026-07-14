@@ -77,7 +77,6 @@ void kernel::x86::init_idt() {
         idtptr.limit = sizeof(idt) - 1;
         idtptr.base  = (uintptr_t)&idt;
 
-        // Clear the IDT
         memset(&idt, 0, sizeof(idt));
 
         // Remap the PIC

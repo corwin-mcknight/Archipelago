@@ -8,7 +8,6 @@ namespace hal {
 
 void interrupt_manager::initialize() { memset(handlers, 0, sizeof(handlers)); }
 
-// Register an object handler for interrupt id.
 void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* handler, uint64_t flags) {
     if (id >= IM_MAX_HANDLERS) { return; }
     handlers[id].handler.object = handler;
@@ -16,7 +15,6 @@ void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* h
     g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
-// Register a function handler for interrupt id.
 void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(register_frame_t*), uint64_t flags) {
     if (id >= IM_MAX_HANDLERS) { return; }
     handlers[id].handler.function = handler;

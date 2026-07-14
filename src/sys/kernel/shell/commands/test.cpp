@@ -57,7 +57,6 @@ void record_failure(const char* message) {
         g_failure_reason.m_buffer[copy_len] = '\0';
         g_failure_reason_recorded           = true;
     }
-    // Also emit as error
     auto& output = kernel::shell::shell_output();
     emit_harness_event(output, "@@HARNESS {{\"event\":\"error\",\"message\":\"{0}\"}}\n", message);
 }
@@ -163,7 +162,6 @@ void handle_assertion_failure(const char* message, bool fatal, unsigned char exi
 
 KSHELL_COMMAND(test, "test", "Test runner", test_handler);
 
-// kernel::testing::abort implementation
 void kernel::testing::abort(unsigned char exit_code) {
     auto& output = kernel::shell::shell_output();
 

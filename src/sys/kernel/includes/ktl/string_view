@@ -13,7 +13,6 @@ class string_view {
     constexpr string_view(const char* str, size_t count) : m_ptr(str), m_size(count) {}
     constexpr string_view(const char* str) : m_ptr(str), m_size(ktl::strlen(str)) {}
 
-    // Copy assignment
     constexpr string_view& operator=(const string_view& other) = default;
     constexpr const char* data() const { return m_ptr; }
     constexpr size_t size() const { return m_size; }
@@ -84,7 +83,6 @@ class string_view {
         return rcount;
     }
 
-    // Starts with
     constexpr bool starts_with(const char* s) const {
         size_t len = ktl::strlen(s);
         if (len > m_size) { return false; }

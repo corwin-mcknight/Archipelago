@@ -97,12 +97,11 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
              ...);
             if (!found) { --format_index; }
         } else {
-            // print the string "<invalid argument>"
             const char* invalid_argument = "<invalid argument>";
             while (*invalid_argument && buffer_index < buffer_max - 1) { buffer[buffer_index++] = *invalid_argument++; }
         }
     }
-    buffer[buffer_index] = '\0';  // null-terminate the string
+    buffer[buffer_index] = '\0';
 }
 }  // namespace format
 }  // namespace ktl

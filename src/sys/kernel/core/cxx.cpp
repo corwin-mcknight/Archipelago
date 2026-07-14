@@ -18,9 +18,7 @@ extern "C" void __cxa_atexit(void (*f)(void*), void* obj, void* d) {
 
 // Define cxa_pure_virtual to prevent undefined reference errors
 extern "C" [[noreturn]] void __cxa_pure_virtual() {
-    // Log the call
     g_log.error("Pure virtual function called");
-    // Halt the system
     hcf();
 }
 
