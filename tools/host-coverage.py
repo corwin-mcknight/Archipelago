@@ -22,8 +22,16 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OBJDIR = os.path.join(ROOT, "build", "obj", "test", "kernel-testrunner")
+sys.path.insert(0, ROOT)
+from plume.config import Config  # noqa: E402
+
+# Resolve build paths from the active target config (build_dir is per-arch, e.g. build/x86_64).
+_CFG = Config(os.path.join(ROOT, "default.yaml"))
+OBJDIR = os.path.join(_CFG.get("build_dir"), "obj", "test", "kernel-testrunner")
 RUNNER = os.path.join(OBJDIR, "host-test-runner")
+# Plume considers a build tool "built" while its installed copy exists; delete it to force the
+# instrumented rebuild.
+TOOLDIR = os.path.join(_CFG.get("tools_path"), "kernel-testrunner")
 COVDIR = os.path.join(ROOT, "build", "host-cov")
 RAWDIR = os.path.join(COVDIR, "raw")
 # Coverage of the code under test only: drop the test sources themselves and any system/libc headers.
@@ -62,6 +70,7 @@ def main(argv):
 
     # Force a clean coverage rebuild: the normal build has no instrumentation and plume would skip it.
     shutil.rmtree(OBJDIR, ignore_errors=True)
+    shutil.rmtree(TOOLDIR, ignore_errors=True)
     shutil.rmtree(COVDIR, ignore_errors=True)
     os.makedirs(RAWDIR, exist_ok=True)
 
