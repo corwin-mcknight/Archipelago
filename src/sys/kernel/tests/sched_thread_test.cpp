@@ -6,6 +6,8 @@
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/thread.h>
 
+#include <ktl/string_view>
+
 using namespace kernel::sched;
 using kernel::obj::g_type_registry;
 
@@ -23,10 +25,24 @@ KTEST_WITH_INIT(sched_thread_defaults, "sched/thread", sched_thread_init) {
     KTEST_EXPECT_TRUE(t.type_id() == kernel::obj::type_ids::THREAD);
 }
 
-KTEST_WITH_INIT(sched_thread_stack_ctor_sets_floor, "sched/thread", sched_thread_init) {
-    Thread t(0x40000, 0xFFFF800000040000u);
+KTEST_WITH_INIT(sched_thread_spawned_ctor_sets_floor, "sched/thread", sched_thread_init) {
+    Thread t("spawned", {}, 0x40000, 0xFFFF800000040000u);
     KTEST_EXPECT_EQUAL(t.kstack_phys(), 0x40000u);
     KTEST_EXPECT_EQUAL(t.kstack_floor(), 0xFFFF800000040000u + CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN);
+    KTEST_EXPECT_EQUAL(t.kstack_top(), 0xFFFF800000040000u + CONFIG_KERNEL_STACK_SIZE);
+    // A spawned thread is queued, not running, until the scheduler switches to it.
+    KTEST_EXPECT_TRUE(t.state() == thread_state::READY);
+    KTEST_EXPECT_TRUE(ktl::string_view(t.name()) == "spawned");
+}
+
+KTEST_WITH_INIT(sched_thread_adopting_ctor_starts_running, "sched/thread", sched_thread_init) {
+    // The adopted context is already executing on its own stack, so it owns no stack of its own
+    // and must not be reported as merely READY.
+    Thread t("idle0", {}, 0xFFFF800000090000u);
+    KTEST_EXPECT_TRUE(t.state() == thread_state::RUNNING);
+    KTEST_EXPECT_EQUAL(t.kstack_floor(), 0xFFFF800000090000u);
+    KTEST_EXPECT_EQUAL(t.kstack_phys(), 0u);
+    KTEST_EXPECT_EQUAL(t.kstack_top(), 0u);
 }
 
 KTEST_WITH_INIT(sched_thread_state_transitions, "sched/thread", sched_thread_init) {

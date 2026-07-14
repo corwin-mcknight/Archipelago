@@ -6,15 +6,13 @@
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/panic.h>
+#include <kernel/sched/reaper.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
-#include <kernel/sched/user_task.h>
-#include <kernel/sched/wait_queue.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/time.h>
 
 #include <ktl/deque>
-#include <ktl/stack>
 #include <ktl/vector>
 
 extern uintptr_t g_hhdm_offset;
@@ -44,13 +42,6 @@ cpu_sched& cur_cpu() { return g_cpus[g_boot_core]; }
 namespace {
 
 bool g_started = false;
-
-// Dead threads awaiting the reaper, and recycled stacks. Stacks come from alloc_contiguous,
-// which has no contiguous free -- the cache recycles them among threads instead; the pool is
-// bounded by the peak live thread count.
-ktl::deque<ktl::ref<Thread>> g_zombies;
-ktl::stack<kernel::mm::vm_paddr_t> g_stack_cache;
-wait_queue g_reaper_wq;
 
 struct sleeper {
     ktime_t wake_at = 0;
@@ -131,42 +122,6 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
     if (c.current->kstack_top() != 0) { kernel::arch::set_kernel_stack(c.current->kstack_top()); }
     arch_context_switch(outgoing->saved_sp_slot(), c.current->saved_sp());
     sched_finish_switch();
-}
-
-// Returns a stack to the cache; shared by reap() and spawn()'s failure paths.
-void release_stack(kernel::mm::vm_paddr_t phys) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    bool ok        = g_stack_cache.push(phys);
-    kernel::arch::restore_interrupts(flags);
-    if (!ok) { g_log.warn("sched: stack cache full; leaking a thread stack"); }
-}
-
-void reap(ktl::ref<Thread> zombie) {
-    if (lifecycle_log_enabled()) { g_log.debug("sched: reap id={0}", zombie->id()); }
-    auto task = ktl::static_ref_cast<Task>(zombie->owner());
-    // Threads built without set_owner() (tests construct Thread directly) still reap
-    // safely: fall back to kernel_task, where remove_thread is a harmless no-op.
-    if (!task) { task = kernel_task(); }
-    task->remove_thread(zombie->id());
-    if (zombie->kstack_phys() != 0) { release_stack(zombie->kstack_phys()); }
-    if (task.get() != kernel_task().get() && task->thread_count() == 0) { teardown_user_task(ktl::move(task)); }
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    g_stats.reaped += 1;
-    kernel::arch::restore_interrupts(flags);
-}
-
-[[noreturn]] void reaper_main(void*) {
-    while (true) {
-        ktl::maybe<ktl::ref<Thread>> zombie;
-        uint64_t flags = kernel::arch::save_and_disable_interrupts();
-        zombie         = g_zombies.pop_front();
-        kernel::arch::restore_interrupts(flags);
-        if (!zombie.has_value()) {
-            g_reaper_wq.block_if(0, [](void*) { return g_zombies.size() == 0; }, nullptr);
-            continue;
-        }
-        reap(ktl::move(*zombie));
-    }
 }
 
 }  // namespace
@@ -301,29 +256,25 @@ void service_pending_preemption() {
 ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg) {
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
-    uint64_t flags                          = kernel::arch::save_and_disable_interrupts();
-    ktl::maybe<kernel::mm::vm_paddr_t> phys = g_stack_cache.pop();
-    kernel::arch::restore_interrupts(flags);
+    ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
     if (!phys.has_value()) { phys = kernel::mm::g_page_frame_allocator.alloc_contiguous(STACK_PAGES); }
     if (!phys.has_value()) { return ktl::err(ktl::errc::oom); }
 
     uintptr_t virt_base = g_hhdm_offset + *phys;
-    auto thread         = ktl::make_ref<Thread>(*phys, virt_base);
+    auto thread         = ktl::make_ref<Thread>(name, task, *phys, virt_base);
     if (!thread) {
-        release_stack(*phys);
+        stack_pool_release(*phys);
         return ktl::err(ktl::errc::oom);
     }
-    thread->set_name(name);
-    thread->set_owner(task);
     thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
 
     auto added = task->add_thread(thread);
     if (added.is_err()) {
-        release_stack(*phys);
+        stack_pool_release(*phys);
         return ktl::err(added.unwrap_err());
     }
 
-    flags = kernel::arch::save_and_disable_interrupts();
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
     thread->set_ready_ts(kernel::arch::timestamp());
     g_stats.spawned += 1;
     trace_push(trace_kind::SPAWN, switch_reason::NONE, cur_cpu().current ? cur_cpu().current->id() : 0, thread->id());
@@ -331,7 +282,7 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
     kernel::arch::restore_interrupts(flags);
     if (!ok) {
         task->remove_thread(thread->id());
-        release_stack(*phys);
+        stack_pool_release(*phys);
         return ktl::err(ktl::errc::oom);
     }
     if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", name, thread->id()); }
@@ -352,22 +303,17 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
     c.current->set_state(thread_state::DEAD);
     c.current->signal_set(Thread::SIGNAL_TERMINATED);
     trace_push(trace_kind::EXIT, switch_reason::NONE, c.current->id(), 0);
-    bool ok = g_zombies.push_back(c.current);
-    assert(ok, "exit_current: zombie list allocation failed");
-    g_reaper_wq.wake_one();
+    reaper_enqueue(c.current);
     schedule_out(switch_reason::EXIT);
     panic("exit_current: switched back into a dead thread");
 }
 
 void init(uint32_t boot_core_index) {
     g_boot_core = boot_core_index;
-    auto idle   = ktl::make_ref<Thread>();
+    // The boot context becomes the idle thread: already running, and its stack keeps whatever
+    // tripwire the arch established (riscv trap_init; 0 on x86).
+    auto idle   = ktl::make_ref<Thread>("idle0", kernel_task(), g_kstack_floor);
     assert(static_cast<bool>(idle), "sched: idle thread allocation failed");
-    idle->set_name("idle0");
-    idle->set_owner(kernel_task());
-    idle->set_state(thread_state::RUNNING);
-    // The boot stack keeps whatever tripwire the arch established (riscv trap_init; 0 on x86).
-    idle->set_kstack_floor(g_kstack_floor);
     kernel_task()->add_thread(idle).expect("sched: task zero rejected the idle thread");
     auto& c   = cur_cpu();
     c.idle    = idle;
@@ -377,7 +323,7 @@ void init(uint32_t boot_core_index) {
     g_last_switch_ts = kernel::arch::timestamp();
     g_stats.boot_ts  = g_last_switch_ts;
     g_started        = true;
-    spawn("reaper", reaper_main, nullptr).expect("sched: reaper spawn failed");
+    reaper_start();
     g_log.info("sched: online (core {0})", boot_core_index);
 }
 
@@ -398,7 +344,8 @@ global_stats stats_snapshot() {
     auto& c        = cur_cpu();
     s.runq_depth   = c.run_queue.size();
     s.sleepers     = g_sleepers.size();
-    s.zombies      = g_zombies.size();
+    s.zombies      = reaper_zombie_count();
+    s.reaped       = reaper_reaped_count();
     // Charge the running thread's in-progress slice so idle/busy shares are current.
     if (c.current) {
         uint64_t now = kernel::arch::timestamp();

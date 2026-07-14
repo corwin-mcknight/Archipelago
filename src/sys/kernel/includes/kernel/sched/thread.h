@@ -34,27 +34,38 @@ class Thread : public kernel::obj::Object {
     DECLARE_OBJECT_TYPE(Thread, kernel::obj::type_ids::THREAD)
     static constexpr uint32_t SIGNAL_TERMINATED = 1u << 0;
 
-    // Adopting constructor: wraps an already-running context (the boot/idle thread); no owned stack.
+    // Bare thread: no name, no owner, no stack. Kernel code uses one of the two constructors
+    // below; this exists for tests exercising Thread/Task bookkeeping in isolation.
     Thread() : Object(TYPE_ID) {}
 
-    // Spawned thread. The stack is identified by its physical base and its HHDM-mapped virtual
-    // base; the scheduler prepares the initial switch frame and records it via set_saved_sp().
-    Thread(uintptr_t kstack_phys, uintptr_t kstack_virt_base)
+    // Adopting constructor: wraps an already-running context (the boot/idle thread). It owns no
+    // stack, and the context is already executing, so it starts RUNNING. kstack_floor is whatever
+    // tripwire the arch established for that stack (0 disables the check).
+    Thread(const char* name, ktl::ref<kernel::obj::Object> owner, uintptr_t kstack_floor)
+        : Object(TYPE_ID), m_state(thread_state::RUNNING), m_kstack_floor(kstack_floor), m_owner(ktl::move(owner)) {
+        set_name(name);
+    }
+
+    // Spawned thread: owns the stack identified by its physical base and its HHDM-mapped virtual
+    // base. Starts READY; the scheduler prepares the initial switch frame and records it via
+    // set_saved_sp().
+    Thread(const char* name, ktl::ref<kernel::obj::Object> owner, uintptr_t kstack_phys, uintptr_t kstack_virt_base)
         : Object(TYPE_ID),
           m_kstack_phys(kstack_phys),
           m_kstack_floor(kstack_virt_base + CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN),
-          m_kstack_top(kstack_virt_base + CONFIG_KERNEL_STACK_SIZE) {}
+          m_kstack_top(kstack_virt_base + CONFIG_KERNEL_STACK_SIZE),
+          m_owner(ktl::move(owner)) {
+        set_name(name);
+    }
 
     thread_state state() const { return m_state; }
     void set_state(thread_state s) { m_state = s; }
 
     uintptr_t kstack_phys() const { return m_kstack_phys; }
     uintptr_t kstack_floor() const { return m_kstack_floor; }
-    void set_kstack_floor(uintptr_t floor) { m_kstack_floor = floor; }
     uintptr_t kstack_top() const { return m_kstack_top; }
 
     ktl::ref<kernel::obj::Object>& owner() { return m_owner; }
-    void set_owner(ktl::ref<kernel::obj::Object> owner) { m_owner = ktl::move(owner); }
 
     uintptr_t saved_sp() const { return m_saved_sp; }
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
