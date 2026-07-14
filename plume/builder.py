@@ -46,13 +46,25 @@ def is_built(config: Config, package: Package) -> bool:
 
 
 def is_installed(config: Config, package: Package) -> bool:
-    """Check whether a package is built and installed into the sysroot."""
+    """Check whether the package's current build is installed in the sysroot.
+
+    World membership alone is insufficient: it survives a rebuild, so a package
+    that was reinstalled after editing its sources would look "installed" while
+    the sysroot still holds the old files. Require the installed manifest to be
+    at least as new as the build stamp, so a rebuild forces a reinstall.
+    """
     if not is_built(config, package):
         return False
     if package.is_build_tool:
         return True  # build tools don't go in world
-    world = World(config.get("sysroot"))
-    return world.contains(package.qualified_name)
+    sysroot = config.get("sysroot")
+    if not World(sysroot).contains(package.qualified_name):
+        return False
+    stamp_path = os.path.join(get_build_env(config, package)["WORKDIR"], STAMP_NAME)
+    manifest_path = installed_manifest_path(sysroot, package.qualified_name)
+    if not os.path.exists(manifest_path):
+        return False
+    return os.path.getmtime(manifest_path) >= os.path.getmtime(stamp_path)
 
 
 def clean_package(config: Config, package: Package):
