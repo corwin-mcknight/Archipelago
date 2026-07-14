@@ -35,7 +35,10 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
 
     kernel::synchronization::lock_guard guard(m_lock);
 
-    if (m_free_head == -1) { KTRY(grow()); }
+    if (m_free_head == -1) {
+        auto grown = grow();
+        if (grown.is_err()) { return ktl::err(grown.unwrap_err()); }
+    }
 
     int32_t slot    = m_free_head;
     auto& entry     = m_entries[static_cast<size_t>(slot)];

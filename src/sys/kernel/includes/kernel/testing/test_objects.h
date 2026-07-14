@@ -60,12 +60,8 @@ class TestObjUnregistered : public kernel::obj::Object {
 // already_registered is expected here: obj_init() registers Event/Counter at boot, and tests
 // re-enter this function freely. Any other registration failure is a real test-environment bug.
 inline void expect_registered(ktl::result<void> result, const char* msg) {
-    result
-        .or_else([](ktl::errc e) -> ktl::result<void> {
-            if (e == ktl::errc::already_registered) { return ktl::result<void>::ok(); }
-            return ktl::err(e);
-        })
-        .expect(msg);
+    if (result.is_err() && result.unwrap_err() == ktl::errc::already_registered) { return; }
+    result.expect(msg);
 }
 
 // One-shot init that registers TestObjA/TestObjB plus Event/Counter.

@@ -32,7 +32,7 @@ template <typename T> class [[nodiscard]] maybe {
     bool has_value() { return m_has_value; }
     explicit operator bool() const { return m_has_value; }
 
-    // Accessing the value of an empty maybe is a kernel bug and panics, mirroring Result::unwrap.
+    // Accessing the value of an empty maybe is a kernel bug and panics, mirroring result::unwrap.
     T& value() {
         if (!m_has_value) { panic("maybe::value on empty maybe"); }
         return m_value;
@@ -42,7 +42,7 @@ template <typename T> class [[nodiscard]] maybe {
         return m_value;
     }
 
-    // Like value(), but panics with a caller-supplied diagnosis, mirroring Result::expect.
+    // Like value(), but panics with a caller-supplied diagnosis, mirroring result::expect.
     T& expect(const char* error_message) {
         if (!m_has_value) { panic(error_message); }
         return m_value;

@@ -100,7 +100,7 @@
 #define KTEST_EXPECT_ALL(...) \
     KTEST_EA_N(__VA_ARGS__, KTEST_EA_5, KTEST_EA_4, KTEST_EA_3, KTEST_EA_2, KTEST_EA_1)(__VA_ARGS__)
 
-// Unwrap a Result<T,E>, requiring is_ok(). Declares `var` with the unwrapped value.
+// Unwrap a ktl::result, requiring is_ok(). Declares `var` with the unwrapped value.
 // Usage: KTEST_UNWRAP(id, table.emplace<ObjA>(RIGHTS_ALL));
 #define KTEST_UNWRAP(var, expr)                   \
     auto _ktest_res_##var = (expr);               \

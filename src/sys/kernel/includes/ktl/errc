@@ -1,0 +1,23 @@
+#pragma once
+
+#include <stdint.h>
+
+namespace ktl {
+
+/// Unified kernel error codes.
+enum class errc : intptr_t {
+    unknown            = -1,
+    null_argument      = -2,
+    invalid_operation  = -3,
+    oom                = -4,
+    wrong_type         = -5,
+    handle_invalid     = -6,
+    already_registered = -7,
+    rights_violation   = -8,
+    registry_full      = -9,
+    capacity_exhausted = -10,
+    out_of_range       = -11,
+    truncated          = -12,
+};
+
+}  // namespace ktl

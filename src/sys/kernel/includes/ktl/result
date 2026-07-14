@@ -1,177 +1,71 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include <ktl/maybe>
+#include <ktl/errc>
 #include <ktl/utility>
 #include <std/new.h>
 
 #include "kernel/panic.h"
 
+namespace ktl {
 
-enum class ResultType { Ok, Err };
+namespace detail {
+/// True when every type is trivially copyable (which implies trivially destructible). Used to make
+/// result itself trivially copyable -- and thus register-passable -- for small payloads like errc.
+template <typename... Ts>
+concept all_trivial = (__is_trivially_copyable(Ts) && ...);
+}  // namespace detail
 
-template <typename T, typename E> struct [[nodiscard]] Result {
+template <typename T, typename E = errc> struct [[nodiscard]] result {
    private:
     union Storage {
         T ok;
         E err;
         Storage() {}
+        ~Storage() requires detail::all_trivial<T, E> = default;
         ~Storage() {}
     } value;
-    ResultType type;
+    bool m_ok;
+
+    struct ok_tag {};
+    struct err_tag {};
+    result(ok_tag, T val) : m_ok(true) { new (&value.ok) T(ktl::move(val)); }
+    result(err_tag, E val) : m_ok(false) { new (&value.err) E(ktl::move(val)); }
 
     void destroy() {
-        if (type == ResultType::Ok) { value.ok.~T(); }
+        if (m_ok) { value.ok.~T(); }
         else { value.err.~E(); }
     }
 
     template <typename Src> void construct_from(Src&& other) {
-        type = other.type;
-        if (type == ResultType::Ok) { new (&value.ok) T(ktl::forward<Src>(other).value.ok); }
+        m_ok = other.m_ok;
+        if (m_ok) { new (&value.ok) T(ktl::forward<Src>(other).value.ok); }
         else { new (&value.err) E(ktl::forward<Src>(other).value.err); }
     }
 
    public:
-    ~Result() { destroy(); }
-
-    Result(const Result& other) { construct_from(other); }
-    Result(Result&& other) noexcept { construct_from(ktl::move(other)); }
-
-    Result& operator=(const Result& other) {
-        if (this != &other) { destroy(); construct_from(other); }
-        return *this;
-    }
-
-    Result& operator=(Result&& other) noexcept {
-        if (this != &other) { destroy(); construct_from(ktl::move(other)); }
-        return *this;
-    }
-
-    // Boolean
-    bool is_ok() const { return type == ResultType::Ok; }
-    bool is_err() const { return type == ResultType::Err; }
-    explicit operator bool() const { return is_ok(); }
-
-    // Extraction
-    T expect(const char* error_message) const {
-        if (is_err()) { panic(error_message); }
-        return value.ok;
-    }
-
-    T unwrap() {
-        if (is_err()) { panic("Result unwrap failed"); }
-        return ktl::move(value.ok);
-    }
-
-    T unwrap() const {
-        if (is_err()) { panic("Result unwrap failed"); }
-        return value.ok;
-    }
-
-    E unwrap_err() const {
-        if (!is_err()) { panic("Result unwrap_err failed"); }
-        return value.err;
-    }
-
-    T unwrap_or(T default_value) const {
-        if (is_err()) { return default_value; }
-        return value.ok;
-    }
-
-    // Transformation
-    ktl::maybe<T> ok() const { return is_ok() ? ktl::maybe<T>(value.ok) : ktl::nothing; }
-    ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
-
     // Construction -- use the static ok()/err() factories; no value constructors to avoid ambiguity when T == E.
-    Result() : type(ResultType::Err) { new (&value.err) E(); }
+    static result ok(T val) { return result(ok_tag{}, ktl::move(val)); }
+    static result err(E val) { return result(err_tag{}, ktl::move(val)); }
 
-    static Result<T, E> ok(T val) {
-        Result<T, E> res;
-        res.destroy();
-        res.type = ResultType::Ok;
-        new (&res.value.ok) T(ktl::move(val));
-        return res;
-    }
+    // Special members: trivial (register-passable) when the payloads are, hand-rolled otherwise.
+    ~result() requires detail::all_trivial<T, E> = default;
+    ~result() { destroy(); }
 
-    static Result<T, E> err(E val) {
-        Result<T, E> res;
-        res.destroy();
-        res.type = ResultType::Err;
-        new (&res.value.err) E(ktl::move(val));
-        return res;
-    }
+    result(const result&) requires detail::all_trivial<T, E> = default;
+    result(const result& other) { construct_from(other); }
+    result(result&&) requires detail::all_trivial<T, E> = default;
+    result(result&& other) noexcept { construct_from(ktl::move(other)); }
 
-    // Operators
-    bool operator==(const Result<T, E>& other) const {
-        if (type != other.type) { return false; }
-        if (type == ResultType::Ok) { return value.ok == other.value.ok; }
-        return value.err == other.value.err;
-    }
-
-    bool operator!=(const Result<T, E>& other) const { return !(*this == other); }
-
-    template <typename F> auto map(F&& func) const -> Result<decltype(func(value.ok)), E> {
-        if (is_err()) { return Result<decltype(func(value.ok)), E>::err(value.err); }
-        return Result<decltype(func(value.ok)), E>::ok(func(value.ok));
-    }
-
-    // This function assumes that the function returns a Result
-    template <typename F> auto and_then(F&& func) const -> decltype(func(value.ok)) {
-        if (is_err()) {
-            return Result<decltype(func(value.ok).value.ok), decltype(func(value.ok).value.err)>::err(value.err);
-        }
-        return func(value.ok);
-    }
-
-    template <typename F> auto or_else(F&& func) const -> decltype(func(value.err)) {
-        if (is_ok()) { return ok(value.ok); }
-        return func(value.err);
-    }
-
-    template <typename F> auto map_err(F&& func) const -> Result<T, decltype(func(value.err))> {
-        using R = Result<T, decltype(func(value.err))>;
-        if (is_ok()) { return R::ok(value.ok); }
-        return R::err(func(value.err));
-    }
-};
-
-/// Unit-value Result: a fallible operation with no success payload. The ok arm carries nothing;
-/// only the error is stored. Mirrors the primary template's API where extraction makes sense.
-template <typename E> struct [[nodiscard]] Result<void, E> {
-   private:
-    union Storage {
-        E err;
-        Storage() {}
-        ~Storage() {}
-    } value;
-    ResultType type;
-
-    void destroy() {
-        if (type == ResultType::Err) { value.err.~E(); }
-    }
-
-    template <typename Src> void construct_from(Src&& other) {
-        type = other.type;
-        if (type == ResultType::Err) { new (&value.err) E(ktl::forward<Src>(other).value.err); }
-    }
-
-   public:
-    ~Result() { destroy(); }
-
-    Result(const Result& other) { construct_from(other); }
-    Result(Result&& other) noexcept { construct_from(ktl::move(other)); }
-
-    Result& operator=(const Result& other) {
+    result& operator=(const result&) requires detail::all_trivial<T, E> = default;
+    result& operator=(const result& other) {
         if (this != &other) {
             destroy();
             construct_from(other);
         }
         return *this;
     }
-
-    Result& operator=(Result&& other) noexcept {
+    result& operator=(result&&) requires detail::all_trivial<T, E> = default;
+    result& operator=(result&& other) noexcept {
         if (this != &other) {
             destroy();
             construct_from(ktl::move(other));
@@ -180,9 +74,98 @@ template <typename E> struct [[nodiscard]] Result<void, E> {
     }
 
     // Boolean
-    bool is_ok() const { return type == ResultType::Ok; }
-    bool is_err() const { return type == ResultType::Err; }
-    explicit operator bool() const { return is_ok(); }
+    bool is_ok() const { return m_ok; }
+    bool is_err() const { return !m_ok; }
+    explicit operator bool() const { return m_ok; }
+
+    // Extraction
+    T expect(const char* error_message) const {
+        if (is_err()) { panic(error_message); }
+        return value.ok;
+    }
+
+    T unwrap() {
+        if (is_err()) { panic("result unwrap failed"); }
+        return ktl::move(value.ok);
+    }
+
+    T unwrap() const {
+        if (is_err()) { panic("result unwrap failed"); }
+        return value.ok;
+    }
+
+    E unwrap_err() const {
+        if (!is_err()) { panic("result unwrap_err failed"); }
+        return value.err;
+    }
+
+    // Operators (!= is synthesized from ==)
+    bool operator==(const result& other) const {
+        if (m_ok != other.m_ok) { return false; }
+        if (m_ok) { return value.ok == other.value.ok; }
+        return value.err == other.value.err;
+    }
+};
+
+/// Unit-value result: a fallible operation with no success payload. The ok arm carries nothing;
+/// only the error is stored. Mirrors the primary template's API where extraction makes sense.
+template <typename E> struct [[nodiscard]] result<void, E> {
+   private:
+    union Storage {
+        E err;
+        Storage() {}
+        ~Storage() requires detail::all_trivial<E> = default;
+        ~Storage() {}
+    } value;
+    bool m_ok;
+
+    struct ok_tag {};
+    struct err_tag {};
+    result(ok_tag) : m_ok(true) {}
+    result(err_tag, E val) : m_ok(false) { new (&value.err) E(ktl::move(val)); }
+
+    void destroy() {
+        if (!m_ok) { value.err.~E(); }
+    }
+
+    template <typename Src> void construct_from(Src&& other) {
+        m_ok = other.m_ok;
+        if (!m_ok) { new (&value.err) E(ktl::forward<Src>(other).value.err); }
+    }
+
+   public:
+    static result ok() { return result(ok_tag{}); }
+    static result err(E val) { return result(err_tag{}, ktl::move(val)); }
+
+    ~result() requires detail::all_trivial<E> = default;
+    ~result() { destroy(); }
+
+    result(const result&) requires detail::all_trivial<E> = default;
+    result(const result& other) { construct_from(other); }
+    result(result&&) requires detail::all_trivial<E> = default;
+    result(result&& other) noexcept { construct_from(ktl::move(other)); }
+
+    result& operator=(const result&) requires detail::all_trivial<E> = default;
+    result& operator=(const result& other) {
+        if (this != &other) {
+            destroy();
+            construct_from(other);
+        }
+        return *this;
+    }
+    result& operator=(result&&) requires detail::all_trivial<E> = default;
+    result& operator=(result&& other) noexcept {
+        if (this != &other) {
+            destroy();
+            construct_from(ktl::move(other));
+        }
+        return *this;
+    }
+
+    // Boolean
+    bool is_ok() const { return m_ok; }
+    bool is_err() const { return !m_ok; }
+    explicit operator bool() const { return m_ok; }
 
     // Extraction
     void expect(const char* error_message) const {
@@ -190,109 +173,28 @@ template <typename E> struct [[nodiscard]] Result<void, E> {
     }
 
     void unwrap() const {
-        if (is_err()) { panic("Result unwrap failed"); }
+        if (is_err()) { panic("result unwrap failed"); }
     }
 
     E unwrap_err() const {
-        if (!is_err()) { panic("Result unwrap_err failed"); }
+        if (!is_err()) { panic("result unwrap_err failed"); }
         return value.err;
     }
 
-    // Transformation
-    ktl::maybe<E> err() const { return is_err() ? ktl::maybe<E>(value.err) : ktl::nothing; }
-
-    // Construction (default is err, matching the primary template)
-    Result() : type(ResultType::Err) { new (&value.err) E(); }
-
-    static Result ok() {
-        Result res;
-        res.destroy();
-        res.type = ResultType::Ok;
-        return res;
-    }
-
-    static Result err(E val) {
-        Result res;
-        res.destroy();
-        res.type = ResultType::Err;
-        new (&res.value.err) E(ktl::move(val));
-        return res;
-    }
-
-    // Operators
-    bool operator==(const Result& other) const {
-        if (type != other.type) { return false; }
-        if (type == ResultType::Ok) { return true; }
-        return value.err == other.value.err;
-    }
-
-    bool operator!=(const Result& other) const { return !(*this == other); }
-
-    // F takes no arguments and returns a Result with the same E; chains a void step into a pipeline.
-    template <typename F> auto and_then(F&& func) const -> decltype(func()) {
-        if (is_err()) { return decltype(func())::err(value.err); }
-        return func();
-    }
-
-    template <typename F> auto or_else(F&& func) const -> decltype(func(value.err)) {
-        if (is_ok()) { return Result::ok(); }
-        return func(value.err);
-    }
-
-    template <typename F> auto map_err(F&& func) const -> Result<void, decltype(func(value.err))> {
-        using R = Result<void, decltype(func(value.err))>;
-        if (is_ok()) { return R::ok(); }
-        return R::err(func(value.err));
+    // Operators (!= is synthesized from ==)
+    bool operator==(const result& other) const {
+        if (m_ok != other.m_ok) { return false; }
+        return m_ok || value.err == other.value.err;
     }
 };
 
-namespace ktl {
-
-/// Unified kernel error codes.
-enum class errc : intptr_t {
-    unknown            = -1,
-    null_argument      = -2,
-    invalid_operation  = -3,
-    oom                = -4,
-    wrong_type         = -5,
-    handle_invalid     = -6,
-    already_registered = -7,
-    rights_violation   = -8,
-    registry_full      = -9,
-    capacity_exhausted = -10,
-    out_of_range       = -11,
-    truncated          = -12,
-};
-
-using ::Result;
-template <typename T, typename E = errc> using result = ::Result<T, E>;
-
-/// Bridges maybe into Result: an engaged maybe becomes ok, an empty one becomes the given error.
-/// Lives here rather than on maybe itself because this header already includes <ktl/maybe>.
-template <typename T, typename E> Result<T, E> ok_or(const maybe<T>& m, E error) {
-    if (m.has_value()) { return Result<T, E>::ok(m.value()); }
-    return Result<T, E>::err(ktl::move(error));
-}
-
-/// Error carrier: converts implicitly into any Result whose error type is constructible from E.
-/// Lets `return ktl::err(code);` and KTRY work without spelling the enclosing Result type.
+/// Error carrier: converts implicitly into any result whose error type is constructible from E.
+/// Lets `return ktl::err(code);` work without spelling the enclosing result type.
 template <typename E> struct err_carrier {
     E error;
-    template <typename T2, typename E2> operator Result<T2, E2>() const { return Result<T2, E2>::err(E2(error)); }
+    template <typename T2, typename E2> operator result<T2, E2>() const { return result<T2, E2>::err(E2(error)); }
 };
 
 template <typename E> err_carrier<E> err(E error) { return err_carrier<E>{ktl::move(error)}; }
 
 }  // namespace ktl
-
-/// Early-return error propagation. Evaluates expr (a Result) once; on err, returns ktl::err(...)
-/// from the enclosing function, which must itself return a Result whose error type is constructible
-/// from expr's. On ok, the statement expression yields the unwrapped value (void for Result<void,E>),
-/// so `auto v = KTRY(f());` and bare `KTRY(g());` both work.
-/// Pass prvalues (`KTRY(f())`); applying KTRY to a named Result moves its ok payload out.
-#define KTRY(expr)                                                               \
-    ({                                                                           \
-        auto&& ktry_tmp_ = (expr);                                               \
-        if (ktry_tmp_.is_err()) { return ktl::err(ktry_tmp_.unwrap_err()); }     \
-        ktry_tmp_.unwrap();                                                      \
-    })
