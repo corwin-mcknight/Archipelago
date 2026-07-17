@@ -104,7 +104,6 @@
 ## Tooling & Developer Experience
 - Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).
 - Expand the Debugging doc with a concrete GDB/QEMU remote-attach walkthrough (stub port, symbol loading, break-on-entry); `make clangd` already exists.
-- Add multi-target build matrix support (build caching and dependency tracking already exist in Plume).
 - Kernel shell enhancements:
     - Object Inspection -- expand handle inspect and obj inspect with detailed views
     - Table Dumps -- add full handle table dump with object details

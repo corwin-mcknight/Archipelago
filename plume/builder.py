@@ -12,7 +12,7 @@ from plume.manifest import (
     generate_manifest, check_conflicts, save_installed_manifest,
     installed_manifest_path, read_manifest,
 )
-from plume.output import green, red, yellow, dim, fmt_duration
+from plume.output import green, red, yellow, dim, fmt_duration, break_line
 from plume.package import Package
 from plume.env import get_build_env
 from plume.stamp import STAMP_NAME, is_stale, update as update_stamp
@@ -27,8 +27,8 @@ STAGES = [
 ]
 
 
-def is_built(config: Config, package: Package) -> bool:
-    """Check whether a package has already been built for the active config."""
+def build_needed(config: Config, package: Package) -> str | None:
+    """Return why the package needs a (re)build, or None if its build is fresh."""
     env = get_build_env(config, package)
     d = env["D"]
 
@@ -38,33 +38,36 @@ def is_built(config: Config, package: Package) -> bool:
         pkg_tool_dir = os.path.join(env.get("TOOL_INSTALL", ""), package.name)
         has_output = os.path.isdir(pkg_tool_dir) and bool(os.listdir(pkg_tool_dir))
     if not has_output:
-        return False
+        return "never built"
 
     stamp_path = os.path.join(env["WORKDIR"], STAMP_NAME)
     source_path = env["LIVE_SOURCES"] if package.supports_live_sources and package.live_source_path else None
-    return not is_stale(stamp_path, config.build_hash, source_path)
+    return is_stale(stamp_path, config.build_hash, source_path)
 
 
-def is_installed(config: Config, package: Package) -> bool:
-    """Check whether the package's current build is installed in the sysroot.
+def install_needed(config: Config, package: Package) -> str | None:
+    """Return why the package needs an install, or None if its current build is installed.
 
     World membership alone is insufficient: it survives a rebuild, so a package
     that was reinstalled after editing its sources would look "installed" while
     the sysroot still holds the old files. Require the installed manifest to be
     at least as new as the build stamp, so a rebuild forces a reinstall.
     """
-    if not is_built(config, package):
-        return False
+    reason = build_needed(config, package)
+    if reason:
+        return reason
     if package.is_build_tool:
-        return True  # build tools don't go in world
+        return None  # build tools don't go in world
     sysroot = config.get("sysroot")
     if not World(sysroot).contains(package.qualified_name):
-        return False
+        return "not installed"
     stamp_path = os.path.join(get_build_env(config, package)["WORKDIR"], STAMP_NAME)
     manifest_path = installed_manifest_path(sysroot, package.qualified_name)
     if not os.path.exists(manifest_path):
-        return False
-    return os.path.getmtime(manifest_path) >= os.path.getmtime(stamp_path)
+        return "not installed"
+    if os.path.getmtime(manifest_path) < os.path.getmtime(stamp_path):
+        return "rebuilt since install"
+    return None
 
 
 def clean_package(config: Config, package: Package):
@@ -91,6 +94,7 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
 
     makefile = os.path.join(env["FILESDIR"], "Makefile")
     if not os.path.exists(makefile):
+        break_line()
         print(f"  {red('error')}: no Makefile found at {makefile}", file=sys.stderr)
         return False, 0.0
 
@@ -117,6 +121,8 @@ def _commit_to_sysroot(package: Package, d_path: str, sysroot: str):
     if os.path.isdir(d_path) and os.listdir(d_path):
         manifest = generate_manifest(package, d_path)
         conflicts = check_conflicts(manifest, sysroot, exclude_pkg=package.qualified_name)
+        if conflicts:
+            break_line()
         for path, owner in conflicts:
             print(f"  {yellow('conflict')}: {path} (owned by {owner})")
         shutil.copytree(d_path, sysroot, dirs_exist_ok=True)
@@ -137,16 +143,17 @@ def install_package(
     total_start = time.monotonic()
     env = get_build_env(config, package)
     sysroot = env["SYSROOT"]
+    reason = build_needed(config, package)
 
     # Try binary package cache first
-    if not (no_binary or force or package.is_build_tool) and is_built(config, package) and binpkg_exists(config, package):
+    if not (no_binary or force or package.is_build_tool) and reason is None and binpkg_exists(config, package):
         manifest = extract_binpkg(binpkg_path(config, package), sysroot)
         save_installed_manifest(manifest, sysroot)
         World(sysroot).add(package.qualified_name)
         return True, time.monotonic() - total_start
 
     # Build from source if needed
-    if force or not is_built(config, package):
+    if force or reason is not None:
         ok, _ = build_package(config, package, verbose, force=force)
         if not ok:
             return False, time.monotonic() - total_start
@@ -168,8 +175,11 @@ def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool) 
     row = f"  {label:<22}"
 
     if ok:
-        print(f"{row}  {green('✓')}  {dim(fmt_duration(elapsed))}")
+        # Quiet mode prints one line per package (in the caller), not per stage.
+        if verbose:
+            print(f"{row}  {green('✓')}  {dim(fmt_duration(elapsed))}")
     else:
+        break_line()
         print(f"{row}  {red('✗')}  FAILED")
         if not verbose and result.stdout:
             print(result.stdout, end="")

@@ -13,25 +13,30 @@ import os
 STAMP_NAME = ".plume-stamp"
 
 
-def is_stale(stamp_path: str, build_hash: str, source_path: str | None = None) -> bool:
-    """Return True if the package recorded at *stamp_path* needs a rebuild."""
+def is_stale(stamp_path: str, build_hash: str, source_path: str | None = None) -> str | None:
+    """Return why the package recorded at *stamp_path* needs a rebuild, or None if fresh."""
     if not os.path.exists(stamp_path):
-        return True
+        return "never built"
 
     with open(stamp_path, "r", encoding="utf-8") as f:
         if f.read().strip() != build_hash:
-            return True
+            return "config changed"
 
     if source_path is None:
-        return False
+        return None
 
     stamp_mtime = os.path.getmtime(stamp_path)
     for root, _dirs, files in os.walk(source_path):
         for name in files:
-            if os.path.getmtime(os.path.join(root, name)) > stamp_mtime:
-                return True
+            path = os.path.join(root, name)
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue  # vanished between walk and stat (editor temp files)
+            if mtime > stamp_mtime:
+                return f"source changed: {os.path.relpath(path, source_path)}"
 
-    return False
+    return None
 
 
 def update(stamp_path: str, build_hash: str):

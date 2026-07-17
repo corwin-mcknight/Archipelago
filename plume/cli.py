@@ -8,10 +8,13 @@ import sys
 import time
 
 from plume.config import Config
-from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_timing_table
+from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_reason, open_line, close_line, break_line
 from plume.repository import load_packages
 from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
-from plume.builder import build_package, install_package, uninstall_package, clean_package, is_built, is_installed
+from plume.builder import (
+    build_package, install_package, uninstall_package, clean_package,
+    build_needed, install_needed,
+)
 from plume.image import assemble_iso
 from plume.world import World
 from plume.validate import validate_packages, validate_package_yaml
@@ -145,44 +148,63 @@ def _resolve(packages, requested):
     return resolve_build_order(expanded), names
 
 
-def _print_timing(timings, total):
-    if len(timings) >= 2:
-        print(f"\n{fmt_timing_table(timings, total)}")
+def _pkg_line_start(label: str, verbose: bool):
+    """Print a package's status line. In quiet mode leave it open for _pkg_line_finish."""
+    if verbose:
+        print(label, flush=True)
+    else:
+        open_line(label)
+
+
+def _pkg_line_finish(elapsed: float, verbose: bool, reason: str | None = None):
+    """Report a package's success: complete the open quiet-mode line, or add a summary row."""
+    text = f"{green('✓')}  {dim(fmt_duration(elapsed))}{fmt_reason(reason)}"
+    if verbose:
+        print(f"  {text}")
+    else:
+        close_line(text)
 
 
 def _sequential_run(ordered, requested_names, show_all, config, args, action, action_label, **action_kwargs):
-    """Run action on each package sequentially, tracking timing. Returns (return_code, timings, total)."""
+    """Run action on each package sequentially. Returns the exit code."""
     total_start = time.monotonic()
-    timings = []
-    count = 0
-    for pkg in ordered:
-        is_target = show_all or pkg.full_name in requested_names
-        force = getattr(args, "force", False) if is_target else False
-        skip_check = is_built if action == build_package else is_installed
-        if not force and skip_check(config, pkg):
-            continue
-        if is_target:
-            count += 1
-            print(bold(cyan(f"\n[{count}] {pkg}")))
-        ok, elapsed = action(
-            config, pkg,
-            verbose=args.verbose if is_target else False,
-            force=force, **action_kwargs,
-        )
-        if is_target:
-            timings.append((str(pkg), elapsed))
-        if not ok:
-            total = time.monotonic() - total_start
-            print(f"\n{red(f'{action_label} failed for')} {pkg} after {fmt_duration(total)}")
-            return 1, timings, total
+    needed = build_needed if action == build_package else install_needed
+    verb = "build" if action == build_package else "install"
+    force_all = getattr(args, "force", False)
 
-    total = time.monotonic() - total_start
-    if count == 0:
-        print(f"Nothing to {action_label.lower()}.")
+    def is_target(pkg):
+        return show_all or pkg.full_name in requested_names
+
+    # Upfront count for the [i/total] labels only; each package is re-checked
+    # just before it runs, since sources can change while earlier ones build.
+    total = sum(1 for p in ordered if is_target(p) and (force_all or needed(config, p)))
+
+    done = 0
+    for pkg in ordered:
+        target = is_target(pkg)
+        force = force_all if target else False
+        reason = needed(config, pkg)
+        if not force and reason is None:
+            continue
+        verbose = args.verbose if target else False
+        if target:
+            done += 1
+            total = max(total, done)
+            _pkg_line_start(bold(cyan(f"[{done}/{total}] {pkg}")), verbose)
+        else:
+            _pkg_line_start(dim(f"  dep {pkg}"), False)
+        ok, elapsed = action(config, pkg, verbose=verbose, force=force, **action_kwargs)
+        if ok:
+            _pkg_line_finish(elapsed, verbose, reason)
+        else:
+            print(f"\n{red(f'Failed to {verb}')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
+            return 1
+
+    if done == 0:
+        print(f"Nothing to {verb}.")
     else:
-        _print_timing(timings, total)
-        print(f"\n{green(action_label)} {count} package(s) in {fmt_duration(total)}")
-    return 0, timings, total
+        print(f"\n{green(action_label)} {done} package(s) in {fmt_duration(time.monotonic() - total_start)}")
+    return 0
 
 
 def cmd_build(args):
@@ -211,14 +233,11 @@ def cmd_build(args):
         total = time.monotonic() - total_start
         if not timings:
             print("Nothing to build.")
-        else:
-            _print_timing(timings, total)
-            if ok:
-                print(f"\n{green('Built')} {len(timings)} package(s) in {fmt_duration(total)}")
+        elif ok:
+            print(f"\n{green('Built')} {len(timings)} package(s) in {fmt_duration(total)}")
         return 0 if ok else 1
 
-    rc, _, _ = _sequential_run(ordered, requested_names, show_all, config, args, build_package, "Built")
-    return rc
+    return _sequential_run(ordered, requested_names, show_all, config, args, build_package, "Built")
 
 
 def cmd_install(args):
@@ -242,11 +261,10 @@ def cmd_install(args):
             print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}")
             return 1
 
-    rc, _, _ = _sequential_run(
+    return _sequential_run(
         ordered, requested_names, show_all, config, args,
         install_package, "Installed", no_binary=no_binary,
     )
-    return rc
 
 
 def cmd_rebuild(args):
@@ -268,28 +286,29 @@ def cmd_rebuild(args):
         return 1
 
     total_start = time.monotonic()
-    timings = []
     rebuild_count = len(rebuild_set)
     idx = 0
     for pkg in ordered:
         if pkg.full_name in rebuild_names:
             idx += 1
-            print(bold(cyan(f"\n[{idx}/{rebuild_count}] {pkg}")))
-            print(dim(f"  Cleaning {pkg}..."))
+            _pkg_line_start(bold(cyan(f"[{idx}/{rebuild_count}] {pkg}")), args.verbose)
             clean_package(config, pkg)
             ok, elapsed = build_package(config, pkg, verbose=args.verbose)
-            timings.append((str(pkg), elapsed))
-        elif not is_built(config, pkg):
-            ok, elapsed = build_package(config, pkg)
+            if ok:
+                _pkg_line_finish(elapsed, args.verbose)
         else:
-            continue
+            reason = build_needed(config, pkg)
+            if reason is None:
+                continue
+            _pkg_line_start(dim(f"  dep {pkg}"), False)
+            ok, elapsed = build_package(config, pkg)
+            if ok:
+                _pkg_line_finish(elapsed, False, reason)
         if not ok:
             print(f"\n{red('Rebuild failed for')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
             return 1
 
-    total = time.monotonic() - total_start
-    _print_timing(timings, total)
-    print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(total)}")
+    print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(time.monotonic() - total_start)}")
     return 0
 
 
@@ -334,19 +353,18 @@ def cmd_test(args):
     config, packages = _load(args)
     ordered = resolve_build_order(filter_packages(packages, []))
     total_start = time.monotonic()
-    timings = []
     for i, pkg in enumerate(ordered, 1):
-        print(bold(cyan(f"\n[{i}/{len(ordered)}] {pkg}")))
+        reason = install_needed(config, pkg)
+        _pkg_line_start(bold(cyan(f"[{i}/{len(ordered)}] {pkg}")), args.verbose)
         ok, elapsed = install_package(
             config, pkg, verbose=args.verbose, force=args.force,
             no_binary=getattr(args, "no_binary", False),
         )
-        timings.append((str(pkg), elapsed))
-        if not ok:
+        if ok:
+            _pkg_line_finish(elapsed, args.verbose, reason)
+        else:
             print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}", file=sys.stderr)
             return 1
-
-    _print_timing(timings, time.monotonic() - total_start)
 
     print(bold("\nAssembling ISO image"))
     if not assemble_iso(config, verbose=args.verbose):
@@ -380,7 +398,8 @@ def cmd_status(args):
     print(f"  {'─' * (name_width + 22)}")
 
     for pkg in packages:
-        built = green("✓") if is_built(config, pkg) else dim("–")
+        reason = build_needed(config, pkg)
+        built = green("✓") if reason is None else dim("–")
         inst = green("✓") if pkg.full_name in installed else (dim("n/a") if pkg.is_build_tool else dim("–"))
         tags = ""
         if pkg.is_build_tool:
@@ -389,6 +408,7 @@ def cmd_status(args):
             tags += dim("  [live]")
         if pkg.arches:
             tags += dim(f"  [{', '.join(pkg.arches)} only]")
+        tags += fmt_reason(reason)
         print(f"  {pkg.full_name:<{name_width}}  {built:<7}  {inst}{tags}")
     return 0
 
@@ -614,6 +634,14 @@ def main(argv=None):
         "list": cmd_list, "world": cmd_world, "clangd": cmd_clangd,
         "set-config": cmd_set_config, "run": cmd_run,
     }
-    if getattr(args, "arch", None) == "all":
-        return _run_matrix(args, commands[args.command])
-    return commands[args.command](args)
+    try:
+        if getattr(args, "arch", None) == "all":
+            return _run_matrix(args, commands[args.command])
+        return commands[args.command](args)
+    except KeyboardInterrupt:
+        break_line()
+        print(red("Interrupted."), file=sys.stderr)
+        return 130
+    except Exception:
+        break_line()  # tracebacks should not start mid-line
+        raise

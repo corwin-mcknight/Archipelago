@@ -23,25 +23,6 @@ bold, green, red, cyan, yellow, dim = (
 )
 
 
-def fmt_timing_table(timings: list[tuple[str, float]], total: float) -> str:
-    """Format a build timing summary table.
-
-    timings is a list of (package_name, elapsed_seconds).
-    """
-    if not timings:
-        return ""
-
-    name_width = max(len(name) for name, _ in timings)
-    name_width = max(name_width, 5)  # minimum width
-
-    lines = [bold("Build timing:")]
-    for name, elapsed in timings:
-        lines.append(f"  {name:<{name_width}}  {fmt_duration(elapsed):>8}")
-    lines.append(f"  {'─' * (name_width + 10)}")
-    lines.append(f"  {'Total':<{name_width}}  {bold(fmt_duration(total)):>8}")
-    return "\n".join(lines)
-
-
 def fmt_duration(seconds: float) -> str:
     """Format elapsed seconds as a human-readable string."""
     if seconds < 60:
@@ -49,3 +30,39 @@ def fmt_duration(seconds: float) -> str:
     m = int(seconds // 60)
     s = seconds % 60
     return f"{m}m{s:.0f}s"
+
+
+# Reasons that add no information next to the surrounding output.
+_QUIET_REASONS = ("never built", "not installed")
+
+
+def fmt_reason(reason: str | None) -> str:
+    """Format a build/install reason as a dim suffix, or '' for uninformative ones."""
+    if not reason or reason in _QUIET_REASONS:
+        return ""
+    return f"  {dim(f'({reason})')}"
+
+
+_line_open = False
+
+
+def open_line(text: str):
+    """Start a status line, leaving it open for close_line to complete."""
+    global _line_open
+    print(f"{text} ", end="", flush=True)
+    _line_open = True
+
+
+def close_line(text: str = ""):
+    """Complete the currently open status line."""
+    global _line_open
+    print(text, flush=True)
+    _line_open = False
+
+
+def break_line():
+    """Terminate any open status line before out-of-band output; no-op otherwise."""
+    global _line_open
+    if _line_open:
+        print(flush=True)
+        _line_open = False

@@ -1,11 +1,11 @@
 """Parallel package build executor."""
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from plume.builder import build_package, is_built
+from plume.builder import build_package, build_needed
 from plume.config import Config
-from plume.output import bold, cyan, green, red, dim, fmt_duration
+from plume.output import bold, cyan, green, red, dim, fmt_duration, fmt_reason
 from plume.package import Package
 from plume.universe import create_build_sorter
 
@@ -38,28 +38,44 @@ def parallel_build(
     timings: list[tuple[str, float]] = []
     failed = False
     idx = 0
-    total = sum(1 for p in packages if p.full_name in force_set or not (skip_built and is_built(config, p)))
+    # Upfront count for the [i/total] labels only; each package is re-checked
+    # just before submission, since sources can change while others build.
+    total = sum(
+        1 for p in packages
+        if p.full_name in force_set or not (skip_built and build_needed(config, p) is None)
+    )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        while sorter.is_active():
-            futures = {}
-            for pkg in sorter.get_ready():
-                force = pkg.full_name in force_set
-                if (not force and skip_built and is_built(config, pkg)) or failed:
-                    sorter.done(pkg)
-                    continue
-                futures[executor.submit(build_package, config, pkg, verbose=False, force=force)] = pkg
+        pending = {}
 
-            for fut in as_completed(futures):
-                pkg = futures[fut]
+        def submit_ready():
+            # Skipped packages unlock their successors immediately, so keep draining.
+            while ready := sorter.get_ready():
+                for pkg in ready:
+                    force = pkg.full_name in force_set
+                    # Capture the staleness reason now; the build refreshes the stamp.
+                    reason = build_needed(config, pkg)
+                    if failed or (not force and skip_built and reason is None):
+                        sorter.done(pkg)
+                    else:
+                        fut = executor.submit(build_package, config, pkg, verbose=False, force=force)
+                        pending[fut] = (pkg, reason)
+
+        submit_ready()
+        while pending:
+            completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in completed:
+                pkg, reason = pending.pop(fut)
                 ok, elapsed = fut.result()
                 timings.append((str(pkg), elapsed))
                 sorter.done(pkg)
                 if ok:
                     idx += 1
-                    _print_sync(f"{bold(cyan(f'[{idx}/{total}]'))} {green('Built')} {pkg}  {dim(fmt_duration(elapsed))}")
+                    total = max(total, idx)
+                    _print_sync(f"{bold(cyan(f'[{idx}/{total}]'))} {green('Built')} {pkg}  {dim(fmt_duration(elapsed))}{fmt_reason(reason)}")
                 else:
                     _print_sync(f"{red('Build failed for')} {pkg}")
                     failed = True
+            submit_ready()
 
     return (not failed, timings)
