@@ -24,8 +24,12 @@ void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(regi
 
 void interrupt_manager::clear_handler(unsigned int id) {
     if (id >= IM_MAX_HANDLERS) { return; }
-    handlers[id].handler.function = nullptr;
-    handlers[id].flags            = 0;
+    if (handlers[id].flags & InterruptHandlerEntry::OBJECT_HANDLER_MASK) {
+        handlers[id].handler.object = nullptr;
+    } else {
+        handlers[id].handler.function = nullptr;
+    }
+    handlers[id].flags = 0;
 }
 
 void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* registers) {

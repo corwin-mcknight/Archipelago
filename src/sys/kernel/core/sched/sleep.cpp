@@ -44,8 +44,7 @@ void wake_due_sleepers() {
     for (size_t i = 0; i < g_sleepers.size();) {
         if (g_sleepers[i].wake_at <= kernel::time::now()) {
             ktl::ref<Thread> t = ktl::move(g_sleepers[i].thread);
-            g_sleepers[i]      = ktl::move(g_sleepers[g_sleepers.size() - 1]);
-            auto discard       = g_sleepers.pop_back();
+            g_sleepers.swap_remove(i);
             make_ready(ktl::move(t));
         } else {
             ++i;

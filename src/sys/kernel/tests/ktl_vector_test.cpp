@@ -41,6 +41,27 @@ KTEST_CASE(ktl_vector_pop_and_clear) {
     KTEST_EXPECT_FALSE(vec.pop_back().has_value());
 }
 
+KTEST_CASE(ktl_vector_swap_remove) {
+    ktl::vector<int> vec;
+    for (int i = 0; i < 4; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }
+
+    vec.swap_remove(1);  // middle: last element moves in
+    KTEST_EXPECT_ALL(vec.size() == 3, vec[0] == 0, vec[1] == 3, vec[2] == 2);
+
+    vec.swap_remove(10);  // out of range: ignored
+    KTEST_EXPECT_TRUE(vec.size() == 3);
+
+    // tracking_value's move-assignment corrupts on self-move, so this fails if
+    // removing the last element routes through a self-move.
+    ktl::vector<tracking_value> tracked;
+    KTEST_REQUIRE_TRUE(tracked.push_back(tracking_value{1}));
+    KTEST_REQUIRE_TRUE(tracked.push_back(tracking_value{2}));
+    tracked.swap_remove(1);
+    KTEST_EXPECT_ALL(tracked.size() == 1, tracked[0].value == 1);
+    tracked.swap_remove(0);
+    KTEST_EXPECT_TRUE(tracked.empty());
+}
+
 KTEST_CASE(ktl_vector_reserve_grows) {
     ktl::vector<int> vec;
     KTEST_REQUIRE_TRUE(vec.reserve(16));

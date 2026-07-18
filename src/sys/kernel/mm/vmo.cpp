@@ -166,8 +166,7 @@ void vmo::add_mapping(vm_aspace& aspace, region_child& binding) {
 void vmo::remove_mapping(region_child& binding) {
     for (size_t i = 0; i < m_mappings.size(); ++i) {
         if (m_mappings[i].binding == &binding) {
-            m_mappings[i] = m_mappings[m_mappings.size() - 1];
-            (void)m_mappings.pop_back();
+            m_mappings.swap_remove(i);
             return;
         }
     }

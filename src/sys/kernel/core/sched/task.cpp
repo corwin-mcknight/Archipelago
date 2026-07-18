@@ -41,8 +41,7 @@ void Task::remove_thread(kernel::obj::ObjectId thread_id) {
     kernel::synchronization::lock_guard guard(m_lock);
     for (size_t i = 0; i < m_threads.size(); ++i) {
         if (m_threads[i]->id() == thread_id) {
-            m_threads[i] = ktl::move(m_threads[m_threads.size() - 1]);
-            auto discard = m_threads.pop_back();
+            m_threads.swap_remove(i);
             return;
         }
     }
@@ -70,8 +69,7 @@ void unregister_task(kernel::obj::ObjectId task_id) {
     kernel::synchronization::lock_guard guard(g_tasks_lock);
     for (size_t i = 0; i < g_tasks.size(); ++i) {
         if (g_tasks[i]->id() == task_id) {
-            g_tasks[i] = ktl::move(g_tasks[g_tasks.size() - 1]);
-            (void)g_tasks.pop_back();
+            g_tasks.swap_remove(i);
             return;
         }
     }

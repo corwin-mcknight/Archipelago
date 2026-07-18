@@ -48,9 +48,8 @@ void wait_queue::wake_one() {
         kernel::synchronization::critical_irq_lock_guard guard(m_lock);
         for (size_t i = 0; i < m_nodes.size(); ++i) {
             if (m_nodes[i].mask != 0) { continue; }  // signal waiters are woken by wake_matching
-            woken        = ktl::move(m_nodes[i].thread);
-            m_nodes[i]   = ktl::move(m_nodes[m_nodes.size() - 1]);
-            auto discard = m_nodes.pop_back();
+            woken = ktl::move(m_nodes[i].thread);
+            m_nodes.swap_remove(i);
             break;
         }
     }
@@ -68,8 +67,7 @@ void wait_queue::wake_all() {
             }
             bool ok = woken.push_back(ktl::move(m_nodes[i].thread));
             assert(ok, "wait_queue: wake list allocation failed");
-            m_nodes[i]   = ktl::move(m_nodes[m_nodes.size() - 1]);
-            auto discard = m_nodes.pop_back();
+            m_nodes.swap_remove(i);
         }
     }
     drain(woken);
@@ -86,8 +84,7 @@ size_t wait_queue::wake_matching(uint32_t signals) {
             }
             bool ok = woken.push_back(ktl::move(m_nodes[i].thread));
             assert(ok, "wait_queue: wake list allocation failed");
-            m_nodes[i]   = ktl::move(m_nodes[m_nodes.size() - 1]);
-            auto discard = m_nodes.pop_back();
+            m_nodes.swap_remove(i);
         }
     }
     size_t n = woken.size();

@@ -127,7 +127,7 @@ const char* exception_name(uint32_t vec) {
 uint64_t frame_vec(register_frame_t* regs) { return regs->int_no; }
 uint64_t frame_err(register_frame_t* regs) { return regs->err_code; }
 uintptr_t frame_fp(register_frame_t* regs) { return regs->rbp; }
-uintptr_t frame_sp(register_frame_t* regs) { return regs->userrsp; }
+uintptr_t frame_sp(register_frame_t* regs) { return regs->rsp; }
 
 namespace {
 char g_reg_fmt_buf[512];
@@ -142,7 +142,7 @@ void emit_registers_harness(register_frame_t* regs, const uint64_t cr[4]) {
     emit(
         "@@CRASH_REG {{\"rip\":\"0x{0:016p}\",\"rsp\":\"0x{1:016p}\",\"rbp\":\"0x{2:016p}\","
         "\"rflags\":\"0x{3:016p}\",\"cs\":\"0x{4:016p}\",\"ss\":\"0x{5:016p}\",",
-        regs->rip, regs->userrsp, regs->rbp, regs->eflags, regs->cs, regs->ss);
+        regs->rip, regs->rsp, regs->rbp, regs->rflags, regs->cs, regs->ss);
     emit(
         "\"rax\":\"0x{0:016p}\",\"rbx\":\"0x{1:016p}\",\"rcx\":\"0x{2:016p}\","
         "\"rdx\":\"0x{3:016p}\",\"rsi\":\"0x{4:016p}\",\"rdi\":\"0x{5:016p}\",",
@@ -158,8 +158,8 @@ void emit_registers_harness(register_frame_t* regs, const uint64_t cr[4]) {
 
 void emit_registers_prose(register_frame_t* regs, const uint64_t cr[4]) {
     kernel::crash::crash_write("Registers:\n");
-    emit("* rip=0x{0:016p}  rfl=0x{1:016p}\n", regs->rip, regs->eflags);
-    emit("* rsp=0x{0:016p}  rbp=0x{1:016p}\n", regs->userrsp, regs->rbp);
+    emit("* rip=0x{0:016p}  rfl=0x{1:016p}\n", regs->rip, regs->rflags);
+    emit("* rsp=0x{0:016p}  rbp=0x{1:016p}\n", regs->rsp, regs->rbp);
     emit("* rax=0x{0:016p}  rbx=0x{1:016p}  rcx=0x{2:016p}\n", regs->rax, regs->rbx, regs->rcx);
     emit("* rdx=0x{0:016p}  rsi=0x{1:016p}  rdi=0x{2:016p}\n", regs->rdx, regs->rsi, regs->rdi);
     emit("*  r8=0x{0:016p}   r9=0x{1:016p}  r10=0x{2:016p}\n", regs->r8, regs->r9, regs->r10);

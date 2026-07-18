@@ -154,6 +154,15 @@ template <typename T> class vector {
         return value;
     }
 
+    // O(1) unordered removal: the last element replaces the removed one. Never self-moves,
+    // so T's move-assignment need not handle self-assignment. Out-of-range indexes are ignored.
+    void swap_remove(size_t index) {
+        if (index >= m_size) { return; }
+        --m_size;
+        if (index != m_size) { m_data[index] = ktl::move(m_data[m_size]); }
+        m_data[m_size].~T();
+    }
+
     ktl::maybe<T> front() const {
         if (empty()) { return ktl::nothing; }
         return m_data[0];

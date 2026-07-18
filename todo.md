@@ -17,9 +17,6 @@
 
 ## Code Hygiene
 - Unify naming: types mix CamelCase (HandleTable), snake_case (page_frame_allocator), and I-prefix (IInterruptHandler); constants mix kMaxSymbols, PAGE_SIZE, and IM_MAX_HANDLERS. Convention per docs is CamelCase types / UPPER_SNAKE constants -- sweep the outliers.
-- x86_64/main.cpp hardcodes memmap `type == 6` two lines below a symbolic LIMINE_MEMMAP_USABLE check -- use the named constant.
-- Register struct fields userrsp/eflags are legacy 32-bit names for what are rsp/rflags on x86_64.
-- interrupts.cpp handler entry union: clear_handler writes the function arm regardless of which arm is active (works only because both are pointers) -- clear by discriminant or memset.
 
 ## KTL & Error Handling
 - Monadic-style audit remainder: register_interrupt, symbols::init, and static_vector::push_back still return void instead of a result.
@@ -98,7 +95,6 @@
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
-- Task's thread-list removal performs a live self-move when removing the last element, and the same swap-remove idiom is duplicated across scheduler, wait-queue, and task code; a shared KTL swap-remove helper plus a host test for the last-element case would pin it.
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/drivers/pit.cpp`, and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience

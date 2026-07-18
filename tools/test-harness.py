@@ -176,11 +176,12 @@ class KernelHarness:
     # ------------------------------------------------------------------
     def _reader_loop(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None and self._lines is not None
+        lines = self._lines  # capture: stop() may null self._lines during teardown
         for raw_line in self.proc.stdout:
-            self._lines.put(raw_line.rstrip("\n"))
+            lines.put(raw_line.rstrip("\n"))
         if self.proc:
             self._exit_code = self.proc.poll()
-        self._lines.put(None)
+        lines.put(None)
 
     def _next_line(self, deadline: Optional[float]) -> str:
         assert self._lines is not None
