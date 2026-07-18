@@ -47,7 +47,7 @@ Every successful build writes a stamp recording a hash of the target config's bu
 A package is stale when its stamp is missing, when the recorded hash no longer matches the active config, or -- for live-source packages -- when a source file is newer than the stamp.
 Editing a target config therefore rebuilds everything it affects; paths and run-only settings (QEMU, memory, image layout) are excluded from the hash.
 
-When a package rebuilds, Plume prints why on the package's status line -- a config change, or the first source file found newer than the stamp. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead.
+When a package rebuilds, Plume prints why on the package's status line -- a config change, or the first source file found newer than the stamp. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead. Captured output from the most recent build of each package is kept at `build/<arch>/logs/<category>/<name>.log`, whether the build succeeded or failed.
 
 ## Build Flow
 ### Dependency Resolution
@@ -134,6 +134,9 @@ Every command accepts `--arch <arch>` (or `--config <path>`) to target an archit
 | `clangd` | Rebuild kernel with compile_commands.json generation |
 | `set-config` | Select the active target config (symlinks `default.yaml`) |
 | `run` | Launch the built ISO interactively in QEMU |
+| `shell` | Open an interactive shell in a package's build environment |
+| `deps` | Show a package's transitive and reverse dependencies, optionally as a tree |
+| `log` | Print a package's most recent build log |
 
 ## Configuration
 Each architecture has a target config at `repo/config/<arch>.yaml`; the active one is the `default.yaml` symlink in the project root, managed with `plume set-config` (which accepts a bare arch name, e.g. `plume set-config riscv64`).

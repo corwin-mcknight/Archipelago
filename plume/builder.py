@@ -70,6 +70,11 @@ def install_needed(config: Config, package: Package) -> str | None:
     return None
 
 
+def build_log_path(config: Config, package: Package) -> str:
+    """Path of the persisted build log for a package."""
+    return os.path.join(config.get("build_dir"), "logs", package.category, f"{package.name}.log")
+
+
 def clean_package(config: Config, package: Package):
     """Remove a package's working directory so it will be fully rebuilt."""
     env = get_build_env(config, package)
@@ -100,10 +105,16 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
 
     pkg_start = time.monotonic()
 
-    for stage, label in STAGES:
-        ok, _ = _run_stage(stage, label, makefile, env, verbose)
-        if not ok:
-            return False, time.monotonic() - pkg_start
+    log_path = build_log_path(config, package)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "w", encoding="utf-8") as log:
+        if verbose:
+            log.write("(output streamed to console; rerun without --verbose to capture)\n")
+        for stage, label in STAGES:
+            ok, _ = _run_stage(stage, label, makefile, env, verbose, log)
+            if not ok:
+                print(f"  {dim(f'full log: {log_path}')}")
+                return False, time.monotonic() - pkg_start
 
     # Record the config hash so source or config changes trigger a rebuild.
     update_stamp(os.path.join(env["WORKDIR"], STAMP_NAME), config.build_hash)
@@ -162,7 +173,7 @@ def install_package(
     return True, time.monotonic() - total_start
 
 
-def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool) -> tuple[bool, float]:
+def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool, log=None) -> tuple[bool, float]:
     """Run a single Make stage, printing a status row. Returns (success, elapsed)."""
     capture = {} if verbose else {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
     t0 = time.monotonic()
@@ -172,6 +183,12 @@ def _run_stage(stage: str, label: str, makefile: str, env: dict, verbose: bool) 
     )
     elapsed = time.monotonic() - t0
     ok = result.returncode == 0
+
+    if log is not None:
+        log.write(f"### {stage} ({'ok' if ok else 'FAILED'})\n")
+        if result.stdout:
+            log.write(result.stdout)
+        log.flush()
     row = f"  {label:<22}"
 
     if ok:

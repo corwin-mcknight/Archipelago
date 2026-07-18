@@ -13,24 +13,32 @@ from plume.repository import load_packages
 from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
 from plume.builder import (
     build_package, install_package, uninstall_package, clean_package,
-    build_needed, install_needed,
+    build_needed, install_needed, build_log_path,
 )
 from plume.image import assemble_iso
 from plume.world import World
 from plume.validate import validate_packages, validate_package_yaml
 
 
-def _all_arches():
-    """Arch names from repo/config/*.yaml, walking up to the project root."""
+def _find_up(relpath):
+    """Return *relpath* resolved against cwd or the nearest ancestor where it exists, else None."""
     d = os.getcwd()
     while True:
-        cfg_dir = os.path.join(d, "repo", "config")
-        if os.path.isdir(cfg_dir):
-            return sorted(f[:-5] for f in os.listdir(cfg_dir) if f.endswith(".yaml"))
+        candidate = os.path.join(d, relpath)
+        if os.path.exists(candidate):
+            return candidate
         parent = os.path.dirname(d)
         if parent == d:
-            return []
+            return None
         d = parent
+
+
+def _all_arches():
+    """Arch names from repo/config/*.yaml, walking up to the project root."""
+    cfg_dir = _find_up(os.path.join("repo", "config"))
+    if not cfg_dir:
+        return []
+    return sorted(f[:-5] for f in os.listdir(cfg_dir) if f.endswith(".yaml"))
 
 
 def _run_matrix(args, command):
@@ -60,15 +68,7 @@ def _run_matrix(args, command):
 def _config_by_name(name):
     """Resolve a config name like 'riscv64' to repo/config/<name>.yaml, walking
     up from the working directory to find the project root."""
-    d = os.getcwd()
-    while True:
-        candidate = os.path.join(d, "repo", "config", f"{name}.yaml")
-        if os.path.exists(candidate):
-            return candidate
-        parent = os.path.dirname(d)
-        if parent == d:
-            return None
-        d = parent
+    return _find_up(os.path.join("repo", "config", f"{name}.yaml"))
 
 
 def _find_config(override=None, arch=None):
@@ -165,12 +165,21 @@ def _pkg_line_finish(elapsed: float, verbose: bool, reason: str | None = None):
         close_line(text)
 
 
+def _warn_verbose_parallel(args):
+    """Parallel builds capture output per package; streaming (-v) cannot interleave sanely."""
+    if getattr(args, "verbose", False):
+        print(f"{yellow('plume: warning')}: --verbose is ignored with --jobs > 1", file=sys.stderr)
+
+
 def _sequential_run(ordered, requested_names, show_all, config, args, action, action_label, **action_kwargs):
     """Run action on each package sequentially. Returns the exit code."""
     total_start = time.monotonic()
     needed = build_needed if action == build_package else install_needed
     verb = "build" if action == build_package else "install"
     force_all = getattr(args, "force", False)
+    keep_going = getattr(args, "keep_going", False)
+    dead: set[str] = set()  # failed packages and their transitive dependents
+    failures: list[str] = []
 
     def is_target(pkg):
         return show_all or pkg.full_name in requested_names
@@ -181,6 +190,10 @@ def _sequential_run(ordered, requested_names, show_all, config, args, action, ac
 
     done = 0
     for pkg in ordered:
+        if any(d in dead for d in pkg.dependencies):
+            dead.add(pkg.full_name)
+            print(dim(f"  skipped {pkg} (dependency failed)"))
+            continue
         target = is_target(pkg)
         force = force_all if target else False
         reason = needed(config, pkg)
@@ -196,10 +209,16 @@ def _sequential_run(ordered, requested_names, show_all, config, args, action, ac
         ok, elapsed = action(config, pkg, verbose=verbose, force=force, **action_kwargs)
         if ok:
             _pkg_line_finish(elapsed, verbose, reason)
+        elif keep_going:
+            dead.add(pkg.full_name)
+            failures.append(pkg.full_name)
         else:
             print(f"\n{red(f'Failed to {verb}')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
             return 1
 
+    if failures:
+        print(f"\n{red(f'Failed to {verb}')} {len(failures)} package(s): {', '.join(failures)}")
+        return 1
     if done == 0:
         print(f"Nothing to {verb}.")
     else:
@@ -227,9 +246,11 @@ def cmd_build(args):
     jobs = getattr(args, "jobs", 1)
     if jobs > 1:
         from plume.parallel import parallel_build
+        _warn_verbose_parallel(args)
         force_set = requested_names if args.force else set()
         total_start = time.monotonic()
-        ok, timings = parallel_build(config, ordered, max_workers=jobs, verbose=args.verbose, force_set=force_set)
+        ok, timings = parallel_build(config, ordered, max_workers=jobs, force_set=force_set,
+                                     keep_going=getattr(args, "keep_going", False))
         total = time.monotonic() - total_start
         if not timings:
             print("Nothing to build.")
@@ -251,13 +272,17 @@ def cmd_install(args):
     show_all = not args.packages
     jobs = getattr(args, "jobs", 1)
     no_binary = getattr(args, "no_binary", False)
+    keep_going = getattr(args, "keep_going", False)
 
     if jobs > 1:
         from plume.parallel import parallel_build
+        _warn_verbose_parallel(args)
         force_set = requested_names if args.force else set()
         total_start = time.monotonic()
-        ok, _ = parallel_build(config, ordered, max_workers=jobs, verbose=args.verbose, force_set=force_set)
-        if not ok:
+        ok, _ = parallel_build(config, ordered, max_workers=jobs, force_set=force_set, keep_going=keep_going)
+        # With -k the install pass below still runs: survivors get installed,
+        # and the failed packages are re-reported (and skipped) there.
+        if not ok and not keep_going:
             print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}")
             return 1
 
@@ -287,6 +312,20 @@ def cmd_rebuild(args):
 
     total_start = time.monotonic()
     rebuild_count = len(rebuild_set)
+
+    jobs = getattr(args, "jobs", 1)
+    if jobs > 1:
+        from plume.parallel import parallel_build
+        _warn_verbose_parallel(args)
+        for pkg in rebuild_set:
+            clean_package(config, pkg)
+        ok, _ = parallel_build(config, ordered, max_workers=jobs, force_set=rebuild_names)
+        if not ok:
+            print(f"\n{red('Rebuild failed')} after {fmt_duration(time.monotonic() - total_start)}")
+            return 1
+        print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(time.monotonic() - total_start)}")
+        return 0
+
     idx = 0
     for pkg in ordered:
         if pkg.full_name in rebuild_names:
@@ -432,7 +471,7 @@ def cmd_world(args):
 
 def cmd_clean(args):
     config, _ = _load(args)
-    for d in ["obj", "sysroot", "tmp"]:
+    for d in ["obj", "sysroot", "tmp", "logs"]:
         p = os.path.join(config.get("build_dir"), d)
         if os.path.exists(p):
             shutil.rmtree(p)
@@ -521,6 +560,87 @@ def cmd_set_config(args):
     return 0
 
 
+def _one_package(packages, name):
+    """Resolve a single-package argument, printing an error and returning None if unknown."""
+    try:
+        return filter_packages(packages, [name])[0]
+    except ValueError as e:
+        print(f"{red('plume: error')}: {e}", file=sys.stderr)
+        return None
+
+
+def cmd_shell(args):
+    """Open an interactive shell inside a package's build environment."""
+    config, packages = _load(args)
+    pkg = _one_package(packages, args.package)
+    if pkg is None:
+        return 1
+
+    from plume.env import get_build_env
+    env = get_build_env(config, pkg)
+    cwd = env["S"] if os.path.isdir(env["S"]) else env["FILESDIR"]
+
+    print(bold(cyan(f"Entering build environment for {pkg}")))
+    for var in ("S", "D", "WORKDIR", "SYSROOT", "FILESDIR"):
+        print(f"  {dim(f'{var:<8}=')} {env[var]}")
+    print(f"  stages: {dim('$MAKE -f $FILESDIR/Makefile pkg_get_source|pkg_configure|pkg_build|pkg_install')}",
+          flush=True)
+
+    shell = os.environ.get("SHELL", "/bin/sh")
+    return subprocess.run([shell], env=env, cwd=cwd).returncode
+
+
+def cmd_deps(args):
+    """Show a package's transitive dependencies and reverse dependencies."""
+    _, packages = _load(args)
+    pkg = _one_package(packages, args.package)
+    if pkg is None:
+        return 1
+
+    reverse = sorted(p.full_name for p in reverse_deps([pkg], packages) if p.full_name != pkg.full_name)
+
+    if args.tree:
+        by_name = {p.full_name: p for p in packages}
+
+        def print_tree(parent, prefix):
+            for i, dep_name in enumerate(parent.dependencies):
+                last = i == len(parent.dependencies) - 1
+                print(f"{prefix}{'└─' if last else '├─'} {dep_name}")
+                child = by_name.get(dep_name)
+                if child:
+                    print_tree(child, prefix + ("   " if last else "│  "))
+
+        print(bold(pkg.full_name) + ("" if pkg.dependencies else dim("  (no dependencies)")))
+        print_tree(pkg, "")
+    else:
+        forward = [p for p in resolve_build_order(expand_with_deps([pkg], packages))
+                   if p.full_name != pkg.full_name]
+        print(bold("Depends on (build order):") + ("" if forward else " nothing"))
+        for p in forward:
+            print(f"  {p.full_name}")
+    print(bold("Depended on by:") + ("" if reverse else " nothing"))
+    for name in reverse:
+        print(f"  {name}")
+    return 0
+
+
+def cmd_log(args):
+    """Print the persisted build log for a package."""
+    config, packages = _load(args)
+    pkg = _one_package(packages, args.package)
+    if pkg is None:
+        return 1
+    log_path = build_log_path(config, pkg)
+    if not os.path.isfile(log_path):
+        print(f"{red('plume: error')}: no build log for {pkg} (never built, or built with --verbose)",
+              file=sys.stderr)
+        return 1
+    print(dim(log_path), file=sys.stderr)
+    with open(log_path, "r", encoding="utf-8") as f:
+        sys.stdout.write(f.read())
+    return 0
+
+
 def cmd_run(args):
     """Launch the built ISO interactively in QEMU on the active target."""
     config, _ = _load(args)
@@ -576,6 +696,8 @@ def main(argv=None):
     build_p.add_argument("--dry-run", "-n", action="store_true", help="Print build order without building")
     build_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     build_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+    build_p.add_argument("--keep-going", "-k", action="store_true",
+                         help="Keep building other packages after a failure (skips dependents of the failed one)")
 
     install_p = sub.add_parser("install", parents=[target], help="Install packages into sysroot (builds if needed)")
     install_p.add_argument("packages", nargs="*", help="Packages to install (default: all, supports @set)")
@@ -583,6 +705,8 @@ def main(argv=None):
     install_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     install_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
     install_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
+    install_p.add_argument("--keep-going", "-k", action="store_true",
+                           help="Keep going after a failure (skips dependents of the failed package)")
 
     rebuild_p = sub.add_parser("rebuild", parents=[target], help="Clean and rebuild specific packages")
     rebuild_p.add_argument("packages", nargs="*", help="Packages to rebuild (default: all, supports @set)")
@@ -613,6 +737,16 @@ def main(argv=None):
     sub.add_parser("world", parents=[target], help="Show packages installed in the sysroot")
     sub.add_parser("clangd", parents=[target], help="Regenerate compile_commands.json")
 
+    shell_p = sub.add_parser("shell", parents=[target], help="Open a shell in a package's build environment")
+    shell_p.add_argument("package", help="Package to enter, e.g. sys/kernel")
+
+    deps_p = sub.add_parser("deps", parents=[target], help="Show a package's dependencies and reverse dependencies")
+    deps_p.add_argument("package", help="Package to inspect, e.g. sys/kernel")
+    deps_p.add_argument("--tree", action="store_true", help="Render dependencies as a recursive tree")
+
+    log_p = sub.add_parser("log", parents=[target], help="Print a package's most recent build log")
+    log_p.add_argument("package", help="Package whose log to print, e.g. sys/kernel")
+
     setconf_p = sub.add_parser("set-config", help="Select the active target config (symlinks ./default.yaml)")
     setconf_p.add_argument("path", help="Config path or bare arch name, e.g. riscv64")
 
@@ -632,7 +766,8 @@ def main(argv=None):
         "rebuild": cmd_rebuild, "image": cmd_image, "test": cmd_test,
         "status": cmd_status, "validate": cmd_validate, "clean": cmd_clean,
         "list": cmd_list, "world": cmd_world, "clangd": cmd_clangd,
-        "set-config": cmd_set_config, "run": cmd_run,
+        "set-config": cmd_set_config, "run": cmd_run, "shell": cmd_shell,
+        "deps": cmd_deps, "log": cmd_log,
     }
     try:
         if getattr(args, "arch", None) == "all":

@@ -23,9 +23,8 @@ def parallel_build(
     packages: list[Package],
     *,
     max_workers: int = 1,
-    verbose: bool = False,
     force_set: set[str] | None = None,
-    skip_built: bool = True,
+    keep_going: bool = False,
 ) -> tuple[bool, list[tuple[str, float]]]:
     """Build packages in parallel respecting dependency order.
 
@@ -37,12 +36,13 @@ def parallel_build(
     sorter = create_build_sorter(packages)
     timings: list[tuple[str, float]] = []
     failed = False
+    dead: set[str] = set()  # failed packages and their transitive dependents
     idx = 0
     # Upfront count for the [i/total] labels only; each package is re-checked
     # just before submission, since sources can change while others build.
     total = sum(
         1 for p in packages
-        if p.full_name in force_set or not (skip_built and build_needed(config, p) is None)
+        if p.full_name in force_set or build_needed(config, p) is not None
     )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -55,7 +55,12 @@ def parallel_build(
                     force = pkg.full_name in force_set
                     # Capture the staleness reason now; the build refreshes the stamp.
                     reason = build_needed(config, pkg)
-                    if failed or (not force and skip_built and reason is None):
+                    if any(d in dead for d in pkg.dependencies):
+                        # Topological release order makes this transitive.
+                        dead.add(pkg.full_name)
+                        _print_sync(dim(f"  skipped {pkg} (dependency failed)"))
+                        sorter.done(pkg)
+                    elif (failed and not keep_going) or (not force and reason is None):
                         sorter.done(pkg)
                     else:
                         fut = executor.submit(build_package, config, pkg, verbose=False, force=force)
@@ -76,6 +81,7 @@ def parallel_build(
                 else:
                     _print_sync(f"{red('Build failed for')} {pkg}")
                     failed = True
+                    dead.add(pkg.full_name)
             submit_ready()
 
     return (not failed, timings)
