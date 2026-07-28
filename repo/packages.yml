@@ -25,6 +25,10 @@ sys/kernel-0.0.1:
   description: "The Archipelago kernel"
   supports_live_sources: true
   live_source_path: "sys/kernel"
+  # The kernel compiles board facts in (device addresses, clock rates, load
+  # address), so it builds separately per board and carries '^<board>' in its
+  # qualifier. Every other package resolves at the arch level and is shared.
+  varies_by: ["board"]
   dependencies:
     - "boot/limine-10.0"
     - "boot/limine-config-1.0"

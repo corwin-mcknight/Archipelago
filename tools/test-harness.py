@@ -940,7 +940,19 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     if args.iso is None:
         args.iso = Path(f"build/{args.arch}/image.iso")
     if args.kernel_elf is None:
-        args.kernel_elf = Path(f"build/{args.arch}/obj/sys/kernel/kernel.elf")
+        # The kernel's object tree carries a board suffix (obj/sys/kernel^virt),
+        # so match any board when the caller did not name one. plume test always
+        # passes --kernel-elf explicitly; this is the manual-invocation fallback.
+        # Guessing between boards would symbolicate crashes against the wrong
+        # binary, which is worse than not symbolicating at all -- so ambiguity
+        # leaves it unset rather than picking one.
+        found = sorted(Path(".").glob(f"build/{args.arch}/obj/sys/kernel^*/kernel.elf"))
+        found += sorted(Path(".").glob(f"build/{args.arch}/obj/sys/kernel/kernel.elf"))
+        if len(found) == 1:
+            args.kernel_elf = found[0]
+        elif len(found) > 1:
+            boards = ", ".join(p.parent.name for p in found)
+            print(f"harness: several kernel builds ({boards}); pass --kernel-elf to choose", file=sys.stderr)
     if args.artifacts is None:
         args.artifacts = Path(f"build/{args.arch}/test-artifacts")
     return args

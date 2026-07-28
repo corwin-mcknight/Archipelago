@@ -33,41 +33,54 @@ def _find_up(relpath):
         d = parent
 
 
-def _all_arches():
-    """Arch names from repo/config/*.yaml, walking up to the project root."""
+def _all_targets(include_boards=False):
+    """Target names from repo/config/*.yaml, walking up to the project root.
+
+    Board targets are named '<arch>^<board>'. By default only arch targets are
+    returned -- each already builds its own default board -- so adding a board
+    does not lengthen every matrix run. `include_boards` returns the full set.
+    """
     cfg_dir = _find_up(os.path.join("repo", "config"))
     if not cfg_dir:
         return []
-    return sorted(f[:-5] for f in os.listdir(cfg_dir) if f.endswith(".yaml"))
+    names = sorted(f[:-5] for f in os.listdir(cfg_dir) if f.endswith(".yaml"))
+    return names if include_boards else [n for n in names if "^" not in n]
 
 
-def _run_matrix(args, command):
-    """Run a command once per target (--arch all), then print a summary."""
-    arches = _all_arches()
-    if not arches:
+def _run_matrix(args, command, include_boards=False):
+    """Run a command once per target (--arch all / all-boards), then print a summary."""
+    targets = _all_targets(include_boards)
+    if not targets:
         print(f"{red('plume: error')}: no configs found under repo/config/", file=sys.stderr)
         return 1
 
     results = []
-    for arch in arches:
-        print(bold(cyan(f"=== {arch} ===")))
-        args.arch = arch
+    for target in targets:
+        print(bold(cyan(f"=== {target} ===")))
+        args.arch = target
         start = time.monotonic()
         rc = command(args)
-        results.append((arch, rc, time.monotonic() - start))
+        results.append((target, rc, time.monotonic() - start))
         print()
 
-    width = max(len(a) for a, _, _ in results)
+    width = max(len(t) for t, _, _ in results)
     print(bold("Matrix summary:"))
-    for arch, rc, elapsed in results:
+    for target, rc, elapsed in results:
         mark = green("✓") if rc == 0 else red("✗")
-        print(f"  {arch:<{width}}  {mark}  {dim(fmt_duration(elapsed))}")
+        print(f"  {target:<{width}}  {mark}  {dim(fmt_duration(elapsed))}")
     return 0 if all(rc == 0 for _, rc, _ in results) else 1
 
 
 def _config_by_name(name):
-    """Resolve a config name like 'riscv64' to repo/config/<name>.yaml, walking
-    up from the working directory to find the project root."""
+    """Resolve a target name to repo/config/<name>.yaml, walking up from the
+    working directory to find the project root.
+
+    Accepts an arch ('riscv64') or a board target ('riscv64^visionfive2').
+    Path separators are rejected so a target name can never escape the config
+    directory.
+    """
+    if os.sep in name or (os.altsep and os.altsep in name) or name in (os.curdir, os.pardir):
+        return None
     return _find_up(os.path.join("repo", "config", f"{name}.yaml"))
 
 
@@ -84,7 +97,7 @@ def _find_config(override=None, arch=None):
     if arch:
         path = _config_by_name(arch)
         if not path:
-            print(f"{red('plume: error')}: no config for arch '{arch}' (expected repo/config/{arch}.yaml)",
+            print(f"{red('plume: error')}: no config for target '{arch}' (expected repo/config/{arch}.yaml)",
                   file=sys.stderr)
             sys.exit(1)
         return path
@@ -127,7 +140,7 @@ def _load(args):
     for w in validate_package_yaml(raw_data or {}):
         print(f"{yellow('plume: warning')}: {w}", file=sys.stderr)
 
-    packages = load_packages(packages_yml, arch=config.get_arch())
+    packages = load_packages(packages_yml, arch=config.get_arch(), board=config.get_board())
 
     errors, warnings = validate_packages(config, packages)
     for w in warnings:
@@ -410,11 +423,14 @@ def cmd_test(args):
         return 1
 
     print("\n\nRunning tests...\n")
+    from plume.env import package_obj_dir
+    kernel_pkgs = [p for p in packages if p.name == "kernel" and p.category == "sys"]
+    kernel_elf = os.path.join(package_obj_dir(config, kernel_pkgs[0]), "kernel.elf") if kernel_pkgs else ""
     harness_args = [
         sys.executable, "tools/test-harness.py",
         "--arch", config.get_arch(),
         "--iso", config.get("iso_output"),
-        "--kernel-elf", os.path.join(config.get("build_dir"), "obj", "sys", "kernel", "kernel.elf"),
+        "--kernel-elf", kernel_elf,
         "--artifacts", os.path.join(config.get("build_dir"), "test-artifacts"),
     ]
     if config.get("qemu"):
@@ -439,7 +455,9 @@ def cmd_status(args):
     for pkg in packages:
         reason = build_needed(config, pkg)
         built = green("✓") if reason is None else dim("–")
-        inst = green("✓") if pkg.full_name in installed else (dim("n/a") if pkg.is_build_tool else dim("–"))
+        # World entries are qualified names, so match through World's
+        # category/name keying rather than comparing the bare full_name.
+        inst = green("✓") if world.contains(pkg.qualified_name) else (dim("n/a") if pkg.is_build_tool else dim("–"))
         tags = ""
         if pkg.is_build_tool:
             tags += dim("  [build-tool]")
@@ -512,11 +530,13 @@ def cmd_clangd(args):
         print(f"{red('plume: error')}: no kernel package found", file=sys.stderr)
         return 1
 
-    from plume.env import get_build_env
+    from plume.env import get_build_env, package_obj_dir
     env = get_build_env(config, kernel_pkgs[0])
-    os.makedirs(os.path.join(config.get("build_dir"), "obj", "sys", "kernel"), exist_ok=True)
+    obj_dir = package_obj_dir(config, kernel_pkgs[0])
+    os.makedirs(obj_dir, exist_ok=True)
     result = subprocess.run(
-        [env["MAKE"], "-B", "-j", env["MAKE_JOBS"], f"BUILD_DIR={config.get('build_dir')}"],
+        [env["MAKE"], "-B", "-j", env["MAKE_JOBS"],
+         f"BUILD_DIR={config.get('build_dir')}", f"OBJ_DIR={obj_dir}"],
         cwd=env["LIVE_SOURCES"], env=env,
     )
     if result.returncode != 0:
@@ -545,7 +565,7 @@ def cmd_set_config(args):
         target = os.path.abspath(by_name)
     try:
         cfg = Config(target)
-        arch = cfg.get_arch()
+        target_name = cfg.target_name()
     except Exception as exc:  # malformed yaml / missing config: block
         print(f"{red('plume: error')}: not a loadable config: {exc}", file=sys.stderr)
         return 1
@@ -556,7 +576,7 @@ def cmd_set_config(args):
     if os.path.islink(link) or os.path.exists(link):
         os.remove(link)
     os.symlink(rel, link)
-    print(f"default.yaml -> {rel} ({bold(arch)})")
+    print(f"default.yaml -> {rel} ({bold(target_name)})")
     return 0
 
 
@@ -688,7 +708,9 @@ def main(argv=None):
     target = argparse.ArgumentParser(add_help=False)
     target.add_argument("--config", default=None, help="Path to a target config yaml")
     target.add_argument("--arch", default=None,
-                        help="Target architecture (resolves repo/config/<arch>.yaml), or 'all' to run every target")
+                        help="Target: an arch ('riscv64') or board ('riscv64^visionfive2'), resolving "
+                             "repo/config/<target>.yaml. 'all' runs every arch at its default board; "
+                             "'all-boards' runs every board target too")
 
     build_p = sub.add_parser("build", parents=[target], help="Build packages (does not install to sysroot)")
     build_p.add_argument("packages", nargs="*", help="Packages to build (default: all, supports @set)")
@@ -770,8 +792,9 @@ def main(argv=None):
         "deps": cmd_deps, "log": cmd_log,
     }
     try:
-        if getattr(args, "arch", None) == "all":
-            return _run_matrix(args, commands[args.command])
+        selected = getattr(args, "arch", None)
+        if selected in ("all", "all-boards"):
+            return _run_matrix(args, commands[args.command], include_boards=(selected == "all-boards"))
         return commands[args.command](args)
     except KeyboardInterrupt:
         break_line()

@@ -61,21 +61,88 @@ def installed_manifest_path(sysroot: str, qualified_name: str) -> str:
     return os.path.join(installed_manifest_dir(sysroot), filename)
 
 
+def _identity(manifest: dict) -> tuple:
+    """Package identity ignoring version and target qualifier.
+
+    Two manifests with the same identity are the same package, so the newer
+    install supersedes the older -- whether it differs by version bump or by
+    gaining a board qualifier. Matches World's category/name keying.
+
+    Returns None when either component is missing: a partially written or
+    foreign manifest must never compare equal to another one, because
+    identity drives file deletion.
+    """
+    category, name = manifest.get("category"), manifest.get("name")
+    return (category, name) if category and name else None
+
+
+def remove_manifest_files(manifest: dict, sysroot: str, keep: frozenset = frozenset()) -> int:
+    """Delete the files a manifest owns, then prune the directories left empty.
+
+    Paths in *keep* are skipped -- used when a newer install of the same
+    package already owns them. Returns the number of files removed.
+    """
+    removed_dirs: set[str] = set()
+    count = 0
+    for entry in manifest.get("files", []):
+        if entry["path"] in keep:
+            continue
+        fpath = os.path.join(sysroot, entry["path"])
+        if os.path.isfile(fpath):
+            os.remove(fpath)
+            removed_dirs.add(os.path.dirname(fpath))
+            count += 1
+
+    for d in sorted(removed_dirs, key=len, reverse=True):
+        while d != sysroot and os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+            d = os.path.dirname(d)
+    return count
+
+
 def save_installed_manifest(manifest: dict, sysroot: str):
-    """Write a manifest to the sysroot manifests directory."""
-    path = installed_manifest_path(sysroot, manifest["qualified_name"])
-    write_manifest(manifest, path)
+    """Write a manifest to the sysroot manifests directory.
+
+    A previous install of the same package under a different qualified name
+    (version bump, or newly board-varying) is superseded: any file it owned
+    that the new install does not is removed, then its manifest is dropped.
+    Deleting the record alone would strand those files owned by nobody --
+    unattributable to `check_conflicts` and unreachable by `uninstall`.
+
+    Call only after the new files are in place, so `keep` protects them.
+    """
+    identity = _identity(manifest)
+    keep = frozenset(f["path"] for f in manifest["files"])
+    if identity is not None:
+        for installed in list_installed_manifests(sysroot):
+            if _identity(installed) != identity or installed["qualified_name"] == manifest["qualified_name"]:
+                continue
+            remove_manifest_files(installed, sysroot, keep=keep)
+            stale = installed_manifest_path(sysroot, installed["qualified_name"])
+            if os.path.isfile(stale):
+                os.remove(stale)
+
+    write_manifest(manifest, installed_manifest_path(sysroot, manifest["qualified_name"]))
 
 
 def list_installed_manifests(sysroot: str) -> list[dict]:
-    """Read all installed manifests from the sysroot."""
+    """Read all installed manifests from the sysroot.
+
+    Unreadable entries are skipped rather than raising: a single truncated
+    manifest from an interrupted install would otherwise break every
+    subsequent install, since installs now consult this list.
+    """
     mdir = installed_manifest_dir(sysroot)
     if not os.path.isdir(mdir):
         return []
     manifests = []
     for fname in sorted(os.listdir(mdir)):
-        if fname.endswith(".json"):
+        if not fname.endswith(".json"):
+            continue
+        try:
             manifests.append(read_manifest(os.path.join(mdir, fname)))
+        except (json.JSONDecodeError, OSError):
+            continue
     return manifests
 
 
@@ -87,7 +154,14 @@ def check_conflicts(manifest: dict, sysroot: str, exclude_pkg: str | None = None
     new_files = {f["path"] for f in manifest["files"]}
     conflicts = []
     for installed in list_installed_manifests(sysroot):
-        if installed["qualified_name"] == exclude_pkg:
+        # Skip the package's own prior install, including one recorded under a
+        # different qualifier (version bump, or newly board-varying): replacing
+        # your own files is an upgrade, not a conflict. save_installed_manifest
+        # supersedes that record immediately afterwards.
+        own_identity = _identity(manifest)
+        if installed["qualified_name"] == exclude_pkg or (
+            own_identity is not None and _identity(installed) == own_identity
+        ):
             continue
         for f in installed["files"]:
             if f["path"] in new_files:

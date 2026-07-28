@@ -26,12 +26,15 @@ def _binpkg_dir(config: Config) -> str:
 def binpkg_path(config: Config, package: Package) -> str:
     """Return the full cache path for a binary package.
 
-    Layout: {build_dir}/packages/{category}/{name}-{version}~{arch}.tar.xz
+    Layout: {build_dir}/packages/{category}/{name}-{version}~{arch}[^{board}].tar.xz
+
+    Boards on one arch share the cache directory, so a package that does not
+    vary by board is built once and reused by every board on that arch.
     """
     return os.path.join(
         _binpkg_dir(config),
         package.category,
-        f"{package.name}-{package.version}~{package.arch}{BINPKG_EXT}",
+        f"{package.name}-{package.version}~{package.arch}{package.variant_suffix}{BINPKG_EXT}",
     )
 
 

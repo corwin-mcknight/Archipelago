@@ -6,22 +6,47 @@ from plume.config import Config
 from plume.package import Package
 
 
+def package_obj_dir(config: Config, package: Package) -> str:
+    """Intermediate build tree for a package, under the target's shared build dir.
+
+    Carries the variant suffix for the same reason WORKDIR does: boards on one
+    arch share build_dir, so without it two boards would compile into the same
+    object tree and clobber each other's output.
+    """
+    return os.path.join(
+        config.get("build_dir"), "obj", package.category,
+        f"{package.name}{package.variant_suffix}",
+    )
+
+
 def get_build_env(config: Config, package: Package) -> dict:
     """Construct the environment dict passed to package Make invocations."""
     env = dict(os.environ)
 
     arch = config.get_arch()
     # Arch isolation comes from the per-arch build tree (tmp_path lives under
-    # build/<arch>/), so workdir names carry no ~arch suffix.
-    tmp_base = os.path.join(config.get("tmp_path"), package.category, f"{package.name}-{package.version}")
+    # build/<arch>/), so workdir names carry no ~arch suffix. Board isolation
+    # cannot come from the tree -- boards on one arch share it so their common
+    # packages build once -- so board-varying packages carry '^<board>' here.
+    tmp_base = os.path.join(
+        config.get("tmp_path"), package.category,
+        f"{package.name}-{package.version}{package.variant_suffix}",
+    )
 
+    # ARCH stays bare so package Makefiles can keep matching on it directly
+    # (ifeq ($(ARCH),riscv64)). BOARD is exported only to packages that declare
+    # they vary by board, so a package cannot read it without also getting the
+    # per-board workdir and cache entry that make that read correct.
     env["ARCH"] = arch
+    if package.varies_by_board:
+        env["BOARD"] = package.board
     # Only exported when configured: an empty TRIPLE in the environment would
     # defeat package Makefiles' own ?= per-arch defaults.
     if config.get("triple"):
         env["TRIPLE"] = config.get("triple")
     env["SYSROOT"] = config.get("sysroot")
     env["BUILD_DIR"] = config.get("build_dir")
+    env["OBJ_DIR"] = package_obj_dir(config, package)
     env["FILESDIR"] = os.path.join(config.get("repo_path"), "packages", package.category, package.name)
     env["WORKDIR"] = tmp_base
     env["S"] = os.path.join(tmp_base, "src")

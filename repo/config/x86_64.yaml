@@ -1,5 +1,8 @@
 config:
   arch: x86_64
+  # Default board for this arch. Board targets overlay this config
+  # (base: x86_64) and override only what differs.
+  board: pc
   build_dir: ./build/x86_64
   sysroot: ./build/x86_64/sysroot
   tmp_path: ./build/x86_64/tmp

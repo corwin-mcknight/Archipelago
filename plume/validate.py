@@ -10,13 +10,51 @@ from plume.package import Package
 
 KNOWN_PACKAGE_KEYS = {
     "description", "is_build_tool", "supports_live_sources",
-    "live_source_path", "dependencies", "source", "arches",
+    "live_source_path", "dependencies", "source", "arches", "varies_by",
 }
+
+# Axes a package may declare it builds separately for. A package listing an
+# axis gets that axis in its qualifier, workdir, and binary package name;
+# packages listing nothing resolve at the arch level and are shared.
+KNOWN_VARIES_BY = {"board"}
+
+
+def validate_target(config: Config) -> list[str]:
+    """Validate the active target config. Returns errors.
+
+    The board name becomes a path component in workdirs, object trees, binary
+    package names, and manifest filenames, so it is constrained to the same
+    character set as an arch. A board target must also isolate the paths that
+    hold per-board output: boards on one arch deliberately share the build
+    tree, so a board inheriting its base's sysroot would install its kernel
+    over the other board's and write both to the same ISO.
+    """
+    errors = []
+    board = config.get_board()
+    if board and not re.match(r"^[a-z0-9_-]+$", board):
+        errors.append(f"invalid board name '{board}' (expected lowercase alphanumeric, '_' or '-')")
+
+    arch = config.get_arch()
+    # Only a non-default board target needs isolated output paths; the arch
+    # config's own board is the one that owns the arch-level sysroot.
+    config_name = os.path.basename(config.config_path)[:-5] if config.config_path else ""
+    if "^" in config_name:
+        expected = f"{arch}^{board}"
+        if config_name != expected:
+            errors.append(f"config {config_name}.yaml declares arch/board '{expected}'; filename must match")
+        for key in ("sysroot", "iso_output"):
+            base_value = config.base_values.get(key)
+            if base_value is not None and config.get(key) == base_value:
+                errors.append(
+                    f"board target {expected} inherits '{key}' from {arch}; "
+                    f"boards share a build tree, so this one must override it"
+                )
+    return errors
 
 
 def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str], list[str]]:
     """Validate all packages. Returns (errors, warnings)."""
-    errors = []
+    errors = validate_target(config)
     warnings = []
     by_name = {p.full_name: p for p in packages}
 
@@ -67,4 +105,7 @@ def validate_package_yaml(raw_data: dict) -> list[str]:
         unknown = set(pkg_data.keys()) - KNOWN_PACKAGE_KEYS
         if unknown:
             warnings.append(f"{full_name}: unknown keys: {', '.join(sorted(unknown))}")
+        unknown_axes = set(pkg_data.get("varies_by") or []) - KNOWN_VARIES_BY
+        if unknown_axes:
+            warnings.append(f"{full_name}: unknown varies_by axes: {', '.join(sorted(unknown_axes))}")
     return warnings

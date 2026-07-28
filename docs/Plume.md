@@ -17,7 +17,8 @@ These Make targets wrap `python3 -m plume` commands.
 ## Packages
 
 Packages are defined in `repo/packages.yml`. Each has a category, name, version, and optional dependencies.
-A package that only exists on some targets declares `arches:`; it is skipped everywhere else, and naming it explicitly on the wrong target is an error.
+A package that only exists on some targets declares `arches:`; it is skipped everywhere else, and naming it explicitly on the wrong target is an error. `arches:` matches the bare architecture -- a board narrows a target, it never changes which architecture that target is.
+A package that compiles board facts in declares `varies_by: ["board"]` and builds once per board; see Targets and Boards.
 ### Example Packages
 | Package                  | Description                               |
 | ------------------------ | ----------------------------------------- |
@@ -70,10 +71,12 @@ Each package build receives environment variables:
 
 | Variable | Value |
 |----------|-------|
-| `ARCH` | Target architecture (`x86_64`, `riscv64`) |
+| `ARCH` | Target architecture (`x86_64`, `riscv64`), never board-qualified |
+| `BOARD` | Board name; exported only to packages declaring `varies_by: ["board"]` |
 | `TRIPLE` | Target triple from the config (e.g. `x86_64-unknown-none`) |
 | `SYSROOT` | `build/<arch>/sysroot` |
-| `WORKDIR` | `build/<arch>/tmp/<category>/<name>-<version>` |
+| `WORKDIR` | `build/<arch>/tmp/<category>/<name>-<version>[^<board>]` |
+| `OBJ_DIR` | `build/<arch>/obj/<category>/<name>[^<board>]` -- intermediate build tree |
 | `S` | Source directory (`$WORKDIR/src`) |
 | `D` | Staging install directory (`$WORKDIR/install`) |
 | `CC`, `CXX` | `clang`, `clang++` |
@@ -115,8 +118,8 @@ build/
 
 ## Commands
 All commands are invoked as `python3 -m plume <command>` or through the Makefile.
-Every command accepts `--arch <arch>` (or `--config <path>`) to target an architecture for one invocation without changing the `default.yaml` selection.
-`--arch all` fans the command out over every config in `repo/config/` sequentially and ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
+Every command accepts `--arch <target>` (or `--config <path>`) to select a target for one invocation without changing the `default.yaml` selection. A target is an arch (`riscv64`) or a board (`riscv64^visionfive2`).
+`--arch all` fans the command out over every arch at its default board; `--arch all-boards` covers every board target as well. Either ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
 
 | Command | Description |
 |---------|-------------|
@@ -138,13 +141,43 @@ Every command accepts `--arch <arch>` (or `--config <path>`) to target an archit
 | `deps` | Show a package's transitive and reverse dependencies, optionally as a tree |
 | `log` | Print a package's most recent build log |
 
+## Targets and Boards
+A target is an architecture, optionally narrowed to a board. `repo/config/riscv64.yaml` is an arch target; `repo/config/riscv64^visionfive2.yaml` is a board target. Every arch config names its default board, so `--arch riscv64` already builds a board -- the qualifier is only spelled out when selecting a non-default one.
+
+A board config names its arch with `base:` and declares only what differs. The base is merged underneath it, so toolchain settings live in one place and boards on an arch cannot drift apart:
+
+```yaml
+config:
+  base: riscv64
+  board: visionfive2
+  sysroot: ./build/riscv64/boards/visionfive2/sysroot
+  iso_output: ./build/riscv64/boards/visionfive2/image.iso
+```
+
+A board target must override `sysroot` and `iso_output`, since it inherits the arch's build tree; `plume validate` rejects a board config that does not, and checks that the filename agrees with its `arch`/`board` keys.
+
+Boards on one architecture share that architecture's build tree and binary package cache. A package that declares no board-specific behavior builds once and every board on the arch reuses it -- that is the normal case, not a cache miss. Only packages declaring `varies_by: ["board"]` build separately per board, and only those carry `^<board>` in their qualifier, workdir, and cached binary package:
+
+```
+sys/kernel-0.0.1~riscv64^visionfive2     board-varying: one build per board
+boot/limine-10.0~riscv64                 shared by every riscv64 board
+```
+
+Because of that sharing, `board` is excluded from the build hash: a board switch must not invalidate packages that do not depend on the board. Board-varying packages get their isolation from the qualifier in their paths instead.
+
+`BOARD` is exported only to packages that declare the axis, so a package cannot read it without also getting the per-board workdir and cache entry that make that read correct. `ARCH` is always the bare architecture, never board-qualified.
+
+`--arch all` runs every arch at its default board; `--arch all-boards` runs every board target as well.
+
 ## Configuration
-Each architecture has a target config at `repo/config/<arch>.yaml`; the active one is the `default.yaml` symlink in the project root, managed with `plume set-config` (which accepts a bare arch name, e.g. `plume set-config riscv64`).
+Each target has a config at `repo/config/<target>.yaml`; the active one is the `default.yaml` symlink in the project root, managed with `plume set-config` (which accepts a bare target name, e.g. `plume set-config riscv64`).
 When no selection exists, Plume falls back to `repo/config/x86_64.yaml`.
 
 | Setting | Value |
 |---------|-------|
 | `arch` | `x86_64` or `riscv64` |
+| `board` | Board this target builds for (default board on an arch config) |
+| `base` | Arch config to merge underneath this one (board configs only) |
 | `build_dir` / `sysroot` / `tmp_path` | Per-target tree under `./build/<arch>/` |
 | `triple` | Target triple exported to package builds |
 | `cc` / `cxx` | `clang` / `clang++` |

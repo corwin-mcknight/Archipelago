@@ -1,5 +1,8 @@
 config:
   arch: riscv64
+  # Default board for this arch. Board targets overlay this config
+  # (base: riscv64) and override only what differs.
+  board: virt
   build_dir: ./build/riscv64
   sysroot: ./build/riscv64/sysroot
   tmp_path: ./build/riscv64/tmp

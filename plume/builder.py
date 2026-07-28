@@ -10,7 +10,7 @@ from plume.binpkg import binpkg_exists, binpkg_path, create_binpkg, extract_binp
 from plume.config import Config
 from plume.manifest import (
     generate_manifest, check_conflicts, save_installed_manifest,
-    installed_manifest_path, read_manifest,
+    installed_manifest_path, read_manifest, remove_manifest_files,
 )
 from plume.output import green, red, yellow, dim, fmt_duration, break_line
 from plume.package import Package
@@ -218,20 +218,7 @@ def uninstall_package(config: Config, package: Package) -> bool:
         return False
 
     manifest = read_manifest(manifest_path)
-
-    removed_dirs: set[str] = set()
-    for entry in manifest.get("files", []):
-        fpath = os.path.join(sysroot, entry["path"])
-        if os.path.isfile(fpath):
-            os.remove(fpath)
-            removed_dirs.add(os.path.dirname(fpath))
-
-    # Walk directories bottom-up and remove empty ones
-    for d in sorted(removed_dirs, key=len, reverse=True):
-        while d != sysroot and os.path.isdir(d) and not os.listdir(d):
-            os.rmdir(d)
-            d = os.path.dirname(d)
-
+    remove_manifest_files(manifest, sysroot)
     os.remove(manifest_path)
     World(sysroot).remove(package.qualified_name)
 
