@@ -1,9 +1,9 @@
 #include <kernel/interrupt.h>
 #include <kernel/log.h>
-#include <kernel/riscv/timer.h>
+#include <kernel/riscv/platforms/virt/timer.h>
 #include <kernel/time.h>
 
-namespace kernel::riscv::drivers {
+namespace kernel::platform::virt {
 
 namespace {
 // QEMU virt's timebase-frequency. hardcoded; read the DTB's
@@ -54,4 +54,4 @@ bool sbi_timer::handle_interrupt(register_frame_t*) {
     return true;
 }
 
-}  // namespace kernel::riscv::drivers
+}  // namespace kernel::platform::virt

@@ -14,12 +14,14 @@ SRC_DIRS  ?= ./
 ARCH ?= x86_64
 
 ifeq ($(ARCH),x86_64)
+BOARD ?= pc
 TRIPLE ?= x86_64-unknown-none
 ARCH_DEFINES  := -D ARCH_X86 -D ARCH_X86_64 -D__x86_64__
 ARCH_CXXFLAGS := -m64 --target=$(TRIPLE) \
     -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel
 LD_EMULATION  := elf_x86_64
 else ifeq ($(ARCH),riscv64)
+BOARD ?= virt
 TRIPLE ?= riscv64-unknown-none
 ARCH_DEFINES  := -D ARCH_RISCV64
 # No hard float in-kernel (lp64 ABI, no f/d extensions); medany so the higher-half kernel links.
@@ -29,12 +31,26 @@ else
 $(error unsupported ARCH '$(ARCH)')
 endif
 
-# Glob all CPP files in src
-ARCH_CPP_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp -not -path '*/tests/*')
+# Glob all CPP files in src. Boards live under $(ARCH)/platforms/<board>/ and are
+# selected one at a time below, so they are excluded from the arch-wide glob --
+# otherwise every board on this arch would be compiled into the image.
+ARCH_CPP_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.cpp -not -path '*/tests/*' -not -path '*/platforms/*')
 # .s is NASM (x86_64 only); .S is GNU syntax assembled by the C compiler's integrated assembler.
-ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s) \
-	$(shell find $(SRC_DIRS)/$(ARCH)/ -name *.S)
+ARCH_ASM_SRCS := $(shell find $(SRC_DIRS)/$(ARCH)/ -name *.s -not -path '*/platforms/*') \
+	$(shell find $(SRC_DIRS)/$(ARCH)/ -name *.S -not -path '*/platforms/*')
 ARCH_SRCS := $(ARCH_CPP_SRCS) $(ARCH_ASM_SRCS)
+# Boot protocol: one implementation of kernel::boot::collect() under boot/<protocol>/.
+# Everything that knows the protocol's types lives there; core/ sees only boot_info.
+BOOT ?= limine
+BOOT_SRCS := $(shell find $(SRC_DIRS)/boot/$(BOOT) -name *.cpp -not -path '*/tests/*')
+# Board: device addresses, clock rates, and the debug-exit device, under
+# $(ARCH)/platforms/<board>/. Plume exports BOARD for the kernel package; the
+# per-arch default above covers standalone invocation. A board belongs to one
+# arch -- which is why it nests inside one -- so board code may use that
+# architecture's instructions directly.
+PLATFORM_DIR  := $(SRC_DIRS)/$(ARCH)/platforms/$(BOARD)
+PLATFORM_SRCS := $(shell find $(PLATFORM_DIR) -name *.cpp -not -path '*/tests/*') \
+	$(shell find $(PLATFORM_DIR) -name *.S -not -path '*/tests/*')
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 STD_SRCS := $(shell find $(SRC_DIRS)/std -name *.cpp -not -path '*/tests/*')
 MM_SRCS := $(shell find $(SRC_DIRS)/mm -name *.cpp -not -path '*/tests/*')
@@ -44,8 +60,9 @@ SHELL_SRCS := $(shell find $(SRC_DIRS)/shell -name *.cpp -not -path '*/tests/*')
 # (kernel-testrunner), never built into the kernel image -- and tests/runner/ is the host harness.
 # The directory is the routing: a test changes tiers by moving directory, with no list to keep in sync.
 TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/freestanding/*.cpp') \
-	$(shell find $(SRC_DIRS) -type f -path '*/$(ARCH)/tests/*.cpp')
-SRCS := $(CORE_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(MM_SRCS) $(SHELL_SRCS) $(TEST_SRCS)
+	$(shell find $(SRC_DIRS) -type f -path '*/$(ARCH)/tests/*.cpp') \
+	$(shell find $(PLATFORM_DIR) -type f -path '*/tests/*.cpp')
+SRCS := $(CORE_SRCS) $(BOOT_SRCS) $(PLATFORM_SRCS) $(ARCH_SRCS) $(STD_SRCS) $(MM_SRCS) $(SHELL_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)

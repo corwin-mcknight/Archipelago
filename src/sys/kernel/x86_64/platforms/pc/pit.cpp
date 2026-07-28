@@ -1,15 +1,15 @@
 #include <kernel/log.h>
 #include <kernel/registers.h>
 #include <kernel/time.h>
-#include <kernel/x86/drivers/pit.h>
 #include <kernel/x86/ioport.h>
+#include <kernel/x86/platforms/pc/pit.h>
 
 #include <ktl/type_traits>
 
 #include "kernel/interrupt.h"
 #include "kernel/x86/descriptor_tables.h"
 
-namespace kernel::x86::drivers {
+namespace kernel::platform::pc {
 
 // PIT base frequency in Hz and the divisor programmed into the channel-0 reload register.
 // These are the single source of truth for both set_phase() and resolution_ns().
@@ -38,4 +38,4 @@ void pit_timer::set_phase(unsigned int divisor) {
     outb(0x40, (uint8_t)(divisor >> 8));    // Send Divisor Hi
 }
 
-}  // namespace kernel::x86::drivers
+}  // namespace kernel::platform::pc

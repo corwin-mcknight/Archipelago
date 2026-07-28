@@ -27,10 +27,6 @@ void restore_interrupts(uint64_t flags);
 /// mm layer's bookkeeping; portable code manages address spaces via vm_aspace.
 uintptr_t active_translation_root();
 
-/// Signal test-harness exit through the emulator's debug-exit device. Returns on
-/// hardware (no such device), so callers must halt afterwards.
-void harness_exit(uint8_t code);
-
 /// Deliberate fault triggers for crash-path testing (shell `crash` command).
 [[noreturn]] void trigger_invalid_opcode();
 [[noreturn]] void trigger_breakpoint();
@@ -44,12 +40,8 @@ void wait_for_interrupt();
 uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* arg);
 
 /// Raw CPU cycle counter (TSC on x86_64, time CSR on riscv64). Monotonic on the calling core.
+/// Its rate is a board property; see kernel::platform::timestamp_hz().
 uint64_t timestamp();
-/// Cycles per second for timestamp(), 0 if not yet calibrated (readers must handle 0).
-uint64_t timestamp_hz();
-/// Establish timestamp_hz(). Requires a ticking kernel timer and interrupts enabled;
-/// called once from late boot before the scheduler starts.
-void timestamp_calibrate();
 
 /// Publish the current kernel stack top for user-to-kernel transitions.
 void set_kernel_stack(uintptr_t top);

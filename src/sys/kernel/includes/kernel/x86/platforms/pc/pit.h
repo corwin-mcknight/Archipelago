@@ -1,9 +1,9 @@
 #pragma once
 
-#include "kernel/interrupt.h"
-#include "kernel/time.h"
+#include <kernel/interrupt.h>
+#include <kernel/time.h>
 
-namespace kernel::x86::drivers {
+namespace kernel::platform::pc {
 
 class pit_timer : public kernel::hal::IInterruptHandler {
    public:
@@ -15,4 +15,4 @@ class pit_timer : public kernel::hal::IInterruptHandler {
     void set_phase(unsigned int hz);  //< Set the resolution
 };
 
-}  // namespace kernel::x86::drivers
+}  // namespace kernel::platform::pc

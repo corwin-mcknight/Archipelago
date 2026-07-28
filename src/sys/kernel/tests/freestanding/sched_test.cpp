@@ -6,6 +6,7 @@
 #include <kernel/obj/event.h>
 #include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
+#include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
@@ -303,7 +304,7 @@ __attribute__((noinline)) uint64_t recurse_forever(uint64_t depth) {
 KTEST_CASE_CRASH(sched_stack_tripwire) { (void)recurse_forever(0); }
 
 KTEST_CASE(sched_timestamp_monotonic_and_calibrated) {
-    uint64_t hz = kernel::arch::timestamp_hz();
+    uint64_t hz = kernel::platform::timestamp_hz();
     KTEST_EXPECT_TRUE(hz > 0);  // riscv constant; x86 calibrated in late_boot
     uint64_t a = kernel::arch::timestamp();
     uint64_t b = kernel::arch::timestamp();

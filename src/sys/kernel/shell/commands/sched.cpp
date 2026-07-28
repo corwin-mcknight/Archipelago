@@ -4,6 +4,7 @@
 
 #include <kernel/arch.h>
 #include <kernel/config.h>
+#include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/trace.h>
@@ -79,7 +80,7 @@ const char* name_of(const ktl::vector<ktl::ref<Thread>>& threads, uint64_t id) {
 }
 
 void cmd_threads(kernel::shell::ShellOutput& output, bool top) {
-    uint64_t hz = kernel::arch::timestamp_hz();
+    uint64_t hz = kernel::platform::timestamp_hz();
     ktl::vector<ktl::ref<Thread>> threads;
     if (!snapshot_all_threads(threads)) {
         output.print("snapshot failed (oom)\n");
@@ -128,7 +129,7 @@ void cmd_threads(kernel::shell::ShellOutput& output, bool top) {
 
 void cmd_stats(kernel::shell::ShellOutput& output) {
     auto s         = stats_snapshot();
-    uint64_t hz    = kernel::arch::timestamp_hz();
+    uint64_t hz    = kernel::platform::timestamp_hz();
     uint64_t total = kernel::arch::timestamp() - s.boot_ts;
     output.print("uptime: ");
     print_human(output, total, hz);
@@ -143,7 +144,7 @@ void cmd_trace_dump(kernel::shell::ShellOutput& output, size_t n) {
     static trace_record recs[CONFIG_SCHED_TRACE_EVENTS];
     if (n > CONFIG_SCHED_TRACE_EVENTS) { n = CONFIG_SCHED_TRACE_EVENTS; }
     size_t got  = trace_copy_newest(recs, n);
-    uint64_t hz = kernel::arch::timestamp_hz();
+    uint64_t hz = kernel::platform::timestamp_hz();
     auto s      = stats_snapshot();
     ktl::vector<ktl::ref<Thread>> threads;
     snapshot_all_threads(threads);

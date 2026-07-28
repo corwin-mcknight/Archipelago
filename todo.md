@@ -8,6 +8,11 @@
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
 
 ## Boot & Platform
+- `_start` still owns the boot ordering itself: `kernel::platform::console_init()`/`timer_init()` moved device bring-up out of the arch files, but the sequence (heap, ctors, console, cores, memory, traps, timer, late boot) is written twice, once per arch, and the two orders differ in ways that are not all forced. Factor the common spine once the third arch makes the real variation visible.
+- Board device discovery is still hardcoded: `riscv64/platforms/virt/` fixes the timebase at QEMU virt's 10 MHz and the UART at 0x10000000. Real hardware needs the DTB (VisionFive 2 is 4 MHz); Limine has a DTB request, so extend `boot_info` rather than teaching shared code a second protocol.
+- No non-default board target exists yet; adding one is a short overlay config (`base:` plus the paths that differ) plus an `<arch>/platforms/<board>/` directory. It should land together so the target means something rather than aliasing the default board's kernel.
+- Linker scripts stayed in `<arch>/`: the higher-half load address is an arch and boot-protocol fact, not a board one. Revisit only if a board needs a different load address.
+- Arch code still depends on Limine directly (x86_64 MP request in `x86_64/main.cpp` and `x86_64/cpu.cpp`, riscv64 paging-mode request in `riscv64/main.cpp`); fold these into the platform layer or extend `boot_info` once the split above exists.
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
 - Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.
 

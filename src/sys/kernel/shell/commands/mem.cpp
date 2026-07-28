@@ -12,6 +12,7 @@
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/obj/type_registry.h>
+#include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/shell/output.h>
 
@@ -545,7 +546,7 @@ void cmd_top(ShellOutput& out) {
         out.print("mem top: interactive only; disabled in protocol mode\n");
         return;
     }
-    uint64_t hz = kernel::arch::timestamp_hz();
+    uint64_t hz = kernel::platform::timestamp_hz();
     uint64_t free_ring[SPARK_LEN];
     uint64_t fault_ring[SPARK_LEN];
     size_t ring_len = 0, ring_head = 0;

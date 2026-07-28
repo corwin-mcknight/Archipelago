@@ -8,19 +8,15 @@
 #include "kernel/assert.h"
 #include "kernel/config.h"
 #include "kernel/cpu.h"
-#include "kernel/drivers/uart.h"
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
+#include "kernel/platform.h"
 #include "kernel/synchronization/execution_context.h"
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
-#include "kernel/x86/drivers/pit.h"
 #include "vendor/limine.h"
-
-extern kernel::driver::uart uart;
-kernel::x86::drivers::pit_timer timer;
 
 extern "C" void init_global_constructors_array(void);
 
@@ -58,10 +54,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     g_log.debug("cpu{0}: Interrupts Enabled", core_index);
 
     // Boot Processor is responsible for initializing the time
-    if (is_boot_processor) {
-        timer.init();
-        g_log.info("Time subsystem initialized");
-    }
+    if (is_boot_processor) { kernel::platform::timer_init(); }
 
     g_log.debug("cpu{0}: Now running", core_index);
     g_cpu_cores[core_index].initialized.store(true, ktl::memory_order::release);
@@ -91,8 +84,7 @@ extern "C" [[noreturn]] void _start(void) {
 
     init_global_constructors_array();
 
-    uart.init();
-    g_log.devices.push_back(&uart);
+    kernel::platform::console_init();
 
     kernel::cpu_init_cores();
 

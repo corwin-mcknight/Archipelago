@@ -5,6 +5,7 @@
 #include <kernel/arch.h>
 #include <kernel/config.h>
 #include <kernel/drivers/uart.h>
+#include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/trace.h>
@@ -72,7 +73,7 @@ void print_row(ShellOutput& out, const char* marker, uint64_t id, const char* na
 }
 
 void render_tree(ShellOutput& out) {
-    uint64_t hz    = kernel::arch::timestamp_hz();
+    uint64_t hz    = kernel::platform::timestamp_hz();
     auto s         = stats_snapshot();
     uint64_t total = kernel::arch::timestamp() - s.boot_ts;
     auto cur       = current();

@@ -1,0 +1,41 @@
+#pragma once
+
+#include <stdint.h>
+
+// What the kernel needs from the board, as opposed to from the CPU.
+//
+// `kernel::arch` covers the instruction set: page-table encoding, traps,
+// context switch, CSR/MSR access. This covers the machine those instructions
+// run on: which devices exist, where they are, and how fast their clocks tick.
+// Each board implements these in <arch>/platforms/<board>/, selected by the build's
+// BOARD variable. A board belongs to exactly one architecture, so board code
+// may use that architecture's instructions directly.
+namespace kernel::platform {
+
+/// Bring up the board's console device and register it as a log sink. Called
+/// once by the boot CPU before the first log line. On a board whose console is
+/// MMIO (virt), the physical map must already be resolved; on a port-I/O
+/// console (pc) there is no such constraint.
+void console_init();
+
+/// Bring up the board's kernel tick source. Called once by the boot CPU after
+/// the interrupt manager is up and interrupts are enabled, since the timer
+/// registers an interrupt handler and starts delivering ticks immediately.
+void timer_init();
+
+/// Signal test-harness exit through the board's debug-exit device (QEMU's
+/// isa-debug-exit on pc, the sifive_test finisher on virt). Returns on
+/// hardware that has no such device, so callers must halt afterwards.
+void harness_exit(uint8_t code);
+
+/// Cycles per second for kernel::arch::timestamp(), 0 if not yet established
+/// (readers must handle 0). The counter is a CPU register; its rate is a
+/// property of the board -- a fixed timebase on virt, calibrated against the
+/// board's tick source on pc.
+uint64_t timestamp_hz();
+
+/// Establish timestamp_hz(). Requires a ticking kernel timer and interrupts
+/// enabled; called once from late boot before the scheduler starts.
+void timestamp_calibrate();
+
+}  // namespace kernel::platform

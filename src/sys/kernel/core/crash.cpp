@@ -12,6 +12,7 @@
 #include "kernel/json_escape.h"
 #include "kernel/log.h"
 #include "kernel/panic.h"
+#include "kernel/platform.h"
 #include "kernel/symbols.h"
 
 extern kernel::driver::uart uart;
@@ -220,7 +221,7 @@ void emit_log_drain(bool harness) {
 }
 
 [[noreturn]] void terminate(trigger_kind kind) {
-    if (g_harness_enabled) { kernel::arch::harness_exit(static_cast<uint8_t>(kind)); }
+    if (g_harness_enabled) { kernel::platform::harness_exit(static_cast<uint8_t>(kind)); }
     hcf();
 }
 

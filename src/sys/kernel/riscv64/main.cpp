@@ -3,22 +3,17 @@
 #include "kernel/arch.h"
 #include "kernel/config.h"
 #include "kernel/cpu.h"
-#include "kernel/drivers/uart.h"
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
-#include "kernel/riscv/timer.h"
+#include "kernel/platform.h"
 #include "kernel/synchronization/execution_context.h"
 #include "vendor/limine.h"
 
 namespace kernel::riscv {
 void trap_init();  // riscv64/trap.cpp
 }
-
-extern kernel::driver::uart uart;
-
-kernel::riscv::drivers::sbi_timer timer;
 
 extern "C" void init_global_constructors_array(void);
 
@@ -50,8 +45,7 @@ extern "C" [[noreturn]] void _start(void) {
     }
     kernel::boot::resolve_hhdm();
 
-    uart.init();
-    g_log.devices.push_back(&uart);
+    kernel::platform::console_init();
 
     kernel::cpu_init_cores();
 
@@ -69,7 +63,7 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::arch::enable_interrupts();
     g_log.debug("cpu0: Interrupts Enabled");
 
-    timer.init();
+    kernel::platform::timer_init();
 
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
