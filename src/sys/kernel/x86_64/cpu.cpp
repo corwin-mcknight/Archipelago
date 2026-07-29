@@ -1,5 +1,6 @@
 #include "kernel/cpu.h"
 
+#include <kernel/boot.h>
 #include <stddef.h>
 
 #include <ktl/ranges>
@@ -9,12 +10,10 @@
 #include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/x86/cpu.h"
-#include "vendor/limine.h"
 
 kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
-extern volatile struct limine_mp_request mp_request;
-extern "C" void ap_startup(struct limine_mp_info* info);
+[[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id);  // x86_64/main.cpp
 
 size_t kernel::x86::current_core_index() {
     // CPUID leaf 1: the initial APIC id of the executing core is reported in EBX bits 31:24.
@@ -40,25 +39,18 @@ void kernel::cpu_init_cores() {
 }
 
 void kernel::cpu_start_cores() {
-    auto* response    = mp_request.response;
-    size_t core_count = response->cpu_count;
+    const auto& boot_info = kernel::boot::collect();
+    size_t core_count     = boot_info.cpu_count;
     if (core_count > CONFIG_MAX_CORES) {
         g_log.warn("Firmware reported {0} CPUs but build supports only {1}; ignoring the rest", core_count,
                    (size_t)CONFIG_MAX_CORES);
         core_count = CONFIG_MAX_CORES;
     }
 
-    const uint32_t bsp = response->bsp_lapic_id;
-    auto cpus          = ktl::span(response->cpus, core_count);
-    auto not_bsp       = [bsp](const auto& p) { return p.second->lapic_id != bsp; };
-
-    for (auto [i, cpu] : cpus | ktl::views::enumerate | ktl::views::filter(not_bsp)) {
-        g_log.info("Starting cpu{0} (lapic {1})", i, cpu->lapic_id);
-        // Publish this AP's dense logical index (its CPU-list position) before releasing it. The
-        // SEQ_CST store of goto_address below acts as the release that makes extra_argument visible.
-        const_cast<struct limine_mp_info*>(cpu)->extra_argument = i;
-        __atomic_store_n(const_cast<void**>(reinterpret_cast<void* const*>(&cpu->goto_address)), (void*)ap_startup,
-                         __ATOMIC_SEQ_CST);
+    for (size_t i = 0; i < core_count; i++) {
+        if (i == boot_info.boot_cpu_index) { continue; }
+        g_log.info("Starting cpu{0} (lapic {1})", i, kernel::boot::cpu_hw_id(i));
+        kernel::boot::start_cpu(i, ap_entry);
     }
 }
 
@@ -66,7 +58,7 @@ void kernel::cpu_gate_wait_for_cores_started() {
     g_log.debug("Initializing other cores...");
     // Match the clamp in cpu_start_cores(): only cores we actually started can become initialized, and
     // g_cpu_cores has only CONFIG_MAX_CORES slots.
-    size_t core_count = mp_request.response->cpu_count;
+    size_t core_count = kernel::boot::collect().cpu_count;
     if (core_count > CONFIG_MAX_CORES) { core_count = CONFIG_MAX_CORES; }
     while (true) {
         bool all_initialized = true;

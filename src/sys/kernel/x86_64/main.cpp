@@ -1,8 +1,6 @@
 #include <kernel/boot.h>
 
-#include <ktl/algorithm>
 #include <ktl/atomic>
-#include <ktl/maybe>
 
 #include "kernel/arch.h"
 #include "kernel/assert.h"
@@ -16,7 +14,6 @@
 #include "kernel/synchronization/execution_context.h"
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
-#include "vendor/limine.h"
 
 extern "C" void init_global_constructors_array(void);
 
@@ -27,9 +24,6 @@ static void enable_nxe() {
     constexpr uint32_t MSR_EFER = 0xC0000080;
     kernel::x86::wrmsr(MSR_EFER, kernel::x86::rdmsr(MSR_EFER) | (1u << 11));
 }
-
-__attribute__((used, section(".limine_requests"))) volatile struct limine_mp_request mp_request = {
-    .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
 
 // Bring a single CPU online. core_index is a dense logical index in [0, CONFIG_MAX_CORES) used to
 // subscript the per-core tables (g_cpu_cores[], gdts[]); it is derived from the bootloader CPU-list
@@ -60,24 +54,16 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     g_cpu_cores[core_index].initialized.store(true, ktl::memory_order::release);
 }
 
-extern "C" [[noreturn]] void ap_startup(struct limine_mp_info* info) {
-    // The dense logical index was published in extra_argument by cpu_start_cores() before this AP was
-    // released; the hardware LAPIC id is reported separately and is never used as an array subscript.
-    g_log.info("cpu{0}: Starting (lapic {1})", info->extra_argument, info->lapic_id);
-    core_init((uint32_t)info->extra_argument, info->lapic_id, /*is_boot_processor=*/false);
+// Secondary-CPU entry, released by cpu_start_cores() via kernel::boot::start_cpu(). core_index is
+// the dense CPU-list index; the hardware LAPIC id is stored as data, never used as a subscript.
+[[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id) {
+    g_log.info("cpu{0}: Starting (lapic {1})", core_index, hw_id);
+    core_init((uint32_t)core_index, (uint32_t)hw_id, /*is_boot_processor=*/false);
     while (true) { __asm__ volatile("hlt"); }
 }
 
 extern uintptr_t _initial_heap_start;
 extern uintptr_t _initial_heap_end;
-
-// The boot processor's dense logical index is its position in the bootloader CPU list, which is
-// not necessarily 0 nor equal to its LAPIC id. A malformed response may omit the BP entirely.
-static ktl::maybe<uint32_t> find_bsp_index(const limine_mp_response& mp) {
-    return ktl::find_index_if(mp.cpus, mp.cpus + mp.cpu_count,
-                              [&](const limine_mp_info* cpu) { return cpu->lapic_id == mp.bsp_lapic_id; })
-        .map([](size_t i) { return (uint32_t)i; });
-}
 
 extern "C" [[noreturn]] void _start(void) {
     g_early_heap.on_boot((uintptr_t)&_initial_heap_start, (uintptr_t)&_initial_heap_end);
@@ -94,19 +80,24 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::boot::resolve_hhdm();
     kernel::boot::init_memory();
 
-    if (mp_request.response == nullptr) { panic("Limine MP request failed"); }
-    if (mp_request.response->cpu_count == 0) { panic("Limine MP response reports zero CPUs"); }
+    const auto& boot_info = kernel::boot::collect();
+    if (boot_info.cpu_count == 0) { panic("Boot protocol reported no CPUs"); }
 
-    g_log.info("Booting on cpu{0}. CPU has {1} cores", mp_request.response->bsp_lapic_id,
-               mp_request.response->cpu_count);
+    // The BP's dense logical index keys the per-core tables the same way the APs (and the startup
+    // gate) are keyed. Fail fast on a malformed response rather than silently keying the BP into
+    // slot 0 (which could collide with whichever core occupies list position 0).
+    if (boot_info.boot_cpu_index == SIZE_MAX) { panic("Boot processor not present in bootloader CPU list"); }
+    // cpu_start_cores() clamps secondary CPUs past CONFIG_MAX_CORES by ignoring them, but the boot
+    // processor cannot be ignored and its dense index keys per-core tables everywhere -- so a BP
+    // past the limit is a deliberate, explained panic rather than a tripped assert in core_init.
+    if (boot_info.boot_cpu_index >= CONFIG_MAX_CORES) {
+        panic("Boot processor sits past CONFIG_MAX_CORES in the bootloader CPU list; raise CONFIG_MAX_CORES");
+    }
+    uint32_t bsp_index = (uint32_t)boot_info.boot_cpu_index;
 
-    // Locate the BP's dense logical index so it keys the per-core tables the same way the APs (and
-    // the startup gate) do. Fail fast on a malformed response rather than silently keying the BP
-    // into slot 0 (which could collide with whichever core occupies list position 0).
-    uint32_t bsp_index =
-        find_bsp_index(*mp_request.response).expect("Boot processor LAPIC id not present in bootloader CPU list");
+    g_log.info("Booting on cpu{0}. CPU has {1} cores", kernel::boot::cpu_hw_id(bsp_index), boot_info.cpu_count);
 
-    core_init(bsp_index, mp_request.response->bsp_lapic_id, /*is_boot_processor=*/true);
+    core_init(bsp_index, (uint32_t)kernel::boot::cpu_hw_id(bsp_index), /*is_boot_processor=*/true);
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
 

@@ -1,12 +1,12 @@
 #include <kernel/boot.h>
 
+#include "kernel/assert.h"
 #include "kernel/log.h"
 #include "vendor/limine.h"
 
 // The Limine boot protocol behind kernel::boot::collect(). Everything that knows
-// a Limine type lives here; core/boot.cpp sees only boot_info. Arch-specific
-// requests (x86_64 MP, riscv64 paging mode) stay in their arch's main.cpp because
-// they gate arch bring-up, not the arch-neutral boot path.
+// a Limine type lives here; the rest of the kernel sees only boot_info and the
+// cpu_hw_id()/start_cpu() accessors.
 
 __attribute__((used, section(".limine_requests_start"))) static volatile LIMINE_REQUESTS_START_MARKER;
 
@@ -26,14 +26,32 @@ __attribute__((
 __attribute__((used, section(".limine_requests"))) static volatile struct limine_executable_cmdline_request
     executable_cmdline_request = {.id = LIMINE_EXECUTABLE_CMDLINE_REQUEST, .revision = 0, .response = nullptr};
 
+__attribute__((used, section(".limine_requests"))) static volatile struct limine_mp_request mp_request = {
+    .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
+
+#if defined(__riscv)
+// Pin the paging mode: the riscv64 paging code assumes a 4-level Sv48 walk and
+// a mode-9 satp, so Sv39/Sv57 would silently corrupt every table access.
+__attribute__((used,
+               section(".limine_requests"))) static volatile struct limine_paging_mode_request paging_mode_request = {
+    .id       = LIMINE_PAGING_MODE_REQUEST,
+    .revision = 0,
+    .response = nullptr,
+    .mode     = LIMINE_PAGING_MODE_RISCV_SV48,
+    .max_mode = LIMINE_PAGING_MODE_RISCV_SV48,
+    .min_mode = LIMINE_PAGING_MODE_RISCV_SV48};
+#endif
+
 namespace kernel::boot {
 
 namespace {
 
-// Limine memmaps are small (tens of entries on any real machine), so the translated
-// map lives in a fixed array rather than costing an allocator this early in boot.
-// Overflow only loses coverage of the tail, so it warns rather than panicking.
-constexpr size_t MAX_MEMORY_RANGES = 64;
+// The translated map lives in a fixed array rather than costing an allocator this
+// early in boot. Adjacent same-kind entries are coalesced during translation, which
+// collapses the fragmented 100+-entry maps real UEFI firmware produces to a handful
+// of ranges; overflow past the coalesced cap only loses coverage of the tail, so it
+// warns rather than panicking.
+constexpr size_t MAX_MEMORY_RANGES = 128;
 
 memory_range g_ranges[MAX_MEMORY_RANGES];
 boot_info g_info   = {};
@@ -55,16 +73,52 @@ void translate_memmap() {
 
     size_t count = 0;
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
+        const auto* entry = memmap_request.response->entries[i];
+        memory_kind kind  = classify(entry->type);
+        // Limine reports the memmap sorted by base, so contiguous same-kind entries merge
+        // into the previous range instead of costing an array slot.
+        if (count > 0 && g_ranges[count - 1].kind == kind &&
+            g_ranges[count - 1].base + g_ranges[count - 1].length == entry->base) {
+            g_ranges[count - 1].length += entry->length;
+            continue;
+        }
         if (count == MAX_MEMORY_RANGES) {
-            g_log.warn("boot: memmap has more than {0} entries; ignoring the remainder", MAX_MEMORY_RANGES);
+            g_log.warn("boot: memmap exceeds {0} coalesced entries; ignoring the remainder", MAX_MEMORY_RANGES);
             break;
         }
-        const auto* entry = memmap_request.response->entries[i];
-        g_ranges[count++] = {.base = entry->base, .length = entry->length, .kind = classify(entry->type)};
+        g_ranges[count++] = {.base = entry->base, .length = entry->length, .kind = kind};
     }
 
     g_info.memory_map       = g_ranges;
     g_info.memory_map_count = count;
+}
+
+// The MP info struct names its hardware id per architecture (lapic_id, hartid).
+uint64_t hw_id_of(const struct limine_mp_info* cpu) {
+#if defined(__x86_64__)
+    return cpu->lapic_id;
+#elif defined(__riscv)
+    return cpu->hartid;
+#endif
+}
+
+uint64_t boot_hw_id(const struct limine_mp_response* mp) {
+#if defined(__x86_64__)
+    return mp->bsp_lapic_id;
+#elif defined(__riscv)
+    return mp->bsp_hartid;
+#endif
+}
+
+// All secondary CPUs share one kernel entry function; stashing it in a global
+// (published before the goto_address release below) keeps limine_mp_info out of
+// the arch-facing signature.
+void (*g_secondary_entry)(size_t core_index, uint64_t hw_id);
+
+void mp_trampoline(struct limine_mp_info* info) {
+    // extra_argument carries the dense CPU-list index published by start_cpu()
+    // before this CPU was released. entry never returns.
+    g_secondary_entry((size_t)info->extra_argument, hw_id_of(info));
 }
 
 }  // namespace
@@ -86,7 +140,45 @@ const boot_info& collect() {
         g_info.cmdline = executable_cmdline_request.response->cmdline;
     }
 
+#if defined(__riscv)
+    g_info.paging_mode_ok =
+        paging_mode_request.response != nullptr && paging_mode_request.response->mode == LIMINE_PAGING_MODE_RISCV_SV48;
+#else
+    // x86_64 makes no paging-mode request: long mode is always the 4-level walk
+    // the paging code assumes (5-level must be opted into, and never is).
+    g_info.paging_mode_ok = true;
+#endif
+
+    if (mp_request.response != nullptr) {
+        const auto* mp        = mp_request.response;
+        g_info.cpu_count      = mp->cpu_count;
+        g_info.boot_cpu_index = SIZE_MAX;
+        for (uint64_t i = 0; i < mp->cpu_count; i++) {
+            if (hw_id_of(mp->cpus[i]) == boot_hw_id(mp)) {
+                g_info.boot_cpu_index = i;
+                break;
+            }
+        }
+    }
+
     return g_info;
+}
+
+uint64_t cpu_hw_id(size_t index) {
+    assert(mp_request.response != nullptr && index < mp_request.response->cpu_count,
+           "cpu_hw_id: index outside the boot protocol CPU list");
+    return hw_id_of(mp_request.response->cpus[index]);
+}
+
+void start_cpu(size_t index, void (*entry)(size_t core_index, uint64_t hw_id)) {
+    assert(mp_request.response != nullptr && index < mp_request.response->cpu_count,
+           "start_cpu: index outside the boot protocol CPU list");
+    g_secondary_entry   = entry;
+    auto* cpu           = mp_request.response->cpus[index];
+    // Publish this CPU's dense index before releasing it; the SEQ_CST store of
+    // goto_address is the release that makes it (and g_secondary_entry) visible.
+    cpu->extra_argument = index;
+    __atomic_store_n(reinterpret_cast<void**>(&cpu->goto_address), (void*)mp_trampoline, __ATOMIC_SEQ_CST);
 }
 
 }  // namespace kernel::boot

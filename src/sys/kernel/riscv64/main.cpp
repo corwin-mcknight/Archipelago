@@ -9,23 +9,12 @@
 #include "kernel/panic.h"
 #include "kernel/platform.h"
 #include "kernel/synchronization/execution_context.h"
-#include "vendor/limine.h"
 
 namespace kernel::riscv {
 void trap_init();  // riscv64/trap.cpp
 }
 
 extern "C" void init_global_constructors_array(void);
-
-// Pin the paging mode: the paging code assumes a 4-level Sv48 walk and a
-// mode-9 satp, so Sv39/Sv57 would silently corrupt every table access.
-__attribute__((used, section(".limine_requests"))) volatile struct limine_paging_mode_request paging_mode_request = {
-    .id       = LIMINE_PAGING_MODE_REQUEST,
-    .revision = 0,
-    .response = nullptr,
-    .mode     = LIMINE_PAGING_MODE_RISCV_SV48,
-    .max_mode = LIMINE_PAGING_MODE_RISCV_SV48,
-    .min_mode = LIMINE_PAGING_MODE_RISCV_SV48};
 
 extern uintptr_t _initial_heap_start;
 extern uintptr_t _initial_heap_end;
@@ -36,13 +25,10 @@ extern "C" [[noreturn]] void _start(void) {
     init_global_constructors_array();
 
     // The HHDM offset must be known before any MMIO device (including the
-    // UART) is reachable, so it is resolved before the first log line. A
-    // missing response leaves the UART unhealthy and the panic silent -- there
-    // is no way to report anything without a mapped device.
-    if (paging_mode_request.response == nullptr ||
-        paging_mode_request.response->mode != LIMINE_PAGING_MODE_RISCV_SV48) {
-        panic("Limine did not grant Sv48 paging");
-    }
+    // UART) is reachable, so it is resolved before the first log line. The
+    // paging code assumes Sv48, so an ungranted mode is fatal -- and the panic
+    // is silent, because there is no mapped device to report through.
+    if (!kernel::boot::collect().paging_mode_ok) { panic("Boot protocol did not grant Sv48 paging"); }
     kernel::boot::resolve_hhdm();
 
     kernel::platform::console_init();

@@ -32,12 +32,30 @@ struct boot_info {
     size_t kernel_elf_size;
     // Space-delimited kernel command line, or null if the protocol supplied none.
     const char* cmdline;
+    // True when the paging mode the port's paging code assumes is in effect
+    // (Sv48 on riscv64; always true on x86_64, where long mode fixes the walk).
+    bool paging_mode_ok;
+    // CPUs reported by the boot protocol, densely indexed by list position.
+    // Zero when the protocol supplied no CPU list. boot_cpu_index is the boot
+    // CPU's position in that list, or SIZE_MAX if the list omits it; it is
+    // meaningless when cpu_count is zero.
+    size_t cpu_count;
+    size_t boot_cpu_index;
 };
 
 // Implemented once per boot protocol under boot/<protocol>/, selected by the build's
 // BOOT variable. Caches on first call, so callers may invoke it in any order and as
 // often as they like. Never panics -- absent data is reported as zero or null fields.
 const boot_info& collect();
+
+// Hardware id (x86_64 LAPIC id, riscv64 hartid) of the CPU at dense list
+// position `index` in the protocol's CPU list; requires index < cpu_count.
+uint64_t cpu_hw_id(size_t index);
+
+// Release the secondary CPU at dense list position `index` into
+// entry(index, hw_id) on its own bootloader-provided stack. All CPUs share one
+// entry function, and entry must not return. Never call this for the boot CPU.
+void start_cpu(size_t index, void (*entry)(size_t core_index, uint64_t hw_id));
 
 // Publish g_hhdm_offset from boot_info::physmap_base. Must run before any
 // MMIO device (including the riscv64 UART) is touched.

@@ -1,12 +1,10 @@
+#include <kernel/boot.h>
 #include <kernel/config.h>
 #include <kernel/cpu.h>
 #include <kernel/testing/testing.h>
 #include <kernel/x86/cpu.h>
-#include <vendor/limine.h>
 
 #if CONFIG_KERNEL_TESTING
-
-extern volatile struct limine_mp_request mp_request;
 
 using namespace kernel::testing;
 
@@ -21,15 +19,13 @@ KTEST_MODULE("x86/cpu");
 // boot panic; it locks the index<->lapic_id mapping and confirms every core completed
 // bring-up. Run under `-smp >1` to exercise the AP startup path as well as the boot processor.
 KTEST_CASE(cpu_smp_cores_initialized) {
-    KTEST_REQUIRE(mp_request.response != nullptr);
-
-    uint64_t count = mp_request.response->cpu_count;
+    size_t count = kernel::boot::collect().cpu_count;
     KTEST_REQUIRE(count >= 1);
     if (count > CONFIG_MAX_CORES) { count = CONFIG_MAX_CORES; }
 
-    for (uint64_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         KTEST_EXPECT_TRUE(g_cpu_cores[i].initialized.load(ktl::memory_order::acquire));
-        KTEST_EXPECT_EQUAL((size_t)g_cpu_cores[i].lapic_id, (size_t)mp_request.response->cpus[i]->lapic_id);
+        KTEST_EXPECT_EQUAL((size_t)g_cpu_cores[i].lapic_id, (size_t)kernel::boot::cpu_hw_id(i));
     }
 }
 
