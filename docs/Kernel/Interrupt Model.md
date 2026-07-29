@@ -7,7 +7,7 @@ The interrupt manager maintains a table of handler entries.
 Each entry can hold either a function pointer or an object pointer, with flags for enable state and interface type.
 The manager tracks per-CPU reentrant state to detect nested interrupts.
 
-The PIT timer is the primary example -- it increments the kernel tick counter on each interrupt.
+The LAPIC timer is the primary example -- it increments the kernel tick counter on each interrupt.
 
 ## Planned Architecture
 The long-term design treats interrupts as handle-bearing [[Object Model|kernel objects]], unifying interrupt management with the rest of the system.

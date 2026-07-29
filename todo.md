@@ -48,7 +48,7 @@
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
 ## Scheduler & Concurrency
-- Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs a per-core (LAPIC) timer driver, wake IPIs, and a reaper switch-completed handshake.
+- Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs LAPIC timer ticks on the APs (the LAPIC timer driver landed, but only the BSP's fires), wake IPIs, and a reaper switch-completed handshake.
 - Per-CPU trace rings and accounting once AP scheduling lands (today's ring and stats assume a single scheduling core).
 - Latency percentiles and richer `sched` shell views if thread counts grow beyond what the flat per-thread tables can show at a glance.
 - Cross-CPU load balancing, once multi-core scheduling lands.
@@ -80,7 +80,8 @@
 - Add a block device abstraction layer with caching and asynchronous I/O plumbing.
 
 ## Device Drivers
-- Expand x86_64 bring-up with APIC/IOAPIC, HPET, and interrupt controller configuration.
+- Expand x86_64 bring-up with IOAPIC routing for device interrupts (LAPIC and its timer landed; the legacy PIC is now fully masked).
+- High-resolution timer events: one-shot deadline programming (LAPIC one-shot/TSC-deadline on x86_64, sbi_set_timer already one-shot on riscv64) with a deadline queue, so sleeps and preemption wake at sub-tick deadlines; `ns_since_boot()` already reads the cycle counter.
 - Add keyboard (PS/2) and framebuffer/console drivers; wire the Limine framebuffer request (UART hardening already landed).
 - UART: pre-init panics lose their output (writes before init are dropped by the health gate); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
 - UART RX interrupt path (IOAPIC/PLIC routing) so shell input can block on a wait queue instead of sleep-polling; QEMU's chardev backpressure makes the current 1 ms poll lossless, but a real 16550's 16-byte FIFO would drop pasted input.
@@ -99,7 +100,7 @@
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
-- Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/drivers/pit.cpp`, and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
+- Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/apic.cpp` (LAPIC timer), and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience
 - Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).

@@ -4,8 +4,8 @@
 #include <kernel/panic.h>
 #include <kernel/registers.h>
 #include <kernel/synchronization/execution_context.h>
+#include <kernel/x86/apic.h>
 #include <kernel/x86/descriptor_tables.h>
-#include <kernel/x86/ioport.h>
 
 extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
 
@@ -28,17 +28,15 @@ extern "C" void k_exception_handler(register_frame_t* regs) {
     // k_irq_handler). Log and try to continue so we don't lose visibility on
     // e.g. spurious hardware-injected vectors during early bring-up.
     g_log.error("k_exception_handler: unexpected vector {0} err=0x{1:x}", regs->int_no, regs->err_code);
-    if (regs->int_no >= 40) { outb(0xA0, 0x20); }
-    outb(0x20, 0x20);
+    kernel::x86::lapic_eoi();
     kernel::synchronization::fault_exit();
 }
 
 extern "C" void k_irq_handler(register_frame_t* regs) {
     kernel::synchronization::interrupt_enter();
-    // EOI first: the tick handler may switch threads and not return here for a while. PIC lines
-    // are edge-triggered, so early EOI cannot re-raise a level.
-    if (regs->int_no >= 40) { outb(0xA0, 0x20); }
-    outb(0x20, 0x20);
+    // EOI first: the tick handler may switch threads and not return here for a while. The LAPIC
+    // timer is edge-triggered, so early EOI cannot re-raise a level.
+    kernel::x86::lapic_eoi();
 
     g_interrupt_manager.dispatch_interrupt((unsigned int)regs->int_no, regs);
     kernel::synchronization::interrupt_exit();

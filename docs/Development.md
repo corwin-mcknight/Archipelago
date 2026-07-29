@@ -66,7 +66,7 @@ src/sys/kernel/          Kernel source
     ktl/                 Kernel Template Library headers
     std/                 Standard library replacement headers
   x86_64/                Architecture-specific code
-    drivers/             PIT timer
+    platforms/pc/        PC board facts (PIT calibration reference, debug exit)
     testing/             Test runner
 plume/                   Build system source (Python)
 repo/

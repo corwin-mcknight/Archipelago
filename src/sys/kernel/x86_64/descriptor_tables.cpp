@@ -88,8 +88,11 @@ void kernel::x86::init_idt() {
         outb(0xA1, 0x02);
         outb(0x21, 0x01);
         outb(0xA1, 0x01);
-        outb(0x21, 0x00);
-        outb(0xA1, 0x00);
+        // Mask everything: the LAPIC delivers all interrupts. The remap above stays so any
+        // spurious IRQ7/IRQ15 the masked PIC still emits lands on a stubbed vector, not an
+        // exception vector.
+        outb(0x21, 0xFF);
+        outb(0xA1, 0xFF);
 
         // Install ISRs and IRQs via X-macro expansion
 #define INSTALL_ISR(n) idt_set_gate(n, (uintptr_t)interrupt_isr##n, 0x08, 0x8E);

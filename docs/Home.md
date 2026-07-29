@@ -8,7 +8,7 @@ Today, Archipelago provides a small kernel with boot, memory-management, testing
 - [[Memory Subsystem]]: Current allocators plus planned virtual memory design
 - [[Interrupt Model]]: Current interrupt dispatch plus planned object-model direction
 - [[Scheduling]]: Kernel-owned, instrumented round-robin scheduler for kernel threads
-- [[Device Drivers]]: Planned userspace driver model plus today's bootstrap UART/PIT drivers
+- [[Device Drivers]]: Planned userspace driver model plus today's bootstrap UART/timer drivers
 - [[KTL]]: Freestanding container library
 - [[Configuration]]: Compile-time constants
 - [[Testing]]: Test framework and harness

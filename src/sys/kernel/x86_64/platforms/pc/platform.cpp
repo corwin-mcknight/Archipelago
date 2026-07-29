@@ -1,8 +1,12 @@
 #include <kernel/arch.h>
+#include <kernel/assert.h>
 #include <kernel/drivers/uart.h>
+#include <kernel/interrupt.h>
 #include <kernel/log.h>
 #include <kernel/platform.h>
 #include <kernel/time.h>
+#include <kernel/x86/apic.h>
+#include <kernel/x86/descriptor_tables.h>
 #include <kernel/x86/ioport.h>
 #include <kernel/x86/platforms/pc/pit.h>
 
@@ -15,10 +19,20 @@ extern kernel::driver::uart uart;
 namespace kernel::platform {
 
 namespace {
-uint64_t g_tsc_hz = 0;
-// The 8254 PIT: the tick source every PC inherits. Interrupt-handler object, so
-// its constructor must have run (global ctors) before timer_init().
-pc::pit_timer g_timer;
+uint64_t g_tsc_hz             = 0;
+
+// Tick source: the LAPIC timer, calibrated once at boot against the PIT (the
+// fixed-frequency reference every PC inherits). Ticks are 1 ms exactly.
+constexpr time_ns_t TICK_NS   = 1'000'000;
+constexpr unsigned int CAL_MS = 10;
+
+struct lapic_tick_handler : kernel::hal::IInterruptHandler {
+    bool handle_interrupt(register_frame_t*) override {
+        kernel::time::tick();
+        return true;
+    }
+};
+lapic_tick_handler g_timer;
 }  // namespace
 
 // The PC console is COM1, reached by port I/O, so nothing needs to be mapped first.
@@ -28,8 +42,26 @@ void console_init() {
 }
 
 void timer_init() {
-    g_timer.init();
-    g_log.info("Time subsystem initialized");
+    // A dead PIT or LAPIC timer degrades to a frozen clock with a warning, matching
+    // timestamp_calibrate's dead-timer policy: readers see time stuck at 0, boot continues.
+    // ponytail: no fallback tick source -- calibrate from CPUID 0x15 or the hypervisor leaves
+    // if legacy-free hardware (no PIT) ever matters.
+    kernel::time::init(TICK_NS);
+    kernel::x86::lapic_init();
+    kernel::x86::lapic_timer_start_counting();
+    if (!pc::pit_poll_wait_ms(CAL_MS)) {
+        g_log.warn("timer_init: PIT not counting; kernel time will not advance");
+        return;
+    }
+    uint32_t counts = kernel::x86::lapic_timer_elapsed();
+    if (counts < CAL_MS) {
+        g_log.warn("timer_init: LAPIC timer did not advance; kernel time will not advance");
+        return;
+    }
+
+    g_interrupt_manager.register_interrupt(kernel::x86::IRQ0, &g_timer, 0);
+    kernel::x86::lapic_timer_start_periodic(kernel::x86::IRQ0, counts / CAL_MS);
+    g_log.info("Time subsystem initialized (LAPIC timer, {0} counts/ms)", counts / CAL_MS);
 }
 
 // QEMU's isa-debug-exit device, wired to port 0x604 by the test harness. The 0x2000 bias matches
@@ -71,6 +103,16 @@ void timestamp_calibrate() {
     }
     g_tsc_hz = (c1 - c0) * 1'000'000'000ull / static_cast<uint64_t>(ns);
     g_log.info("platform: timestamp calibrated: {0} MHz", g_tsc_hz / 1'000'000);
+
+    // Invariant TSC (CPUID 0x80000007 EDX bit 8) means the counter runs at a constant rate across
+    // P-/C-state changes. Without it the calibrated rate can drift; warn but keep the clock --
+    // QEMU TCG does not advertise the bit yet ticks the TSC at a fixed virtual rate.
+    uint32_t eax, ebx, ecx, edx;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000000u), "c"(0u));
+    if (eax >= 0x80000007u) {
+        asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000007u), "c"(0u));
+        if ((edx & (1u << 8)) == 0) { g_log.warn("platform: TSC is not invariant; timestamps may drift"); }
+    }
 }
 
 }  // namespace kernel::platform

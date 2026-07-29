@@ -31,4 +31,4 @@ See [[Server Lifecycle]].
 ## Current System
 The kernel currently includes two in-kernel drivers for bootstrap purposes:
 - **UART serial** -- used for logging and the [[Testing|test harness]]
-- **PIT timer** -- kernel time base
+- **Timer** -- kernel time base (x86_64: LAPIC timer calibrated once against the PIT; riscv64: SBI timer)
