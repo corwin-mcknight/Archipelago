@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import sys
 
 from plume.package import Package
 
@@ -141,7 +142,10 @@ def list_installed_manifests(sysroot: str) -> list[dict]:
             continue
         try:
             manifests.append(read_manifest(os.path.join(mdir, fname)))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            # Skip so one truncated manifest doesn't brick every plume command, but loudly:
+            # this package's files are now invisible to conflict checks and uninstall.
+            print(f"plume: warning: skipping unreadable manifest {fname}: {exc}", file=sys.stderr)
             continue
     return manifests
 

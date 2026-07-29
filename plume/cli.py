@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from plume.config import Config
+from plume.config import Config, is_bare_config_name
 from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_reason, open_line, close_line, break_line
 from plume.repository import load_packages
 from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
@@ -79,7 +79,7 @@ def _config_by_name(name):
     Path separators are rejected so a target name can never escape the config
     directory.
     """
-    if os.sep in name or (os.altsep and os.altsep in name) or name in (os.curdir, os.pardir):
+    if not is_bare_config_name(name):
         return None
     return _find_up(os.path.join("repo", "config", f"{name}.yaml"))
 
@@ -425,14 +425,16 @@ def cmd_test(args):
     print("\n\nRunning tests...\n")
     from plume.env import package_obj_dir
     kernel_pkgs = [p for p in packages if p.name == "kernel" and p.category == "sys"]
-    kernel_elf = os.path.join(package_obj_dir(config, kernel_pkgs[0]), "kernel.elf") if kernel_pkgs else ""
     harness_args = [
         sys.executable, "tools/test-harness.py",
         "--arch", config.get_arch(),
         "--iso", config.get("iso_output"),
-        "--kernel-elf", kernel_elf,
         "--artifacts", os.path.join(config.get("build_dir"), "test-artifacts"),
     ]
+    # Omit --kernel-elf when no kernel package exists so the harness runs its own fallback lookup;
+    # an empty-string Path would resolve to '.' and symbolicate against the working directory.
+    if kernel_pkgs:
+        harness_args.extend(["--kernel-elf", os.path.join(package_obj_dir(config, kernel_pkgs[0]), "kernel.elf")])
     if config.get("qemu"):
         harness_args.extend(["--qemu", config.get("qemu")])
     if config.get("firmware"):

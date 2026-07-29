@@ -22,6 +22,12 @@ PATH_KEYS = [
 NON_BUILD_KEYS = ("qemu", "memory", "image", "board")
 
 
+def is_bare_config_name(name):
+    """True if name is a bare config name -- no path separators, not '.' or '..' --
+    so it can never escape the config directory when joined into a path."""
+    return not (os.sep in name or (os.altsep and os.altsep in name) or name in (os.curdir, os.pardir))
+
+
 class Config:
     """Load a target config from repo/config/<target>.yaml and resolve all paths.
 
@@ -118,7 +124,7 @@ def _load_merged(real_path, _seen=None):
     # A base names a sibling config, never a path: without this the value flows
     # straight into os.path.join, where '../..' escapes the config directory and
     # an absolute path replaces it outright.
-    if os.sep in base_name or (os.altsep and os.altsep in base_name) or os.pardir in base_name.split("."):
+    if not is_bare_config_name(base_name):
         raise ValueError(f"{os.path.basename(real_path)}: base '{base_name}' must name a config, not a path")
 
     base_path = os.path.join(os.path.dirname(real_path), f"{base_name}.yaml")

@@ -587,14 +587,16 @@ def _invert_for_expected_crash(attempt: AttemptLog) -> AttemptLog:
 # ----------------------------------------------------------------------
 # Symbolication
 # ----------------------------------------------------------------------
-def _addr2line(kernel_elf: Path, addrs: List[str]) -> Dict[str, str]:
+def _addr2line(kernel_elf: Optional[Path], addrs: List[str]) -> Dict[str, str]:
     """Resolve hex addresses to 'function at file:line' via llvm-addr2line.
 
     Returns a mapping addr -> resolved string. Missing/failed addresses map to "??".
+    kernel_elf may be None (no build found, or several ambiguous board builds);
+    symbolication is skipped and every address stays "??".
     """
     result: Dict[str, str] = {a: "??" for a in addrs if a}
     addrs = [a for a in addrs if a]
-    if not addrs or not kernel_elf.exists():
+    if not addrs or kernel_elf is None or not kernel_elf.exists():
         return result
     binary = shutil.which("llvm-addr2line") or shutil.which("addr2line")
     if not binary:
@@ -618,7 +620,7 @@ def _pc_key(crash: Crash) -> str:
     return "rip" if "rip" in crash.registers else "pc"
 
 
-def symbolicate_crash(crash: Crash, kernel_elf: Path) -> None:
+def symbolicate_crash(crash: Crash, kernel_elf: Optional[Path]) -> None:
     addrs: List[str] = []
     pc_key = _pc_key(crash)
     pc = crash.registers.get(pc_key)
