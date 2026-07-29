@@ -5,6 +5,7 @@
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/shell/shell.h>
+#include <kernel/time.h>
 
 #include <ktl/maybe>
 #include <ktl/string_view>
@@ -177,6 +178,7 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
     kernel_task->handles().get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
     kernel::platform::timestamp_calibrate();
+    kernel::time::use_timestamp_clock();
     kernel::sched::init(boot_core_index);
 
     kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");

@@ -314,6 +314,22 @@ KTEST_CASE(sched_timestamp_monotonic_and_calibrated) {
     KTEST_EXPECT_TRUE(kernel::arch::timestamp() > a);
 }
 
+KTEST_CASE(time_ns_since_boot_is_highres) {
+    // late_boot adopted the cycle counter via time::use_timestamp_clock(), so ns_since_boot must
+    // advance within a sub-tick window. Spin ~100 us of counter time per round: tick-derived time
+    // reports 0 for at least two of the three rounds (at most one can cross a 1 ms tick boundary),
+    // so every-round advance proves counter resolution. Preemption can only lengthen a round.
+    uint64_t hz = kernel::platform::timestamp_hz();
+    KTEST_EXPECT_TRUE(hz > 0);
+    for (int round = 0; round < 3; ++round) {
+        time_ns_t a    = kernel::time::ns_since_boot();
+        uint64_t start = kernel::arch::timestamp();
+        while (kernel::arch::timestamp() - start < hz / 10000) {}
+        time_ns_t b = kernel::time::ns_since_boot();
+        KTEST_EXPECT_TRUE(b - a >= 90'000);
+    }
+}
+
 namespace {
 volatile int g_acct_phase;
 void acct_thread(void*) {
