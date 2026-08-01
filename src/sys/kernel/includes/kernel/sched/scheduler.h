@@ -23,7 +23,10 @@ bool current_is_idle();
 
 // Create a kernel thread under task zero and make it runnable. name must be a string literal.
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg);
-ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg);
+// ipc_pages sizes the thread's IPC buffer; ignored for threads in the kernel task, which have no
+// address space to map one into. Capped at IPC_BUFFER_MAX_PAGES.
+ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
+                                         size_t ipc_pages = IPC_BUFFER_DEFAULT_PAGES);
 
 void yield();
 // Block the current thread until at least `ticks` kernel ticks have elapsed. The idle thread

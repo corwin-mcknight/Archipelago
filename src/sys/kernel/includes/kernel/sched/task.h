@@ -43,6 +43,16 @@ class Task : public kernel::obj::Object {
     kernel::obj::HandleId owner_handle() const { return m_owner_handle; }
     void set_owner_handle(kernel::obj::HandleId id) { m_owner_handle = id; }
 
+    // IPC-buffer slots in this task's address space. Threads need distinct buffer addresses and
+    // the VMM has no first-fit search, so slots are handed out from a bitmap and returned when the
+    // thread goes away -- a monotonic counter would leak the address space of a task that spawns
+    // and reaps workers over a long life.
+    //
+    // Bookkeeping only: a slot is not reusable until its buffer is also unmapped, which is VMM work
+    // this class deliberately does not do. Use kernel::sched::release_thread_ipc() to do both.
+    ktl::maybe<size_t> acquire_ipc_slot();
+    void release_ipc_slot(size_t slot);
+
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
         return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE, RIGHT_READ);
@@ -55,6 +65,8 @@ class Task : public kernel::obj::Object {
     kernel::mm::vm_aspace* m_aspace      = nullptr;
     task_state m_state                   = task_state::NEW;
     kernel::obj::HandleId m_owner_handle = kernel::obj::HandleId::invalid();
+    // One bit per slot; see IPC_BUFFER_MAX_SLOTS.
+    uint64_t m_ipc_slots                 = 0;
 };
 
 // Task zero. Lazy-created on first use: kernel boot reaches it from obj_init(), host tests

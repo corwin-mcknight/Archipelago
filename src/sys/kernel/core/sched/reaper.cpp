@@ -33,6 +33,10 @@ void reap(ktl::ref<Thread> zombie) {
     // remove_thread is a harmless no-op.
     if (!task) { task = kernel_task(); }
     task->remove_thread(zombie->id());
+    // Return the thread's IPC buffer alongside its kernel stack: both are resources the task holds
+    // on the thread's behalf, and a task that spawns and reaps workers would otherwise run out of
+    // buffer slots (and address space) long before it ran out of anything else.
+    release_thread_ipc(*task, zombie->ipc());
     if (zombie->kstack_phys() != 0) { stack_pool_release(zombie->kstack_phys()); }
     if (task.get() != kernel_task().get() && task->thread_count() == 0) { teardown_user_task(ktl::move(task)); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();

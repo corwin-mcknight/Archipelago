@@ -1,57 +1,52 @@
 #include <kernel/arch.h>
 #include <kernel/config.h>
+#include <kernel/elf_loader.h>
 #include <kernel/log.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/user_task.h>
 #include <std/new.h>
-#include <string.h>
-
-extern uintptr_t g_hhdm_offset;
-extern "C" const char user_payload_start[];
-extern "C" const char user_payload_end[];
 
 namespace kernel::sched {
 
 namespace {
 
-constexpr uintptr_t USER_CODE_VADDR = 0x400000;
+// The stack is the kernel's choice, not the image's: nothing in an ELF says where it goes, and
+// first-fit virtual address search is still a VMM to-do. A segment that reached this far would
+// collide here and be rejected by Region::map rather than silently overlapping.
 constexpr uintptr_t USER_STACK_BASE = 0x800000;
 constexpr size_t USER_STACK_PAGES   = 4;
 constexpr uintptr_t USER_STACK_TOP  = USER_STACK_BASE + USER_STACK_PAGES * KERNEL_MINIMUM_PAGE_SIZE;
 
-[[noreturn]] void user_thread_entry(void*) {
+[[noreturn]] void user_thread_entry(void* entry) {
     // The temporary ref from current() must die before enter_user: the kernel stack is
     // abandoned on exit, so a ref still live here would never run its destructor and
     // would pin the Thread (and its owner Task) forever.
-    uintptr_t kstack_top = current()->kstack_top();
-    kernel::arch::enter_user(USER_CODE_VADDR, USER_STACK_TOP, kstack_top);
-}
-
-ktl::result<ktl::ref<kernel::mm::vmo>> build_code_vmo(size_t& pages_out) {
-    size_t bytes = static_cast<size_t>(user_payload_end - user_payload_start);
-    size_t pages = (bytes + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
-    auto code    = kernel::mm::create_anonymous_vmo(pages);
-    if (!code) { return ktl::err(ktl::errc::oom); }
-    auto committed = code->commit(0, pages);
-    if (committed.is_err()) { return ktl::err(committed.unwrap_err()); }
-    for (size_t page = 0; page < pages; ++page) {
-        auto frame = code->resident_frame(page);
-        if (!frame.has_value()) { return ktl::err(ktl::errc::oom); }
-        size_t offset = page * KERNEL_MINIMUM_PAGE_SIZE;
-        size_t chunk  = bytes - offset < KERNEL_MINIMUM_PAGE_SIZE ? bytes - offset : KERNEL_MINIMUM_PAGE_SIZE;
-        memcpy(reinterpret_cast<void*>(frame.value() + g_hhdm_offset), user_payload_start + offset, chunk);
+    uintptr_t kstack_top = 0;
+    uintptr_t ipc_base   = 0;
+    uintptr_t ipc_size   = 0;
+    {
+        auto self  = current();
+        kstack_top = self->kstack_top();
+        ipc_base   = self->ipc().user_base();
+        ipc_size   = self->ipc().size_bytes();
     }
-    pages_out = pages;
-    return ktl::result<ktl::ref<kernel::mm::vmo>>::ok(ktl::move(code));
+    kernel::arch::enter_user(reinterpret_cast<uintptr_t>(entry), USER_STACK_TOP, kstack_top, ipc_base, ipc_size);
 }
 
 }  // namespace
 
-ktl::result<ktl::ref<Task>> create_user_task(const char* name) {
+ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size) {
     using namespace kernel::mm;
     using namespace kernel::obj;
+
+    auto parsed = kernel::elf::parse_image(elf, elf_size);
+    if (parsed.is_err()) {
+        g_log.warn("task: '{0}' rejected: {1}", name, kernel::elf::to_string(parsed.unwrap_err()));
+        return ktl::err(ktl::errc::invalid_operation);
+    }
+    auto img  = parsed.unwrap();
 
     auto task = ktl::make_ref<Task>();
     if (!task) { return ktl::err(ktl::errc::oom); }
@@ -70,12 +65,8 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name) {
         return ktl::err(error);
     };
 
-    size_t code_pages = 0;
-    auto code         = build_code_vmo(code_pages);
-    if (code.is_err()) { return fail(code.unwrap_err()); }
-    auto mapped = aspace->root().map(USER_CODE_VADDR, code_pages * KERNEL_MINIMUM_PAGE_SIZE, code.unwrap(), 0,
-                                     vm_prot::USER | vm_prot::READ | vm_prot::EXECUTE);
-    if (mapped.is_err()) { return fail(mapped.unwrap_err()); }
+    auto loaded = kernel::elf::map_image(*aspace, elf, elf_size, img);
+    if (loaded.is_err()) { return fail(loaded.unwrap_err()); }
 
     auto stack = create_anonymous_vmo(USER_STACK_PAGES);
     if (!stack) { return fail(ktl::errc::oom); }
@@ -95,7 +86,7 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name) {
     // cleared table would recreate the Task->HandleTable->Task cycle teardown breaks.
     // ponytail: single-core interrupts-off; SMP needs a creation lock or a paused-spawn API.
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    auto thread    = spawn_into(task, name, user_thread_entry, nullptr);
+    auto thread    = spawn_into(task, name, user_thread_entry, reinterpret_cast<void*>(img.entry));
     if (thread.is_err()) {
         kernel::arch::restore_interrupts(flags);
         unregister_task(task->id());

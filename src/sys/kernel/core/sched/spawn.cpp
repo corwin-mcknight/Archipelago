@@ -13,7 +13,8 @@ extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
-ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg) {
+ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
+                                         size_t ipc_pages) {
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
     ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
@@ -28,8 +29,29 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
     }
     thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
 
+    // A thread gets an IPC buffer exactly when its task has an address space to map one into.
+    // Kernel threads have neither, and make no syscalls.
+    if (task->aspace() != nullptr) {
+        auto slot = task->acquire_ipc_slot();
+        if (!slot.has_value()) {
+            stack_pool_release(*phys);
+            return ktl::err(ktl::errc::capacity_exhausted);
+        }
+        auto buffer = ipc_buffer::create(*task->aspace(), ipc_pages, *slot);
+        if (buffer.is_err()) {
+            // Nothing was mapped, so the bit is all there is to give back.
+            task->release_ipc_slot(*slot);
+            stack_pool_release(*phys);
+            return ktl::err(buffer.unwrap_err());
+        }
+        thread->set_ipc(buffer.unwrap());
+    }
+
     auto added = task->add_thread(thread);
     if (added.is_err()) {
+        // The buffer is mapped by now, so this unmaps as well as freeing the slot -- otherwise the
+        // next thread handed this slot would fail to map over it.
+        release_thread_ipc(*task, thread->ipc());
         stack_pool_release(*phys);
         return ktl::err(added.unwrap_err());
     }
@@ -42,6 +64,7 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
     kernel::arch::restore_interrupts(flags);
     if (!ok) {
         task->remove_thread(thread->id());
+        release_thread_ipc(*task, thread->ipc());
         stack_pool_release(*phys);
         return ktl::err(ktl::errc::oom);
     }

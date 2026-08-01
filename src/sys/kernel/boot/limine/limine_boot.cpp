@@ -26,6 +26,13 @@ __attribute__((
 __attribute__((used, section(".limine_requests"))) static volatile struct limine_executable_cmdline_request
     executable_cmdline_request = {.id = LIMINE_EXECUTABLE_CMDLINE_REQUEST, .revision = 0, .response = nullptr};
 
+__attribute__((used, section(".limine_requests"))) static volatile struct limine_module_request module_request = {
+    .id                    = LIMINE_MODULE_REQUEST,
+    .revision              = 0,
+    .response              = nullptr,
+    .internal_module_count = 0,
+    .internal_modules      = nullptr};
+
 __attribute__((used, section(".limine_requests"))) static volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
 
@@ -53,7 +60,12 @@ namespace {
 // warns rather than panicking.
 constexpr size_t MAX_MEMORY_RANGES = 128;
 
+// Modules are named in the boot configuration, so the count is bounded by what a human wrote.
+// Overflow drops the tail with a warning rather than panicking, matching the memmap.
+constexpr size_t MAX_MODULES       = 8;
+
 memory_range g_ranges[MAX_MEMORY_RANGES];
+boot_module g_modules[MAX_MODULES];
 boot_info g_info   = {};
 bool g_info_cached = false;
 
@@ -93,6 +105,33 @@ void translate_memmap() {
     g_info.memory_map_count = count;
 }
 
+// Limine's module strings and paths live in bootloader-reclaimable memory, which classify() sends
+// to memory_kind::OTHER and never hands the PMM -- so the pointers stay valid and are stored rather
+// than copied, exactly as the command line is.
+void translate_modules() {
+    if (module_request.response == nullptr) { return; }
+
+    size_t count = 0;
+    for (uint64_t i = 0; i < module_request.response->module_count; i++) {
+        const auto* file = module_request.response->modules[i];
+        if (file == nullptr || file->address == nullptr) { continue; }
+        if (count == MAX_MODULES) {
+            g_log.warn("boot: more than {0} modules; ignoring the remainder", MAX_MODULES);
+            break;
+        }
+        // An untagged module has no role to answer to, so it is carried with an empty role and
+        // simply never matches a lookup.
+        g_modules[count++] = {
+            .role = file->string != nullptr ? file->string : "",
+            .data = file->address,
+            .size = static_cast<size_t>(file->size),
+        };
+    }
+
+    g_info.modules      = g_modules;
+    g_info.module_count = count;
+}
+
 // The MP info struct names its hardware id per architecture (lapic_id, hartid).
 uint64_t hw_id_of(const struct limine_mp_info* cpu) {
 #if defined(__x86_64__)
@@ -130,6 +169,7 @@ const boot_info& collect() {
     if (hhdm_request.response != nullptr) { g_info.physmap_base = hhdm_request.response->offset; }
 
     translate_memmap();
+    translate_modules();
 
     if (executable_file_request.response != nullptr && executable_file_request.response->executable_file != nullptr) {
         g_info.kernel_elf      = executable_file_request.response->executable_file->address;

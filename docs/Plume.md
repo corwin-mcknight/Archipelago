@@ -26,6 +26,8 @@ A package that compiles board facts in declares `varies_by: ["board"]` and build
 | `boot/limine-10.0`       | Limine boot binaries                      |
 | `boot/limine-config-1.0` | Limine bootloader configuration           |
 | `sys/kernel-0.0.1`       | The Archipelago kernel                    |
+| `sys/kernel-headers-0.0.1` | Public kernel headers (user/kernel ABI) |
+| `sys/init-0.0.1`         | The first user program                    |
 | `sys/kernel-src-0.0.1`   | Kernel source archive                     |
 
 The `@system` package set (`repo/sets/system`) includes all packages needed for a bootable image.
@@ -61,10 +63,14 @@ For `make install`:
 2. boot/limine-10.0         (depends on limine-tools)
 3. boot/limine-config-1.0   (no deps)
 4. sys/kernel-0.0.1          (depends on limine, limine-config)
-5. sys/kernel-src-0.0.1      (no deps)
+5. sys/kernel-headers-0.0.1  (no deps)
+6. sys/init-0.0.1            (depends on kernel-headers)
+7. sys/kernel-src-0.0.1      (no deps)
 ```
 
 Steps that don't depend on each other can build in parallel with `-j`.
+
+A package may compile against its dependencies' installed files. Building commits each package into the sysroot as soon as it is done -- built or already current -- so by the time a dependent runs, everything it depends on is in `$(SYSROOT)`. That is what lets `sys/init` build against the headers `sys/kernel-headers` installs to `/usr/include`, exactly as any other consumer of that ABI would. The later install pass then has nothing left to do for those packages.
 
 ### Build Environment
 Each package build receives environment variables:

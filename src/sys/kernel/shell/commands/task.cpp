@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/arch.h>
+#include <kernel/boot.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
@@ -25,7 +26,14 @@ const char* state_name(kernel::sched::task_state state) {
 void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     using namespace kernel::sched;
     if (argc >= 2 && argv[1] == "demo") {
-        auto created = create_user_task("udemo");
+        // Missing module and unloadable image are distinct failures: one means the boot image is
+        // wrong, the other means the binary is. The loader logs which rejection it was.
+        const auto* module = kernel::boot::find_module("init");
+        if (module == nullptr) {
+            output.print("task: no 'init' module in the boot image\n");
+            return;
+        }
+        auto created = create_user_task("udemo", module->data, module->size);
         if (created.is_err()) {
             output.print("task: create failed\n");
             return;

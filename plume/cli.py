@@ -12,7 +12,7 @@ from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_
 from plume.repository import load_packages
 from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
 from plume.builder import (
-    build_package, install_package, uninstall_package, clean_package,
+    build_package, install_package, uninstall_package, clean_package, ensure_installed,
     build_needed, install_needed, build_log_path,
 )
 from plume.image import assemble_iso
@@ -211,6 +211,10 @@ def _sequential_run(ordered, requested_names, show_all, config, args, action, ac
         force = force_all if target else False
         reason = needed(config, pkg)
         if not force and reason is None:
+            # Already current, but its dependents build against the sysroot, so it still has to
+            # be in there. install_package commits on its own; only the build phase needs this.
+            if action == build_package:
+                ensure_installed(config, pkg)
             continue
         verbose = args.verbose if target else False
         if target:
@@ -221,6 +225,8 @@ def _sequential_run(ordered, requested_names, show_all, config, args, action, ac
             _pkg_line_start(dim(f"  dep {pkg}"), False)
         ok, elapsed = action(config, pkg, verbose=verbose, force=force, **action_kwargs)
         if ok:
+            if action == build_package:
+                ensure_installed(config, pkg)
             _pkg_line_finish(elapsed, verbose, reason)
         elif keep_going:
             dead.add(pkg.full_name)

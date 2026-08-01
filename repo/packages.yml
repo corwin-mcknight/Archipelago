@@ -33,6 +33,18 @@ sys/kernel-0.0.1:
     - "boot/limine-10.0"
     - "boot/limine-config-1.0"
 
+sys/kernel-headers-0.0.1:
+  description: "Public kernel headers (user/kernel ABI)"
+  supports_live_sources: true
+  live_source_path: "sys/kernel"
+
+sys/init-0.0.1:
+  description: "The first user program"
+  supports_live_sources: true
+  live_source_path: "sys/init"
+  dependencies:
+    - "sys/kernel-headers-0.0.1"
+
 sys/kernel-src-0.0.1:
   description: "Kernel source archive"
   supports_live_sources: true

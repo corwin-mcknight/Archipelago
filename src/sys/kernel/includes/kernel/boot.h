@@ -19,6 +19,19 @@ struct memory_range {
     memory_kind kind;
 };
 
+// A file the boot protocol loaded alongside the kernel. `role` is what the boot configuration
+// tagged it with, not its filename, so the kernel asks for what it needs ("init") rather than
+// where it happens to live -- renaming or moving the file cannot break boot.
+//
+// Module bytes are classified memory_kind::KERNEL, so they stay wired and remain readable for the
+// life of the system. Nothing reclaims them yet; the address and length here are what a future
+// initrd path needs to hand the page-aligned interior back to the PMM once it is done with it.
+struct boot_module {
+    const char* role;
+    const void* data;
+    size_t size;
+};
+
 // Everything the arch-neutral boot path needs from the boot protocol. Fields a
 // protocol could not supply are zero or null; the consumer decides whether that
 // is fatal, which is why collect() itself never panics.
@@ -32,6 +45,9 @@ struct boot_info {
     size_t kernel_elf_size;
     // Space-delimited kernel command line, or null if the protocol supplied none.
     const char* cmdline;
+    // Files the protocol loaded alongside the kernel. Empty when it loaded none or supports none.
+    const boot_module* modules;
+    size_t module_count;
     // True when the paging mode the port's paging code assumes is in effect
     // (Sv48 on riscv64; always true on x86_64, where long mode fixes the walk).
     bool paging_mode_ok;
@@ -47,6 +63,10 @@ struct boot_info {
 // BOOT variable. Caches on first call, so callers may invoke it in any order and as
 // often as they like. Never panics -- absent data is reported as zero or null fields.
 const boot_info& collect();
+
+// The module tagged with `role`, or null if the protocol loaded no such module. Protocol-neutral:
+// a plain search over boot_info::modules.
+const boot_module* find_module(const char* role);
 
 // Hardware id (x86_64 LAPIC id, riscv64 hartid) of the CPU at dense list
 // position `index` in the protocol's CPU list; requires index < cpu_count.

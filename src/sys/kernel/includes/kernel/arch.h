@@ -46,7 +46,11 @@ uint64_t timestamp();
 /// Publish the current kernel stack top for user-to-kernel transitions.
 void set_kernel_stack(uintptr_t top);
 /// Enter user mode at entry with the supplied user and kernel stacks. Never returns.
-[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top);
+// Drops to user mode at `entry`. The thread's IPC buffer base and size arrive in the first two
+// argument registers, which is how a thread learns where its buffer is -- no address is baked into
+// the ABI, so user-space ASLR can move it later without an ABI break.
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top, uintptr_t ipc_base,
+                             uintptr_t ipc_size);
 
 }  // namespace kernel::arch
 

@@ -38,6 +38,9 @@ ktl::result<void> Task::add_thread(ktl::ref<Thread> thread) {
 }
 
 void Task::remove_thread(kernel::obj::ObjectId thread_id) {
+    // The thread's IPC slot is NOT reclaimed here. Freeing it means unmapping the buffer, which is
+    // VMM work, and this file is linked by the host test tier as pure bookkeeping. Callers pair
+    // this with release_thread_ipc() -- see reaper.cpp and spawn.cpp.
     kernel::synchronization::lock_guard guard(m_lock);
     for (size_t i = 0; i < m_threads.size(); ++i) {
         if (m_threads[i]->id() == thread_id) {
@@ -45,6 +48,23 @@ void Task::remove_thread(kernel::obj::ObjectId thread_id) {
             return;
         }
     }
+}
+
+ktl::maybe<size_t> Task::acquire_ipc_slot() {
+    kernel::synchronization::lock_guard guard(m_lock);
+    for (size_t slot = 0; slot < IPC_BUFFER_MAX_SLOTS; ++slot) {
+        uint64_t bit = uint64_t{1} << slot;
+        if ((m_ipc_slots & bit) == 0) {
+            m_ipc_slots |= bit;
+            return slot;
+        }
+    }
+    return ktl::nothing;
+}
+
+void Task::release_ipc_slot(size_t slot) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    m_ipc_slots &= ~(uint64_t{1} << slot);
 }
 
 size_t Task::thread_count() {

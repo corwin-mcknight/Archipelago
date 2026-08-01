@@ -88,7 +88,9 @@ extern "C" void riscv_trap_handler(register_frame_t* regs) {
 
     constexpr uint64_t CAUSE_ECALL_U = 8;
     if (regs->scause == CAUSE_ECALL_U) {
-        regs->a0 = syscall_dispatch(regs->a7, regs->a0);
+        // User ABI: a7 = number, a0..a5 = args. The trap frame already saves them all, and riscv64
+        // has enough argument registers to pass every one of them plus the number.
+        regs->a0 = syscall_dispatch(regs->a7, regs->a0, regs->a1, regs->a2, regs->a3, regs->a4, regs->a5);
         regs->sepc += 4;
         return;
     }

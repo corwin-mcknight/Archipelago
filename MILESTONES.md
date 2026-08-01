@@ -1,7 +1,7 @@
 # MILESTONES
 
 ## Milestone 1 -- User-mode Hello World
-Task lifecycle, per-task address spaces, privilege transitions, `yield`, and `exit` are implemented on x86_64 and riscv64 using an embedded validation payload. ELF loading, serial output, and handle-based operation dispatch remain to complete this milestone.
+Task lifecycle, per-task address spaces, privilege transitions, `yield`, `exit`, and ELF loading are implemented on x86_64 and riscv64. The first user program is a real binary (`sys/init`), loaded from the boot image by the kernel's ELF loader. User programs write through a per-thread IPC buffer, so no user pointer crosses the syscall boundary. Handle-based operation dispatch remains to complete this milestone.
 
 An initial user program is loaded and run by the kernel.
 It outputs "hello world" to the serial console via a syscall.
@@ -45,7 +45,9 @@ Triggered on syscall entry/exit and on scheduler preemption.
 
 #### Serial Write Syscall
 The one syscall the hello world program actually calls.
-Takes a buffer and length, writes to the UART.
+Takes an offset and length into the calling thread's IPC buffer and writes those bytes out.
+No pointer crosses the syscall boundary: the buffer is the only memory a syscall reads from its caller,
+and the kernel resolved its frames when the thread was created.
 
 #### Scheduler
 Round-robin scheduling across runnable threads.

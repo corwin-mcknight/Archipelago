@@ -34,6 +34,7 @@
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
 - Implement NUMA awareness and reserved region handling.
 - Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
+- Boot modules are never reclaimed. They are classified `KERNEL` (wired) because Limine reports the kernel image and every module under one memmap type, so a module range is not distinguishable from the memmap alone. `boot_info::modules` carries each module's address and size, which is what a future initrd path needs to hand the page-aligned interior to `pmm::add_region()` once it has consumed it; a `memory_kind::MODULE` should land with that reclaim path rather than before it.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - VMM follow-ups:
@@ -57,22 +58,35 @@
 - IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 
 ## Handles & Syscalls
+- Implement handle-based operation dispatch -- the last item in Milestone 1. The pipeline is handle lookup (with generation-counter validation) then a rights check then a kernel-internal handler; OTPs and server forwarding are explicitly out of scope for the milestone. Its first consumer is a task's own self-handles, which creation already installs with genuinely different rights (task: `RIGHT_READ | RIGHT_WRITE`; thread: `RIGHT_READ | RIGHT_WAIT`), so no new object type is needed and the rejection case is easy to reach by asking for a right the handle does not carry. Notably not the debug `write`, which stays a non-handle syscall with no object behind it.
 - Implement handle transfer between tables for cross-process capability passing.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
-- Add user-pointer copy-in/copy-out before the first buffer-taking syscall.
+- Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
+    - Copy-out (kernel to user) does not exist; nothing returns data yet. It is the same page walk in the other direction.
+    - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
+    - Buffers occupy fixed slots in a reserved address-space region because the VMM has no first-fit search; 64 slots per task, one bitmap word. Revisit with first-fit.
+    - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
+- Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
 ## Task & Thread Lifecycle
 - Terminate only the faulting user task for unresolved user-mode faults; the current path panics the kernel until task-kill machinery exists.
 - Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
-- Implement the ELF loader; fixed embedded payload addresses currently exercise the user-mode transition and lifecycle.
+- Extract the userspace runtime once a second user program exists. `src/sys/init/` currently owns `_start` (per arch), the syscall wrappers, the linker script, and its freestanding compile flags; each exists once, so factoring now would build a library with one caller. The second program is the trigger, and the thing to extract is a C runtime -- `_start`, syscall stubs, linker script -- as a package installing headers and a static archive next to `sys/kernel-headers`, not a libc. Nothing needs malloc, stdio, string, or locale, and naming it `libc` invites someone to supply them. Initrd will likely reshape userspace anyway, so committing late is cheaper than committing now.
+- ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):
+    - No `ET_DYN`/PIE support, which is the prerequisite for user-space ASLR; relocation processing is a milestone of its own.
+    - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.
+    - `MAX_SEGMENTS` is a fixed 8, chosen for static binaries; a real toolchain image with more loadable segments would be refused.
+    - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image; first-fit virtual address search is a VMM to-do.
+    - `PT_GNU_STACK` is ignored -- the stack is mapped `READ|WRITE` unconditionally.
 - Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
 
 ## IPC & Services
 - Implement the message passing/channel API with capability-aware routing per the existing design in `docs/Design/IPC Primitives.md` (design is written; implementation is open).
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - Define service discovery, registration, and policy enforcement for core daemons.
+- Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.
 
 ## Storage & Filesystem
 - Implement the package store mount path and signed read-only root filesystem driver.
@@ -103,6 +117,7 @@
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/apic.cpp` (LAPIC timer), and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience
+- Plume decides a package is installed from world membership plus an installed manifest newer than the build stamp, so files removed from the sysroot behind its back are never noticed: deleting `boot/kernel.elf` or `usr/include/abi/` leaves `plume build`/`install` reporting nothing to do, and the ISO is assembled without them. Verifying the manifest's files still exist would close it, at the cost of stat-ing every installed file on each invocation.
 - Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).
 - Expand the Debugging doc with a concrete GDB/QEMU remote-attach walkthrough (stub port, symbol loading, break-on-entry); `make clangd` already exists.
 - Kernel shell enhancements:

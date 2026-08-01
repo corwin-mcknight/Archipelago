@@ -73,6 +73,15 @@ bool resolve_shell_boot() {
 
 }  // namespace
 
+const boot_module* find_module(const char* role) {
+    if (role == nullptr) { return nullptr; }
+    const boot_info& info = collect();
+    for (size_t i = 0; i < info.module_count; i++) {
+        if (ktl::string_view(info.modules[i].role) == ktl::string_view(role)) { return &info.modules[i]; }
+    }
+    return nullptr;
+}
+
 void resolve_hhdm() {
     g_hhdm_offset = collect().physmap_base;
     if (g_hhdm_offset == 0) { panic("bootloader supplied no physical map base -- direct map unavailable"); }

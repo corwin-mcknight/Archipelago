@@ -17,20 +17,25 @@ namespace kernel::arch {
 // The trap return path republishes the frame's kernel stack top in sscratch.
 void set_kernel_stack(uintptr_t) {}
 
-[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top) {
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top, uintptr_t ipc_base,
+                             uintptr_t ipc_size) {
     disable_interrupts();
     constexpr uint64_t SSTATUS_SPP  = 1ull << 8;
     constexpr uint64_t SSTATUS_SPIE = 1ull << 5;
+    // a0/a1 carry the IPC buffer, matching the argument registers so startup code reads them as
+    // ordinary function arguments. Written last so nothing below clobbers them.
     asm volatile(
         "csrw sscratch, %0\n"
         "csrc sstatus, %1\n"
         "csrs sstatus, %2\n"
         "csrw sepc, %3\n"
         "mv sp, %4\n"
+        "mv a0, %5\n"
+        "mv a1, %6\n"
         "sret\n"
         :
-        : "r"(kstack_top), "r"(SSTATUS_SPP), "r"(SSTATUS_SPIE), "r"(entry), "r"(user_sp)
-        : "memory");
+        : "r"(kstack_top), "r"(SSTATUS_SPP), "r"(SSTATUS_SPIE), "r"(entry), "r"(user_sp), "r"(ipc_base), "r"(ipc_size)
+        : "a0", "a1", "memory");
     __builtin_unreachable();
 }
 

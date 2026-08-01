@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_TESTING
 
+#include <kernel/boot.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
@@ -12,8 +13,15 @@ using namespace kernel::sched;
 
 KTEST_MODULE("kernel/task");
 
+// End to end over the real boot path: the init module is loaded from the boot image by the ELF
+// loader, runs in its own address space, and exits. A missing module fails the test loudly rather
+// than silently skipping, because an image without init is a broken image.
 KTEST_CASE_INTEGRATION(user_task_lifecycle) {
-    auto created = create_user_task("utest");
+    const auto* module = kernel::boot::find_module("init");
+    KTEST_REQUIRE_TRUE(module != nullptr);
+    KTEST_REQUIRE_TRUE(module->size > 0);
+
+    auto created = create_user_task("utest", module->data, module->size);
     KTEST_REQUIRE_TRUE(created.is_ok());
     ktl::ref<Task> task = created.unwrap();
     KTEST_EXPECT_TRUE(task->state() == task_state::RUNNING);

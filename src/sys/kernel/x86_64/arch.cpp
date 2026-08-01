@@ -36,17 +36,22 @@ void syscall_init() {
     x86::wrmsr(MSR_FMASK, (1u << 8) | (1u << 9) | (1u << 10) | (1u << 18));
 }
 
-[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top) {
+[[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top, uintptr_t ipc_base,
+                             uintptr_t ipc_size) {
     disable_interrupts();
     set_kernel_stack(kstack_top);
+    // rdi/rsi carry the IPC buffer, matching the SysV argument registers so startup code reads them
+    // as ordinary function arguments. SYSRET takes the entry point from rcx and RFLAGS from r11.
     asm volatile(
+        "movq %2, %%rdi\n"
+        "movq %3, %%rsi\n"
         "movq %0, %%rcx\n"
         "movq $0x202, %%r11\n"
         "movq %1, %%rsp\n"
         "sysretq\n"
         :
-        : "r"(entry), "r"(user_sp)
-        : "rcx", "r11", "memory");
+        : "r"(entry), "r"(user_sp), "r"(ipc_base), "r"(ipc_size)
+        : "rcx", "r11", "rdi", "rsi", "memory");
     __builtin_unreachable();
 }
 

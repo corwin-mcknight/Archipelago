@@ -142,6 +142,28 @@ def _commit_to_sysroot(package: Package, d_path: str, sysroot: str):
         World(sysroot).add(package.qualified_name)
 
 
+def ensure_installed(config: Config, package: Package) -> None:
+    """Make a package's files present in the sysroot as soon as it is done building.
+
+    The build phase runs over every package before the install phase runs over any, so without
+    this a package could not compile against a dependency's installed files: $(SYSROOT) would
+    still be empty when it ran. Build order is already topological, so committing a package the
+    moment it is done is enough for its dependents to find it.
+
+    Called for every package the build phase finishes with, built or skipped as already current,
+    so a package plume does not consider installed gets committed even when it needed no rebuild.
+    Idempotent and cheap: a package whose current build is already installed does nothing. Note
+    that "already installed" means world membership and a manifest newer than the build stamp --
+    files deleted from the sysroot behind plume's back are not noticed here, same as anywhere
+    else. Build tools are exempt; they install to TOOL_INSTALL from their own stages.
+    """
+    if package.is_build_tool or install_needed(config, package) is None:
+        return
+    d_path = get_build_env(config, package)["D"]
+    if os.path.isdir(d_path) and os.listdir(d_path):
+        _commit_to_sysroot(package, d_path, config.get("sysroot"))
+
+
 def install_package(
     config: Config, package: Package,
     verbose: bool = False, force: bool = False,

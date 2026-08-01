@@ -35,16 +35,14 @@ size_t g_entry_count = 0;
 size_t g_string_used = 0;
 bool g_initialized   = false;
 
-// The ELF64 types, constants, and the pure locate_symbol_tables() parser now live in
-// <kernel/elf_symbols.h> (namespace detail) so the host fuzz lane can drive the parser directly.
-using detail::Elf64_Sym;
+// The on-disk ELF64 format lives in <kernel/elf.h>, shared with the user-binary loader. The pure
+// locate_symbol_tables() parser is declared in <kernel/elf_symbols.h> (namespace detail) so the host
+// fuzz lane can drive it directly.
 using detail::symbol_tables;
-
-// True when the half-open region [offset, offset + size) lies fully inside an
-// `elf_size`-byte blob, computed without overflow.
-bool region_in_bounds(uint64_t offset, uint64_t size, size_t elf_size) {
-    return offset <= elf_size && size <= elf_size - offset;
-}
+using elf::Elf64_Ehdr;
+using elf::Elf64_Shdr;
+using elf::Elf64_Sym;
+using elf::region_in_bounds;
 
 // View a NUL-terminated string starting at `s`, bounded by `end` so a missing
 // terminator can never run off the string table. Replaces a hand-rolled strlen.
@@ -101,20 +99,13 @@ maybe<const func_entry&> find_entry(uintptr_t addr) {
 }  // namespace
 
 // Validate the ELF header, then locate .symtab and its associated string table. Every malformed or
-// out-of-bounds field short-circuits to nothing. Declared in <kernel/elf_symbols.h>; uses the
-// file-static region_in_bounds above.
+// out-of-bounds field short-circuits to nothing. Declared in <kernel/elf_symbols.h>.
 namespace detail {
 maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size) {
-    if (elf_data == nullptr || elf_size < sizeof(Elf64_Ehdr)) { return nothing; }
+    const Elf64_Ehdr* hdr = elf::header_of(elf_data, elf_size);
+    if (hdr == nullptr) { return nothing; }
 
     const auto* base = static_cast<const uint8_t*>(elf_data);
-    const auto* hdr  = reinterpret_cast<const Elf64_Ehdr*>(base);
-
-    if (string_view(reinterpret_cast<const char*>(hdr->e_ident), sizeof(kElfMagic)) !=
-        string_view(reinterpret_cast<const char*>(kElfMagic), sizeof(kElfMagic))) {
-        return nothing;
-    }
-    if (hdr->e_ident[4] != kElfClass64) { return nothing; }
     if (hdr->e_shoff == 0 || hdr->e_shentsize < sizeof(Elf64_Shdr)) { return nothing; }
     if (!region_in_bounds(hdr->e_shoff, static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize, elf_size)) {
         return nothing;
@@ -125,8 +116,8 @@ maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size)
     const uint8_t* sections_bytes = base + hdr->e_shoff;
     if (reinterpret_cast<uintptr_t>(sections_bytes) % alignof(Elf64_Shdr) != 0) { return nothing; }
     const auto* sections = reinterpret_cast<const Elf64_Shdr*>(sections_bytes);
-    auto sym_sh =
-        ktl::find_if(sections, sections + hdr->e_shnum, [](const Elf64_Shdr& sh) { return sh.sh_type == kShtSymtab; });
+    auto sym_sh          = ktl::find_if(sections, sections + hdr->e_shnum,
+                                        [](const Elf64_Shdr& sh) { return sh.sh_type == elf::SHT_SYMTAB; });
     if (!sym_sh) { return nothing; }
     if (sym_sh->sh_entsize < sizeof(Elf64_Sym)) { return nothing; }
     if (!region_in_bounds(sym_sh->sh_offset, sym_sh->sh_size, elf_size)) { return nothing; }
@@ -157,7 +148,7 @@ void init(const void* elf_data, size_t elf_size) {
 
     // A usable function symbol: function-typed, non-empty extent, in-bounds name.
     auto is_function_symbol = [&](const Elf64_Sym& s) {
-        return (s.st_info & 0xf) == detail::kSttFunc && s.st_size != 0 && s.st_name < tables->strtab_size;
+        return (s.st_info & 0xf) == elf::STT_FUNC && s.st_size != 0 && s.st_name < tables->strtab_size;
     };
 
     for (const Elf64_Sym& s : ktl::span(tables->syms, tables->count) | ktl::views::filter(is_function_symbol)) {

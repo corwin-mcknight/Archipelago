@@ -3,7 +3,7 @@
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from plume.builder import build_package, build_needed
+from plume.builder import build_package, build_needed, ensure_installed
 from plume.config import Config
 from plume.output import bold, cyan, green, red, dim, fmt_duration, fmt_reason
 from plume.package import Package
@@ -60,7 +60,12 @@ def parallel_build(
                         dead.add(pkg.full_name)
                         _print_sync(dim(f"  skipped {pkg} (dependency failed)"))
                         sorter.done(pkg)
-                    elif (failed and not keep_going) or (not force and reason is None):
+                    elif failed and not keep_going:
+                        sorter.done(pkg)
+                    elif not force and reason is None:
+                        # Nothing to build, but dependents released by done() compile against the
+                        # sysroot, so make sure this package is actually in it first.
+                        ensure_installed(config, pkg)
                         sorter.done(pkg)
                     else:
                         fut = executor.submit(build_package, config, pkg, verbose=False, force=force)
@@ -73,6 +78,11 @@ def parallel_build(
                 pkg, reason = pending.pop(fut)
                 ok, elapsed = fut.result()
                 timings.append((str(pkg), elapsed))
+                # Commit before done() releases dependents, and on this thread rather than in a
+                # worker: the world file and installed manifests are shared state, and keeping
+                # every write here means -j needs no lock around them.
+                if ok:
+                    ensure_installed(config, pkg)
                 sorter.done(pkg)
                 if ok:
                     idx += 1

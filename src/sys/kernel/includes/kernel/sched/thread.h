@@ -4,6 +4,7 @@
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
+#include <kernel/sched/ipc_buffer.h>
 #include <kernel/synchronization/execution_context.h>
 
 #include <ktl/ref>
@@ -91,6 +92,11 @@ class Thread : public kernel::obj::Object {
     uint64_t ready_ts() const { return m_ready_ts; }
     void set_ready_ts(uint64_t ts) { m_ready_ts = ts; }
 
+    // The only memory a syscall reads from this thread. Invalid for kernel threads, which have no
+    // address space to map one into and make no syscalls.
+    const ipc_buffer& ipc() const { return m_ipc; }
+    void set_ipc(ipc_buffer buffer) { m_ipc = ktl::move(buffer); }
+
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
         return registry.register_type(TYPE_ID, "thread", RIGHT_READ | RIGHT_WAIT | RIGHT_DUPLICATE,
@@ -108,6 +114,7 @@ class Thread : public kernel::obj::Object {
     uint32_t m_slice = CONFIG_SCHED_TIMESLICE_TICKS;
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
+    ipc_buffer m_ipc;
 #ifndef NDEBUG
     kernel::synchronization::held_lock m_held_locks[CONFIG_LOCKDEP_MAX_HELD] = {};
     size_t m_held_lock_count                                                 = 0;
