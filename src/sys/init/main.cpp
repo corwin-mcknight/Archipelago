@@ -51,6 +51,19 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
     ipc.write(0, first);
     ipc.write(first, second);
 
+    // The self-handles the kernel installed at creation, exercised through the dispatch pipeline.
+    // Structural checks only -- type ids and rights bits are not part of the installed ABI yet, so
+    // assert what the contract does promise: both self-handles resolve, they name objects of
+    // different types, and an operation needing a right they lack (duplicate) is refused.
+    uint64_t task_info   = init::obj_info(abi::syscall::SELF_TASK_HANDLE);
+    uint64_t thread_info = init::obj_info(abi::syscall::SELF_THREAD_HANDLE);
+    bool infos_ok        = !init::is_error(task_info) && !init::is_error(thread_info) &&
+                    (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
+    ipc.print(infos_ok ? "init: self handles ok\n" : "init: SELF HANDLES BROKEN\n");
+
+    uint64_t dup = init::handle_duplicate(abi::syscall::SELF_TASK_HANDLE, ~0ull);
+    ipc.print(init::is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
+
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task.
     volatile char stack_probe[64];
     for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }

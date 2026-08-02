@@ -94,6 +94,8 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
         return fail(thread.unwrap_err());
     }
 
+    // These two inserts into the fresh table ARE the ABI: first-generation slots 0 and 1, which is
+    // what abi::syscall::SELF_TASK_HANDLE and SELF_THREAD_HANDLE promise the initial thread.
     ktl::ref<kernel::obj::Object> self_task_object   = task;
     ktl::ref<kernel::obj::Object> self_thread_object = thread.unwrap();
     auto self_task   = task->handles().insert(ktl::move(self_task_object), RIGHT_READ | RIGHT_WRITE);

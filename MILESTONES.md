@@ -1,7 +1,7 @@
 # MILESTONES
 
 ## Milestone 1 -- User-mode Hello World
-Task lifecycle, per-task address spaces, privilege transitions, `yield`, `exit`, and ELF loading are implemented on x86_64 and riscv64. The first user program is a real binary (`sys/init`), loaded from the boot image by the kernel's ELF loader. User programs write through a per-thread IPC buffer, so no user pointer crosses the syscall boundary. Handle-based operation dispatch remains to complete this milestone.
+Complete. Task lifecycle, per-task address spaces, privilege transitions, `yield`, `exit`, and ELF loading are implemented on x86_64 and riscv64. The first user program is a real binary (`sys/init`), loaded from the boot image by the kernel's ELF loader. User programs write through a per-thread IPC buffer, so no user pointer crosses the syscall boundary. Handle syscalls run the three-path pipeline -- handle lookup with generation validation, rights check, kernel-internal handler -- against the task's self-handles installed at creation.
 
 An initial user program is loaded and run by the kernel.
 It outputs "hello world" to the serial console via a syscall.

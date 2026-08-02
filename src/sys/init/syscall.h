@@ -58,6 +58,15 @@ inline void exit() { syscall1(abi::syscall::SYS_EXIT, 0); }
 inline void yield() { syscall1(abi::syscall::SYS_YIELD, 0); }
 inline void sleep(uint64_t ticks) { syscall1(abi::syscall::SYS_SLEEP, ticks); }
 
+// Handle operations return a negative error code on failure; see <abi/syscall.h> for the
+// verification pipeline every one of them runs before doing anything.
+inline bool is_error(uint64_t ret) { return static_cast<int64_t>(ret) < 0; }
+inline uint64_t handle_close(uint64_t handle) { return syscall1(abi::syscall::SYS_HANDLE_CLOSE, handle); }
+inline uint64_t handle_duplicate(uint64_t handle, uint64_t rights_mask) {
+    return syscall2(abi::syscall::SYS_HANDLE_DUPLICATE, handle, rights_mask);
+}
+inline uint64_t obj_info(uint64_t handle) { return syscall1(abi::syscall::SYS_OBJ_INFO, handle); }
+
 // This thread's IPC buffer, as handed over at entry. Every program stashes it before doing anything
 // else; there is no way to ask for it again.
 struct ipc_buffer {

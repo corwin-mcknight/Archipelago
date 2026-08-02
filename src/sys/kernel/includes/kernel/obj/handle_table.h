@@ -30,6 +30,13 @@ struct HandleInfo {
     ObjectId object_id;
 };
 
+// What verify() hands back: the object reference plus the rights the handle actually carries, so
+// callers that report or propagate rights need no second lookup.
+struct VerifiedHandle {
+    ktl::ref<Object> object;
+    Rights rights;
+};
+
 class HandleTable {
    public:
     HandleTable() = default;
@@ -47,6 +54,12 @@ class HandleTable {
 
     ktl::result<HandleId> duplicate(HandleId source, Rights rights_mask);
     ktl::result<void> close(HandleId id);
+
+    // The one verification path every handle operation goes through: slot-and-generation lookup,
+    // then type check, then rights check, under a single lock acquisition. Errors come out in that
+    // order (handle_invalid, wrong_type, rights_violation) so a caller learns the first thing wrong
+    // and nothing more. expected_type type_ids::INVALID means any type.
+    ktl::result<VerifiedHandle> verify(HandleId id, Rights required_rights, TypeId expected_type = type_ids::INVALID);
 
     template <typename T> ktl::result<ktl::ref<T>> get(HandleId id, Rights required_rights = 0);
 
@@ -90,12 +103,9 @@ template <typename T, typename... Args> ktl::result<HandleId> HandleTable::empla
 }
 
 template <typename T> ktl::result<ktl::ref<T>> HandleTable::get(HandleId id, Rights required_rights) {
-    kernel::synchronization::lock_guard guard(m_lock);
-    HandleEntry* entry = lookup_entry(id);
-    if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
-    if (entry->object->type_id() != T::TYPE_ID) { return ktl::err(ktl::errc::wrong_type); }
-    if ((entry->rights & required_rights) != required_rights) { return ktl::err(ktl::errc::rights_violation); }
-    return ktl::result<ktl::ref<T>>::ok(ktl::static_ref_cast<T>(entry->object));
+    auto verified = verify(id, required_rights, T::TYPE_ID);
+    if (verified.is_err()) { return ktl::err(verified.unwrap_err()); }
+    return ktl::result<ktl::ref<T>>::ok(ktl::static_ref_cast<T>(verified.unwrap().object));
 }
 
 }  // namespace kernel::obj

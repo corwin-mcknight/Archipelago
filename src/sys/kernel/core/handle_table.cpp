@@ -9,9 +9,14 @@ ktl::result<void> HandleTable::grow() {
     size_t old_size = m_entries.size();
     for (size_t i = 0; i < GROW_BATCH; i++) {
         HandleEntry entry;
-        entry.next_free = m_free_head;
         if (!m_entries.push_back(ktl::move(entry))) { return ktl::err(ktl::errc::oom); }
-        m_free_head = static_cast<int32_t>(old_size + i);
+    }
+    // Chain the new slots so allocation walks them in ascending index order. The order is
+    // load-bearing for a fresh table: the ABI promises the initial thread's self-handles occupy
+    // slots 0 and 1 (abi::syscall::SELF_TASK_HANDLE / SELF_THREAD_HANDLE).
+    for (size_t i = old_size + GROW_BATCH; i-- > old_size;) {
+        m_entries[i].next_free = m_free_head;
+        m_free_head            = static_cast<int32_t>(i);
     }
     return ktl::result<void>::ok();
 }
@@ -113,6 +118,17 @@ ktl::result<void> HandleTable::close(HandleId id) {
     m_free_head      = static_cast<int32_t>(id.index);
 
     return ktl::result<void>::ok();
+}
+
+ktl::result<VerifiedHandle> HandleTable::verify(HandleId id, Rights required_rights, TypeId expected_type) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    HandleEntry* entry = lookup_entry(id);
+    if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
+    if (expected_type != type_ids::INVALID && entry->object->type_id() != expected_type) {
+        return ktl::err(ktl::errc::wrong_type);
+    }
+    if ((entry->rights & required_rights) != required_rights) { return ktl::err(ktl::errc::rights_violation); }
+    return ktl::result<VerifiedHandle>::ok(VerifiedHandle{entry->object, entry->rights});
 }
 
 ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {

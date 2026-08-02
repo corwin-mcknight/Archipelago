@@ -58,7 +58,10 @@
 - IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 
 ## Handles & Syscalls
-- Implement handle-based operation dispatch -- the last item in Milestone 1. The pipeline is handle lookup (with generation-counter validation) then a rights check then a kernel-internal handler; OTPs and server forwarding are explicitly out of scope for the milestone. Its first consumer is a task's own self-handles, which creation already installs with genuinely different rights (task: `RIGHT_READ | RIGHT_WRITE`; thread: `RIGHT_READ | RIGHT_WAIT`), so no new object type is needed and the rejection case is easy to reach by asking for a right the handle does not carry. Notably not the debug `write`, which stays a non-handle syscall with no object behind it.
+- Handle dispatch follow-ups (the pipeline itself landed with Milestone 1: verify-then-execute over a declarative op table, `close`/`duplicate`/`obj_info` as first operations):
+    - Rights bits and type ids are kernel constants, not installed ABI; `obj_info` returns them raw, so a user program can compare but not name them. Move them into `abi/` when a program first needs to request a specific right.
+    - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
+    - The self-handle ABI (first-generation slots 0 and 1) leans on fresh-table allocation order; a bootstrap-message scheme should replace it if the IPC milestone reshapes startup anyway.
 - Implement handle transfer between tables for cross-process capability passing.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.

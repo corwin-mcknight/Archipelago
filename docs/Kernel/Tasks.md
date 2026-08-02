@@ -23,8 +23,18 @@ The initial syscall surface is deliberately small:
 - `yield` (`1`) cooperatively rotates the scheduler run queue.
 - `sleep` (`2`) blocks the calling thread for at least `arg0` kernel ticks.
 - `write` (`3`) emits a range of the calling thread's IPC buffer, given as an offset and a length. It returns the byte count written, or a negative error code.
+- `handle_close` (`4`) closes the handle in `arg0`.
+- `handle_duplicate` (`5`) creates a second handle to `arg0`'s object carrying its rights ANDed with `arg1`; the source handle must carry the duplicate right.
+- `obj_info` (`6`) returns the handle's object type id in the low 32 bits and its rights in the high 32.
 
-The syscall number names the operation. Operations will additionally name the object they act on, through a handle argument, once the dispatch pipeline exists; the number stays the opcode.
+The syscall number names the operation; a handle argument names the object it acts on.
+
+## Handle operations
+Every handle syscall runs the same pipeline before any operation code executes: decode the handle, then a single verification call on the calling task's handle table -- slot-and-generation lookup, type check, rights check, under one lock -- and only then the operation. The pipeline is a table with one row per operation declaring the type it expects and the rights it requires, so an operation cannot be reached without its checks and adding an operation cannot forget them. Failures return a negative error naming the first check that failed: an invalid or stale handle, the wrong type, or a missing right, in that order.
+
+A handle crossing the boundary is a uint64: table slot index in the low 32 bits, generation in the high 32. A closed slot's generation moves, so a stale handle fails the lookup rather than reaching whatever now occupies the slot.
+
+The initial thread's table is created with exactly two entries, promised by the ABI as first-generation slots 0 and 1: a handle to its own task (read and write rights) and a handle to its own thread (read and wait). Neither carries the duplicate right, which makes the rights-rejection path reachable from the first program.
 
 x86_64 enters through SYSCALL/SYSRET. riscv64 enters through `ecall` and returns through `sret`. Both call the shared dispatcher with interrupts disabled on the calling thread's kernel stack. Six argument registers are carried -- as many as either architecture's calling convention provides, so the entry assembly never needs widening again -- though no operation reads more than two yet.
 
