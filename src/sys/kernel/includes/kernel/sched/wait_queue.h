@@ -1,4 +1,3 @@
-// src/sys/kernel/includes/kernel/sched/wait_queue.h
 #pragma once
 
 #include <kernel/panic.h>

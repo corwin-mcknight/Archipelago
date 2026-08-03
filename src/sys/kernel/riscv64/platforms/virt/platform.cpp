@@ -6,7 +6,7 @@
 extern kernel::driver::uart uart;
 
 // Board facts for QEMU's riscv64 `virt` machine. The counter itself (rdtime)
-// is a CPU register and stays in riscv64/arch.cpp; its rate is the board's
+// is a CPU register and lives in riscv64/arch.cpp; its rate is the board's
 // timebase, so it lives here.
 //
 // MMIO devices are reached through the HHDM (the bootloader maps at least the

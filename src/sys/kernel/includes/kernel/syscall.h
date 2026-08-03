@@ -10,7 +10,7 @@ namespace syscall = ::abi::syscall;
 }
 
 // Six argument registers -- as many as either architecture's calling convention carries, so the
-// entry assembly never needs widening again. Two is all any syscall reads today; the rest are
+// entry assembly never needs widening. Two is all any syscall reads today; the rest are
 // carried for the handle-dispatch pipeline, which will prepend a handle to every operation.
 //
 // Note this is a seven-parameter function, one past what SysV passes in registers on x86_64, so a5

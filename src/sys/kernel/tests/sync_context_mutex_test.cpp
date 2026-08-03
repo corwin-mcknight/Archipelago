@@ -56,7 +56,7 @@ KTEST(sync_lockdep_reclaims_identities, "sync/lockdep") {
     lockdep::reset_for_testing();
     // Each mutex (plus its embedded wait-queue spinlock) must return its identity slot on
     // destruction. Churning far past the fixed pool would panic ("capacity exhausted") if slots
-    // leaked, as they did before reclamation existed.
+    // leaked.
     for (size_t i = 0; i < CONFIG_LOCKDEP_MAX_LOCKS * 3; ++i) {
         mutex m;
         lock_guard guard(m);

@@ -32,7 +32,6 @@ void kernel::system_log::flush() {
         uint64_t time_seconds   = (uint64_t)timestamp / 1'000'000'000;
         uint64_t time_ms        = (uint64_t)(timestamp / 1'000'000) % 1'000;
 
-        // Render the front string
         ktl::fixed_string<32> front;
 
         if (m_colors) {

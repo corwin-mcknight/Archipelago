@@ -26,8 +26,7 @@ void operator delete(void* ptr, const std::nothrow_t&) noexcept { operator delet
 void operator delete[](void* ptr, const std::nothrow_t&) noexcept { operator delete(ptr); }
 
 // Aligned forms: required whenever a heap object's alignment exceeds
-// __STDCPP_DEFAULT_NEW_ALIGNMENT__ (e.g. a cache-line-aligned spinlock member). early_heap::alloc
-// already takes an alignment, so these just forward it through.
+// __STDCPP_DEFAULT_NEW_ALIGNMENT__ (e.g. a cache-line-aligned spinlock member).
 void* operator new(size_t size, std::align_val_t align) { return g_early_heap.alloc(size, static_cast<size_t>(align)); }
 
 void* operator new[](size_t size, std::align_val_t align) { return operator new(size, align); }

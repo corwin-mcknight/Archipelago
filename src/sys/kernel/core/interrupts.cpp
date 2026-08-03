@@ -40,8 +40,8 @@ void interrupt_manager::dispatch_interrupt(unsigned int id, register_frame_t* re
     }
 
     const bool ret = (handlers[id].flags & InterruptHandlerEntry::OBJECT_HANDLER_MASK)
-                         ? handlers[id].handler.object->handle_interrupt(registers)  // Object handler
-                         : handlers[id].handler.function(registers);                 // Function handler
+                         ? handlers[id].handler.object->handle_interrupt(registers)
+                         : handlers[id].handler.function(registers);
 
     if (!ret) { g_log.error("Interrupt 0x{0:x} was not handled successfully", id); }
 }

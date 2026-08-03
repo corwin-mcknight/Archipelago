@@ -240,7 +240,7 @@ KTEST(ktl_result_errc_default, "ktl/result") {
     ktl::result<void> fail = ktl::err(ktl::errc::oom);
     KTEST_EXPECT_ALL(fail.is_err(), fail.unwrap_err() == ktl::errc::oom);
 
-    // errc preserves the retired RESULT_* numeric space for log continuity.
+    // errc values are pinned (inheriting the RESULT_* numbering) so old log output stays decodable.
     KTEST_EXPECT_EQUAL(static_cast<int>(ktl::errc::oom), -4);
     KTEST_EXPECT_EQUAL(static_cast<int>(ktl::errc::registry_full), -9);
 }

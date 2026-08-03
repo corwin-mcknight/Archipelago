@@ -80,13 +80,13 @@
                           kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV | kernel::testing::KTEST_FLAG_EXPECTS_CRASH)
 
 // The expression-capturing EXPECT / REQUIRE live in <kernel/testing/expect.h> and route through
-// kernel::testing::report_assertion (declared above, defined per-backend). The legacy KTEST_* macros
+// kernel::testing::report_assertion (declared above, defined per-backend). The KTEST_* macros
 // below are thin aliases over them, so a test written in either style shares one backend and runs on
 // either tier unchanged.
 #include <kernel/testing/expect.h>
 
 // Bare-condition checks wrap the whole expression in parentheses so it is taken as a single boolean
-// (unary) check. This preserves legacy behaviour and stays valid for conditions containing && / ||,
+// (unary) check. The wrapping also keeps conditions containing && / || valid,
 // which the raw decomposer deliberately rejects. The _EQUAL / _NOT_EQUAL forms expose the top-level
 // comparison to the decomposer so both operand values are captured in the failure record.
 #define KTEST_EXPECT(condition) EXPECT((condition))

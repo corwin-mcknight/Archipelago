@@ -16,7 +16,8 @@ extern "C" void __cxa_atexit(void (*f)(void*), void* obj, void* d) {
     (void)d;
 }
 
-// Define cxa_pure_virtual to prevent undefined reference errors
+// Vtables of abstract classes reference __cxa_pure_virtual; a call lands here only through a
+// partially-constructed (or already-destroyed) object.
 extern "C" [[noreturn]] void __cxa_pure_virtual() {
     g_log.error("Pure virtual function called");
     hcf();

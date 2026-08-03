@@ -258,7 +258,7 @@ KTEST_CASE(ktl_deque_index_across_blocks) {
     dq[static_cast<size_t>(element_count - 1)] = -7;
     KTEST_EXPECT_EQUAL(const_ref[static_cast<size_t>(element_count - 1)], -7);
 
-    // at() stays the soft bounds-checked API.
+    // at() is the soft bounds-checked accessor: out-of-range returns nothing rather than panicking.
     KTEST_EXPECT_VALUE(dq.at(0), 0);
     KTEST_EXPECT_FALSE(dq.at(static_cast<size_t>(element_count)).has_value());
 }

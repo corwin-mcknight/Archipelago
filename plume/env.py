@@ -33,7 +33,7 @@ def get_build_env(config: Config, package: Package) -> dict:
         f"{package.name}-{package.version}{package.variant_suffix}",
     )
 
-    # ARCH stays bare so package Makefiles can keep matching on it directly
+    # ARCH is the bare arch so package Makefiles can match on it directly
     # (ifeq ($(ARCH),riscv64)). BOARD is exported only to packages that declare
     # they vary by board, so a package cannot read it without also getting the
     # per-board workdir and cache entry that make that read correct.

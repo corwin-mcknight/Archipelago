@@ -1,4 +1,3 @@
-// src/sys/kernel/includes/kernel/obj/semaphore.h
 #pragma once
 
 #include <kernel/obj/object.h>
@@ -10,7 +9,7 @@
 namespace kernel::obj {
 
 // Counting semaphore as a kernel object: acquire() blocks the calling thread on the object's
-// waiter queue. The spin-wait kernel::synchronization::semaphore remains for pre-scheduler code.
+// waiter queue. Pre-scheduler code uses the spin-wait kernel::synchronization::semaphore instead.
 class Semaphore : public Object {
    public:
     DECLARE_OBJECT_TYPE(Semaphore, type_ids::SEMAPHORE)

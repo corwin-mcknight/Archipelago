@@ -15,8 +15,8 @@ KTEST_MODULE("x86/cpu");
 // rather than used as a subscript. After boot, every core in [0, min(cpu_count, CONFIG_MAX_CORES))
 // must be initialized and hold the LAPIC id reported at that same list position.
 //
-// Note: QEMU hands out dense LAPIC ids 0..N-1, so this cannot reproduce the original sparse/>=16-id
-// boot panic; it locks the index<->lapic_id mapping and confirms every core completed
+// Note: QEMU hands out dense LAPIC ids 0..N-1, so sparse ids or ids >= CONFIG_MAX_CORES cannot be
+// exercised here; the test locks the index<->lapic_id mapping and confirms every core completed
 // bring-up. Run under `-smp >1` to exercise the AP startup path as well as the boot processor.
 KTEST_CASE(cpu_smp_cores_initialized) {
     size_t count = kernel::boot::collect().cpu_count;

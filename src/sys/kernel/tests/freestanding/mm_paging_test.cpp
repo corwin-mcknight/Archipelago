@@ -113,8 +113,8 @@ KTEST_CASE(paging_prot_and_cache_roundtrip) {
 }
 
 // The no-execute bit must round-trip: a mapping without EXECUTE reports no
-// EXECUTE, one with EXECUTE reports it. Proves the old NO_EXECUTE rejection is
-// gone and EFER.NXE is honored. (Regression pin -- kept separate.)
+// EXECUTE, one with EXECUTE reports it -- proving EFER.NXE is enabled and
+// honored end-to-end.
 KTEST_CASE(paging_nx_is_honored) {
     vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());

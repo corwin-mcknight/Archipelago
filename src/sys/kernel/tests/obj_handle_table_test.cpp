@@ -15,7 +15,6 @@ static void handle_table_init() {
     kernel::sched::Task::register_type(g_type_registry).expect("task type registration failed");
 }
 
-// Subsumes the old emplace_valid test -- emplace + get + verify type in one.
 KTEST_CASE(obj_handle_table_emplace_and_get) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
@@ -32,7 +31,6 @@ KTEST_CASE(obj_handle_table_close_invalidates) {
     KTEST_EXPECT_ALL(!table.is_valid(id), table.count() == 0);
 }
 
-// Subsumes old close_destroys_object + emplace_with_args -- both tested destroyed flag.
 KTEST_CASE(obj_handle_table_close_destroys_object) {
     bool destroyed = false;
     HandleTable table;

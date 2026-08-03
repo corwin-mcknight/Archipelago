@@ -11,9 +11,9 @@
 namespace kernel::mm {
 
 struct early_heap_block {
-    size_t size;             // Total size of the block, including this header
-    early_heap_block* next;  // Next block in the list
-    bool free;               // Whether the block is currently free
+    size_t size;  // Total size of the block, including this header
+    early_heap_block* next;
+    bool free;
     uintptr_t payload_base;  // Pointer returned to the caller when allocated
 };
 

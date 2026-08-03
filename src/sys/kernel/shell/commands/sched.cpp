@@ -60,7 +60,7 @@ void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t h
     output.print("{0}", human_str(buf, sizeof(buf), cycles, hz));
 }
 
-// Threads live in their owning task since spawn_into; gather them across every task so
+// Threads are stored in their owning task (spawn_into puts them there); gather across every task so
 // user threads show up alongside kernel ones.
 bool snapshot_all_threads(ktl::vector<ktl::ref<Thread>>& out) {
     ktl::vector<ktl::ref<Task>> tasks;

@@ -45,7 +45,7 @@ using elf::Elf64_Sym;
 using elf::region_in_bounds;
 
 // View a NUL-terminated string starting at `s`, bounded by `end` so a missing
-// terminator can never run off the string table. Replaces a hand-rolled strlen.
+// terminator can never run off the string table.
 string_view bounded_view(const char* s, const char* end) {
     string_view full(s, static_cast<size_t>(end - s));
     size_t nul = full.find('\0');

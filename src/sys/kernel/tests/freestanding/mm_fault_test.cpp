@@ -145,8 +145,8 @@ KTEST_CASE_INTEGRATION(fault_demand_paging_story) {
     }
 }
 
-// A fault outside any binding must keep crash-dumping exactly as before the
-// resolver existed (the harness inverts the outcome: crash = pass).
+// A fault outside any binding must not be resolved by the demand-paging path --
+// it must still crash-dump (the harness inverts the outcome: crash = pass).
 KTEST_CASE_CRASH(fault_outside_binding_still_crashes) {
     volatile int* p = reinterpret_cast<int*>(0x20000000000);  // 2 TiB: canonical, unmapped, no binding
     *p              = 0;

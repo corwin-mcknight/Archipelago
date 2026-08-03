@@ -29,7 +29,6 @@ template <typename T, size_t N> class static_array {
 
     void copy(T* buf, size_t n) {
         if (n > N) {
-            // We can't copy more than N elements...
             // TODO: Assert a warning here.
             n = N;
         }

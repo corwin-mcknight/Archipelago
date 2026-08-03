@@ -184,9 +184,9 @@ void kernel::testing::abort(unsigned char exit_code) {
 
 // Assertion backend.
 //
-// The legacy KTEST_* assertion macros are now thin aliases over the expression-capturing EXPECT/REQUIRE
+// The KTEST_* assertion macros are thin aliases over the expression-capturing EXPECT/REQUIRE
 // machinery (see <kernel/testing/expect.h> and <kernel/testing/testing.h>), so the single sink below
-// serves every assertion on this tier -- there are no longer per-type ktest_expect_equal overloads.
+// serves every assertion on this tier.
 
 // Backend for the expression-capturing EXPECT/REQUIRE macros. Operands arrive pre-formatted from the
 // shared decomposer; here we assemble the reason string and route it through the existing failure path.

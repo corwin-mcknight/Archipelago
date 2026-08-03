@@ -9,7 +9,7 @@ namespace {
 // QEMU virt's timebase-frequency. hardcoded; read the DTB's
 // /cpus/timebase-frequency when real hardware (VisionFive 2: 4 MHz) matters.
 constexpr uint64_t TIMEBASE_FREQ_HZ       = 10'000'000;
-// 1 ms kernel tick, matching the x86_64 PIT resolution.
+// 1 ms kernel tick, matching the x86_64 tick rate.
 constexpr uint64_t TICK_HZ                = 1000;
 constexpr uint64_t TICKS_PER_INTERVAL     = TIMEBASE_FREQ_HZ / TICK_HZ;
 

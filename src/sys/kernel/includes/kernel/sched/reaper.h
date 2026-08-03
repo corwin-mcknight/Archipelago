@@ -1,4 +1,3 @@
-// src/sys/kernel/includes/kernel/sched/reaper.h
 #pragma once
 
 #include <kernel/mm/page.h>

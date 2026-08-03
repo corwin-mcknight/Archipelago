@@ -1,4 +1,3 @@
-// src/sys/kernel/includes/kernel/sched/scheduler.h
 #pragma once
 
 #include <kernel/sched/thread.h>

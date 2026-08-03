@@ -13,7 +13,7 @@
 extern kernel::driver::uart uart;
 
 // Board facts for the PC: the legacy ISA device set that every x86_64 machine
-// inherits. The counter itself (rdtsc) is a CPU register and stays in
+// inherits. The counter itself (rdtsc) is a CPU register and lives in
 // x86_64/arch.cpp; only its rate is established here, because that depends on
 // the board's tick source.
 namespace kernel::platform {

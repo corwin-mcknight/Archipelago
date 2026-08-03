@@ -6,7 +6,6 @@
 
 namespace ktl {
 
-// ktl::move
 template <typename T> constexpr remove_reference_t<T>&& move(T&& arg) noexcept {
     return static_cast<remove_reference_t<T>&&>(arg);
 }

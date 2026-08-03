@@ -131,7 +131,7 @@ def list_installed_manifests(sysroot: str) -> list[dict]:
 
     Unreadable entries are skipped rather than raising: a single truncated
     manifest from an interrupted install would otherwise break every
-    subsequent install, since installs now consult this list.
+    subsequent install, since every install consults this list.
     """
     mdir = installed_manifest_dir(sysroot)
     if not os.path.isdir(mdir):

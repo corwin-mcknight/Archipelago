@@ -2,7 +2,6 @@ global kernel_x86_install_gdt
 
 kernel_x86_install_gdt:
     lgdt    [rdi]
-    ; Set segement registers
     push    rax
     mov     ax,     0x28  
     ltr     ax
@@ -17,7 +16,7 @@ kernel_x86_install_gdt:
     mov     rax,    after_gdt
     push    0x08                    ; New CS
     push    rax                     ; "Return location"
-    retfq                           ; Swap!
+    retfq
 
 after_gdt:
     pop rax

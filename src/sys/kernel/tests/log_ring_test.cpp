@@ -147,8 +147,8 @@ KTEST_CASE(log_ring_crash_scan_flags_in_progress) {
     KTEST_EXPECT_ALL(ready == 1, inprog == 1);
 }
 
-// Headline migration property: flushed slots are RETAINED as history, not discarded. A drained
-// (all-FLUSHED) ring must still replay the last Capacity messages in order via for_each.
+// Flushed slots are RETAINED as history: a drained (all-FLUSHED) ring must still replay the last
+// Capacity messages in order via for_each.
 KTEST_CASE(log_ring_retains_flushed_history) {
     log_ring<int, 4> ring;
     for (int i = 0; i < 4; i++) {
