@@ -46,6 +46,7 @@ extern "C" [[noreturn]] void _start(void) {
     // CLINT/PLIC routing for external interrupts is future work.
     kernel::riscv::trap_init();
     g_interrupt_manager.initialize();
+    kernel::platform::interrupt_init();
     kernel::arch::enable_interrupts();
     g_log.debug("cpu0: Interrupts Enabled");
 

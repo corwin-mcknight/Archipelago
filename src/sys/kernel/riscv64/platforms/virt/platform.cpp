@@ -39,6 +39,9 @@ void console_init() {
     g_log.devices.push_back(&uart);
 }
 
+// No fixed interrupt hardware needs quiescing; PLIC routing is future work.
+void interrupt_init() {}
+
 void timer_init() { g_timer.init(); }
 
 void harness_exit(uint8_t code) {

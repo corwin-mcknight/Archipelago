@@ -42,7 +42,10 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     kernel::x86::init_idt();
     kernel::arch::syscall_init();
 
-    if (is_boot_processor) { g_interrupt_manager.initialize(); }
+    if (is_boot_processor) {
+        g_interrupt_manager.initialize();
+        kernel::platform::interrupt_init();
+    }
 
     kernel::arch::enable_interrupts();
     g_log.debug("cpu{0}: Interrupts Enabled", core_index);

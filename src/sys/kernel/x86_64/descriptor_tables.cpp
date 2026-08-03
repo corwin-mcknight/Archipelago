@@ -1,7 +1,6 @@
 #include <kernel/cpu.h>
 #include <kernel/x86/cpu.h>
 #include <kernel/x86/descriptor_tables.h>
-#include <kernel/x86/ioport.h>
 #include <string.h>
 
 #include "kernel/config.h"
@@ -78,21 +77,6 @@ void kernel::x86::init_idt() {
         idtptr.base  = (uintptr_t)&idt;
 
         memset(&idt, 0, sizeof(idt));
-
-        // Remap the PIC
-        outb(0x20, 0x11);
-        outb(0xA0, 0x11);
-        outb(0x21, 0x20);
-        outb(0xA1, 0x28);
-        outb(0x21, 0x04);
-        outb(0xA1, 0x02);
-        outb(0x21, 0x01);
-        outb(0xA1, 0x01);
-        // Mask everything: the LAPIC delivers all interrupts. The remap above stays so any
-        // spurious IRQ7/IRQ15 the masked PIC still emits lands on a stubbed vector, not an
-        // exception vector.
-        outb(0x21, 0xFF);
-        outb(0xA1, 0xFF);
 
         // Install ISRs and IRQs via X-macro expansion
 #define INSTALL_ISR(n) idt_set_gate(n, (uintptr_t)interrupt_isr##n, 0x08, 0x8E);

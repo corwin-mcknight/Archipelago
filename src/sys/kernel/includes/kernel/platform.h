@@ -18,6 +18,12 @@ namespace kernel::platform {
 /// console (pc) there is no such constraint.
 void console_init();
 
+/// Quiesce the board's fixed interrupt hardware so the first interrupts-enabled
+/// window is quiet. Called once by the boot CPU before interrupts are first
+/// enabled. On pc this remaps and masks the legacy 8259 PICs; on virt there is
+/// nothing to quiesce.
+void interrupt_init();
+
 /// Bring up the board's kernel tick source. Called once by the boot CPU after
 /// the interrupt manager is up and interrupts are enabled, since the timer
 /// registers an interrupt handler and starts delivering ticks immediately.
