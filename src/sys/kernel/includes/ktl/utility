@@ -12,7 +12,7 @@ template <typename T> constexpr remove_reference_t<T>&& move(T&& arg) noexcept {
 
 template <class T> constexpr T&& forward(typename remove_reference<T>::type& t) noexcept { return static_cast<T&&>(t); }
 template <class T> constexpr T&& forward(typename remove_reference<T>::type&& t) noexcept {
-    // static_assert(!is_lvalue_reference<T>::value, "Can not forward an rvalue as an lvalue.");
+    static_assert(!is_lvalue_ref_v<T>, "Can not forward an rvalue as an lvalue.");
     return static_cast<T&&>(t);
 }
 

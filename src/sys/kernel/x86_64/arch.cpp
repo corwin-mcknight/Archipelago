@@ -15,6 +15,16 @@ constexpr uint32_t MSR_EFER  = 0xC0000080;
 constexpr uint32_t MSR_STAR  = 0xC0000081;
 constexpr uint32_t MSR_LSTAR = 0xC0000082;
 constexpr uint32_t MSR_FMASK = 0xC0000084;
+
+// RFLAGS bits cleared by SYSCALL on kernel entry: anything a user thread can set that would change
+// how kernel code executes. NT is the subtle one -- left set, an IRET taken during the syscall is
+// treated as a task-switch return rather than a plain one.
+constexpr uint32_t RFLAGS_TF = 1u << 8;
+constexpr uint32_t RFLAGS_IF = 1u << 9;
+constexpr uint32_t RFLAGS_DF = 1u << 10;
+constexpr uint32_t RFLAGS_NT = 1u << 14;
+constexpr uint32_t RFLAGS_RF = 1u << 16;
+constexpr uint32_t RFLAGS_AC = 1u << 18;
 }  // namespace
 
 [[noreturn]] void hcf() {
@@ -33,7 +43,7 @@ void syscall_init() {
     x86::wrmsr(MSR_EFER, x86::rdmsr(MSR_EFER) | 1);
     x86::wrmsr(MSR_STAR, (0x13ULL << 48) | (0x08ULL << 32));
     x86::wrmsr(MSR_LSTAR, reinterpret_cast<uint64_t>(&syscall_entry));
-    x86::wrmsr(MSR_FMASK, (1u << 8) | (1u << 9) | (1u << 10) | (1u << 18));
+    x86::wrmsr(MSR_FMASK, RFLAGS_TF | RFLAGS_IF | RFLAGS_DF | RFLAGS_NT | RFLAGS_RF | RFLAGS_AC);
 }
 
 [[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top, uintptr_t ipc_base,
@@ -42,16 +52,27 @@ void syscall_init() {
     set_kernel_stack(kstack_top);
     // rdi/rsi carry the IPC buffer, matching the SysV argument registers so startup code reads them
     // as ordinary function arguments. SYSRET takes the entry point from rcx and RFLAGS from r11.
+    // Everything outside that ABI is zeroed so no kernel value stays readable in a register. The
+    // operands are pinned to fixed registers so the clearing cannot overwrite one the compiler
+    // placed elsewhere; rax holds the user stack until last because rsp cannot be an asm operand.
     asm volatile(
-        "movq %2, %%rdi\n"
-        "movq %3, %%rsi\n"
-        "movq %0, %%rcx\n"
         "movq $0x202, %%r11\n"
-        "movq %1, %%rsp\n"
+        "movq %%rax, %%rsp\n"
+        "xorl %%eax, %%eax\n"
+        "xorl %%ebx, %%ebx\n"
+        "xorl %%edx, %%edx\n"
+        "xorl %%ebp, %%ebp\n"
+        "xorl %%r8d, %%r8d\n"
+        "xorl %%r9d, %%r9d\n"
+        "xorl %%r10d, %%r10d\n"
+        "xorl %%r12d, %%r12d\n"
+        "xorl %%r13d, %%r13d\n"
+        "xorl %%r14d, %%r14d\n"
+        "xorl %%r15d, %%r15d\n"
         "sysretq\n"
+        : "+c"(entry), "+a"(user_sp), "+D"(ipc_base), "+S"(ipc_size)
         :
-        : "r"(entry), "r"(user_sp), "r"(ipc_base), "r"(ipc_size)
-        : "rcx", "r11", "rdi", "rsi", "memory");
+        : "rbx", "rdx", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory");
     __builtin_unreachable();
 }
 

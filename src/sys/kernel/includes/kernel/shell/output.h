@@ -6,6 +6,7 @@
 
 #include <kernel/arch.h>
 #include <kernel/drivers/uart.h>
+#include <kernel/json_escape.h>
 
 #include <ktl/fixed_string>
 #include <ktl/fmt>
@@ -37,17 +38,17 @@ class ShellOutput {
         }
     }
 
+    // Formats one @@HARNESS protocol line and writes it regardless of protocol mode: the prefix
+    // is what test tooling scrapes, and interactive test runs still want to see progress.
     template <typename... Args> void event(const char* fmt, const Args&... args) {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-        if (protocol_mode_) {
-            // Same anti-splice guard as print(); see the comment there.
-            uint64_t flags = kernel::arch::save_and_disable_interrupts();
-            write("@@HARNESS ");
-            write(buffer.c_str());
-            write("\n");
-            kernel::arch::restore_interrupts(flags);
-        }
+        // Same anti-splice guard as print(); see the comment there.
+        uint64_t flags = kernel::arch::save_and_disable_interrupts();
+        write("@@HARNESS ");
+        write(buffer.c_str());
+        write("\n");
+        kernel::arch::restore_interrupts(flags);
     }
 
     void write(const char* s);
@@ -72,57 +73,9 @@ class ShellOutput {
     }
     void reset_style() { sgr("0"); }
 
-    // Writes a complete, pre-formatted harness protocol line with interrupts disabled so log
-    // writes from interrupt context (or another thread after a preemption) cannot splice into
-    // it; see print() for the full rationale.
-    void write_atomic(const char* s) {
-        uint64_t flags = kernel::arch::save_and_disable_interrupts();
-        write(s);
-        kernel::arch::restore_interrupts(flags);
-    }
-
    private:
-    // Writes the string while escaping JSON-special characters so the result is safe to embed
-    // inside a JSON string literal: double-quote, backslash, and control characters below 0x20.
     void write_json_escaped(const char* s) {
-        static constexpr char kHex[] = "0123456789abcdef";
-        for (const char* p = s; *p != '\0'; ++p) {
-            unsigned char c = static_cast<unsigned char>(*p);
-            switch (c) {
-                case '"':
-                    write_char('\\');
-                    write_char('"');
-                    break;
-                case '\\':
-                    write_char('\\');
-                    write_char('\\');
-                    break;
-                case '\n':
-                    write_char('\\');
-                    write_char('n');
-                    break;
-                case '\r':
-                    write_char('\\');
-                    write_char('r');
-                    break;
-                case '\t':
-                    write_char('\\');
-                    write_char('t');
-                    break;
-                default:
-                    if (c < 0x20) {
-                        write_char('\\');
-                        write_char('u');
-                        write_char('0');
-                        write_char('0');
-                        write_char(kHex[(c >> 4) & 0xf]);
-                        write_char(kHex[c & 0xf]);
-                    } else {
-                        write_char(static_cast<char>(c));
-                    }
-                    break;
-            }
-        }
+        kernel::write_json_escaped([this](char c) { write_char(c); }, s);
     }
 
     bool protocol_mode_ = false;

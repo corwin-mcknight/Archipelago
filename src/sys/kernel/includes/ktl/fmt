@@ -10,6 +10,7 @@
 // Format
 #include <ktl/fmt_builtin>
 #include <ktl/fmt_type>
+#include <ktl/utf8>
 
 namespace ktl {
 namespace format {
@@ -86,18 +87,19 @@ constexpr void format_to_buffer_raw(char* buffer, size_t buffer_max, ktl::string
         }
 
         if (argument_index < sizeof...(args)) {
-            size_t i   = 0;
-            bool found = false;
-            ((i++ == argument_index ? found = true,
-              kfmt_printer<ktl::decay_t<decltype(args)>>::print(fmtargs, buffer, buffer_max, buffer_index, args)
-                                    : void()),
+            size_t i = 0;
+            ((i++ == argument_index
+                  ? kfmt_printer<ktl::decay_t<decltype(args)>>::print(fmtargs, buffer, buffer_max, buffer_index, args)
+                  : void()),
              ...);
-            if (!found) { --format_index; }
         } else {
             const char* invalid_argument = "<invalid argument>";
             while (*invalid_argument && buffer_index < buffer_max - 1) { buffer[buffer_index++] = *invalid_argument++; }
         }
     }
+    // A full buffer may have cut a multibyte sequence; invalid UTF-8 must not
+    // reach sinks that require well-formed text (the harness JSON stream).
+    if (buffer_index == buffer_max - 1) { buffer_index = ktl::utf8_trim_partial(buffer, buffer_index); }
     buffer[buffer_index] = '\0';
 }
 }  // namespace format

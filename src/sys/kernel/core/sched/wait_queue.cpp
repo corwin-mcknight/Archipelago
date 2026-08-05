@@ -134,7 +134,7 @@ void Semaphore::acquire() {
 }
 
 void Semaphore::release() {
-    __atomic_fetch_add(&m_count, 1, __ATOMIC_RELEASE);
+    m_count.fetch_add(1, ktl::memory_order::release);
     waiters().wake_one();
 }
 

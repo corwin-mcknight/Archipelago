@@ -7,6 +7,7 @@
 
 #include "kernel/log.h"
 #include "kernel/panic.h"
+#include "kernel/synchronization/execution_context.h"
 
 namespace kernel::mm {
 
@@ -29,6 +30,15 @@ using ktl::align_up;
 constexpr size_t kMinimumSplitSize = sizeof(early_heap_block) + heap_alignment_fallback;
 
 }  // namespace
+
+// This heap backs operator new, and the timer tick reaches it: waking a sleeper pushes onto the
+// run queue, which grows a deque, which allocates. Any block-list walk interrupted mid-splice by
+// that path returns a block already handed out or drops one entirely.
+//
+// ponytail: masking interrupts is mutual exclusion only while one core allocates. A spinlock is the
+// upgrade, and it needs a lock whose construction is constant-initialised -- on_boot() runs before
+// the global constructors, so a lock built by a constructor would be assembled after first use.
+using heap_guard = kernel::synchronization::critical_irq_section;
 
 void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     if (start >= end) { panic("Invalid early heap range"); }
@@ -54,6 +64,7 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
 }
 
 early_heap_stats early_heap::stats() {
+    heap_guard guard;
     early_heap_stats s{};
     s.start       = heap_start;
     s.end         = heap_end;
@@ -74,6 +85,7 @@ early_heap_stats early_heap::stats() {
 }
 
 void early_heap::for_each_block(void (*fn)(void* ctx, size_t payload_bytes, bool is_free), void* ctx) {
+    heap_guard guard;
     for (early_heap_block* block = m_head; block != nullptr; block = block->next) {
         size_t payload = block->size > sizeof(early_heap_block) ? block->size - sizeof(early_heap_block) : 0;
         fn(ctx, payload, block->free);
@@ -81,6 +93,7 @@ void early_heap::for_each_block(void (*fn)(void* ctx, size_t payload_bytes, bool
 }
 
 void* early_heap::alloc(size_t size, size_t alignment) {
+    heap_guard guard;
     if (size == 0) { return nullptr; }
 
     if (!ktl::is_power_of_two(alignment)) {
@@ -164,6 +177,7 @@ void* early_heap::alloc(size_t size, size_t alignment) {
 
 void early_heap::free(void* ptr) {
     if (ptr == nullptr) { return; }
+    heap_guard guard;
 
     uintptr_t target        = reinterpret_cast<uintptr_t>(ptr);
 

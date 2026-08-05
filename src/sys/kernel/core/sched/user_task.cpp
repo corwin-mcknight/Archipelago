@@ -83,8 +83,8 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     register_task(task);
     task->set_state(task_state::RUNNING);
     // Interrupts stay off from spawn through self-handle insertion so the payload cannot
-    // run, exit, and be torn down before its handles exist -- a late insert into the
-    // cleared table would recreate the Task->HandleTable->Task cycle teardown breaks.
+    // run, exit, and be torn down before its handles exist -- a late insert would leave
+    // entries behind in a table nothing will clear again.
     // ponytail: single-core interrupts-off; SMP needs a creation lock or a paused-spawn API.
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto thread    = spawn_into(task, name, user_thread_entry, reinterpret_cast<void*>(img.entry));
@@ -97,10 +97,13 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
 
     // These two inserts into the fresh table ARE the ABI: first-generation slots 0 and 1, which is
     // what abi::syscall::SELF_TASK_HANDLE and SELF_THREAD_HANDLE promise the initial thread.
-    ktl::ref<kernel::obj::Object> self_task_object   = task;
-    ktl::ref<kernel::obj::Object> self_thread_object = thread.unwrap();
-    auto self_task   = task->handles().insert(ktl::move(self_task_object), RIGHT_READ | RIGHT_WRITE);
-    auto self_thread = task->handles().insert(ktl::move(self_thread_object), RIGHT_READ | RIGHT_WAIT);
+    // Both are unowned: a task's handles to itself and its initial thread must not pin the task.
+    // The thread entry cannot dangle because reap() holds the thread's last reference across
+    // teardown_user_task(), which clears this table first.
+    // ponytail: unowned slot 1 assumes single-threaded tasks (the initial thread's reap tears the
+    // whole task down); a thread-spawn syscall must close the self-thread entry at thread reap.
+    auto self_task   = task->handles().insert_unowned(task, RIGHT_READ | RIGHT_WRITE);
+    auto self_thread = task->handles().insert_unowned(thread.unwrap(), RIGHT_READ | RIGHT_WAIT);
     kernel::arch::restore_interrupts(flags);
     if (self_task.is_err() || self_thread.is_err()) {
         g_log.warn("task: '{0}' created without full self-handles", name);

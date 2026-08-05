@@ -42,6 +42,25 @@ KTEST_CASE(ktl_fmt_width_alignment_and_flags) {
     KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "0042");
 }
 
+KTEST_CASE(ktl_fmt_utf8_width_and_truncation) {
+    char buffer[64];
+    // Width pads by codepoints, not bytes: "héllo" is 6 bytes but 5 columns.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:7}|", ktl::string_view("h\xc3\xa9llo"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "  h\xc3\xa9llo|");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:-7}|", ktl::string_view("h\xc3\xa9llo"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "h\xc3\xa9llo  |");
+
+    // A string wider than its field gets no padding, not width-of-string padding.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:2}|", ktl::string_view("abc"));
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "abc|");
+
+    // Truncation at the buffer edge must drop a split multibyte sequence, not
+    // emit its lead byte as invalid UTF-8.
+    char small[3];
+    ktl::format::format_to_buffer_raw(small, sizeof(small), "{0}", ktl::string_view("a\xc3\xa9"));
+    KTEST_EXPECT_TRUE(ktl::string_view(small) == "a");
+}
+
 KTEST_CASE(ktl_fmt_integer_bases_and_char) {
     char buffer[64];
     ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:x}", 255);
@@ -58,6 +77,13 @@ KTEST_CASE(ktl_fmt_integer_bases_and_char) {
     // 'c' prints the raw character instead of the integer value.
     ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0:c}", 'A');
     KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "A");
+
+    // The most-negative values have no positive counterpart in their own type;
+    // the printer must negate in unsigned space.
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0}", -2147483647 - 1);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "-2147483648");
+    ktl::format::format_to_buffer_raw(buffer, sizeof(buffer), "{0}", -9223372036854775807LL - 1);
+    KTEST_EXPECT_TRUE(ktl::string_view(buffer) == "-9223372036854775808");
 }
 
 KTEST_CASE(ktl_fmt_maybe_argument) {

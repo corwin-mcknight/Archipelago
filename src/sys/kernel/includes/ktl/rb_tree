@@ -191,17 +191,20 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
     }
 
    private:
-    static rb_node* hook_of(T& element) { return &(element.*Hook); }
+    // The hook's byte offset within T, measured from a real element the first time one passes
+    // through hook_of. Every node handed to element_of was inserted via hook_of first, so the
+    // offset is always recorded before it is read.
+    inline static size_t s_hook_offset = 0;
 
-    // container_of: recover the element from its embedded hook. hook_offset is the byte offset of the
-    // hook member within T, computed once via the standard pointer-to-member trick.
-    static T* element_of(rb_node* node) {
-        return reinterpret_cast<T*>(reinterpret_cast<char*>(node) - hook_offset());
+    static rb_node* hook_of(T& element) {
+        rb_node* node = &(element.*Hook);
+        s_hook_offset = static_cast<size_t>(reinterpret_cast<char*>(node) - reinterpret_cast<char*>(&element));
+        return node;
     }
 
-    static size_t hook_offset() {
-        // Address of the hook within a zero-based T. Forms an address, never dereferences.
-        return reinterpret_cast<size_t>(&(reinterpret_cast<T*>(0)->*Hook));
+    // container_of: recover the element from its embedded hook.
+    static T* element_of(rb_node* node) {
+        return reinterpret_cast<T*>(reinterpret_cast<char*>(node) - s_hook_offset);
     }
 
     static rb_node* leftmost(rb_node* node) {

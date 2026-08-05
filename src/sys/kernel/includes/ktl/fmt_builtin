@@ -16,10 +16,12 @@ namespace format {
                           KFMT_TYPE value) {                                                   \
             char number_temp[MAX_BUFFER];                                                      \
             memset(number_temp, 0, MAX_BUFFER);                                                \
+            /* Negate in unsigned space: -INT_MIN overflows the signed type. */                \
+            unsigned long long magnitude = static_cast<unsigned long long>(value);             \
             if constexpr (SIGNED) {                                                            \
                 if (value < 0) {                                                               \
                     buffer[index++] = '-';                                                     \
-                    value = static_cast<KFMT_TYPE>(-value);                                    \
+                    magnitude = 0ULL - magnitude;                                              \
                 }                                                                              \
             }                                                                                  \
             unsigned int base;                                                                 \
@@ -32,7 +34,7 @@ namespace format {
                 case 'b': base = 2; break;                                                     \
                 default: base = 10; break;                                                     \
             }                                                                                  \
-            itoa((unsigned long long)value, number_temp, base);                                \
+            itoa(magnitude, number_temp, base);                                                \
             format_args::print_string(args, buffer, buffer_max, index, number_temp);           \
         }                                                                                      \
     };

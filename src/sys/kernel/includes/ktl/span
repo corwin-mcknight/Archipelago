@@ -61,7 +61,7 @@ public:
     constexpr T& back() { return m_data[m_size - 1]; }
     constexpr const T& back() const { return m_data[m_size - 1]; }
 
-    // Slicing — forgiving: clamp to actual size (matching static_array style)
+    // Slicing — forgiving: clamp to actual size (matching static_vector style)
     constexpr span first(size_type count) const noexcept {
         count = ktl::min(count, m_size);
         return span{m_data, count};

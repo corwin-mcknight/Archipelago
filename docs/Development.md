@@ -48,6 +48,7 @@ clang-format -i <file>  # Format a specific file
 - `CamelCase` for classes and structs.
 - `UPPER_SNAKE_CASE` for constants, macros, enum values.
 - No exceptions, no RTTI, no standard library -- use [[KTL]] equivalents.
+- Strings are opaque UTF-8 byte sequences. Never reject or strip bytes >= 0x80, never apply per-byte transformations that assume ASCII (case folding, character classes), and never split a multibyte sequence when truncating or editing. Only code that measures or edits text needs codepoint awareness; use the `<ktl/utf8>` helpers. Codepoints approximate display columns -- double-cell characters (CJK, emoji) are out of scope.
 - Comment only non-obvious behavior. The code should be self-documenting.
 - Use `nullptr`, `constexpr`, `const` appropriately.
 - Prefer composition over inheritance.

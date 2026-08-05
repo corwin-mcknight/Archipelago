@@ -15,7 +15,7 @@ mutex::~mutex() {
 
 bool mutex::try_acquire() {
     uint8_t expected = 0;
-    return __atomic_compare_exchange_n(&m_state, &expected, 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+    return m_state.compare_exchange(expected, 1, ktl::memory_order::acquire, ktl::memory_order::relaxed);
 }
 
 bool mutex::try_lock() {
@@ -49,7 +49,7 @@ void mutex::lock() {
 }
 
 void mutex::unlock() {
-    if (__atomic_exchange_n(&m_state, 0, __ATOMIC_RELEASE) == 0) { panic("mutex: unlock of unlocked mutex"); }
+    if (m_state.exchange(0, ktl::memory_order::release) == 0) { panic("mutex: unlock of unlocked mutex"); }
 #if defined(ARCH_X86_64) || defined(ARCH_RISCV64)
     m_waiters.wake_one();
 #endif

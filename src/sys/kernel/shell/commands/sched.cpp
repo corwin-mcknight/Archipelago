@@ -20,6 +20,9 @@ namespace {
 
 using namespace kernel::sched;
 using kernel::shell::human_str;
+using kernel::shell::print_stats_header;
+using kernel::shell::print_stats_row;
+using kernel::shell::sort_by_cpu;
 using kernel::shell::state_name;
 
 const char* kind_name(trace_kind k) {
@@ -86,44 +89,16 @@ void cmd_threads(kernel::shell::ShellOutput& output, bool top) {
         output.print("snapshot failed (oom)\n");
         return;
     }
-    if (top) {
-        // Insertion sort by cpu_cycles descending; thread counts are single digits.
-        for (size_t i = 1; i < threads.size(); ++i) {
-            for (size_t j = i; j > 0 && threads[j]->stats().cpu_cycles > threads[j - 1]->stats().cpu_cycles; --j) {
-                ktl::ref<Thread> tmp = threads[j];
-                threads[j]           = threads[j - 1];
-                threads[j - 1]       = tmp;
-            }
-        }
-    }
+    if (top) { sort_by_cpu(threads); }
     auto cur       = current();
     auto s         = stats_snapshot();
     uint64_t total = kernel::arch::timestamp() - s.boot_ts;
-    // Header and rows share one format string so the columns cannot drift apart.
-    constexpr const char* ROW_FMT =
-        "{0}{1:3} {2:-10} {3:-8} {4:9} {5:5} {6:5} {7:5} {8:5} {9:5} {10:5} {11:5} "
-        "{12:9} {13:9}\n";
-    output.print(ROW_FMT, " ", "ID", "NAME", "STATE", "CPU-TIME", "%CPU", "SCHED", "PRE", "YLD", "BLK", "SLP", "WAKE",
-                 "LAT-AVG", "LAT-MAX");
+    print_stats_header(output);
     for (size_t i = 0; i < threads.size(); ++i) {
         auto& t     = threads[i];
-        auto& st    = t->stats();
         bool is_cur = cur && cur->id() == t->id();
-        char cpu_buf[24];
-        char pct_buf[8];
-        char lat_avg_buf[24];
-        char lat_max_buf[24];
-        if (total > 0) {
-            ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "{0}%", st.cpu_cycles * 100 / total);
-        } else {
-            ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "-");
-        }
-        output.print(
-            ROW_FMT, is_cur ? ">" : " ", t->id(), t->name() ? t->name() : "?", state_name(t->state()),
-            human_str(cpu_buf, sizeof(cpu_buf), st.cpu_cycles, hz), pct_buf, st.scheduled, st.preemptions, st.yields,
-            st.blocks, st.sleeps, st.wakes,
-            human_str(lat_avg_buf, sizeof(lat_avg_buf), st.scheduled ? st.lat_total_cycles / st.scheduled : 0, hz),
-            human_str(lat_max_buf, sizeof(lat_max_buf), st.lat_max_cycles, hz));
+        print_stats_row(output, is_cur ? ">" : " ", t->id(), t->name() ? t->name() : "?", state_name(t->state()),
+                        t->stats(), total, hz);
     }
 }
 

@@ -22,22 +22,15 @@ extern kernel::driver::uart uart;
 namespace {
 
 using namespace kernel::sched;
-using kernel::shell::human_str;
+using kernel::shell::print_stats_header;
+using kernel::shell::print_stats_row;
 using kernel::shell::ShellOutput;
+using kernel::shell::sort_by_cpu;
 using kernel::shell::state_name;
 
 constexpr const char* C_DIM   = "2";
 constexpr const char* C_TITLE = "1;36";
 constexpr const char* C_TASK  = "1;33";
-
-// Header and every row share one format so columns cannot drift apart.
-constexpr const char* ROW_FMT =
-    "{0}{1:3} {2:-12} {3:-8} {4:9} {5:5} {6:5} {7:5} {8:5} {9:5} {10:5} {11:5} {12:9} {13:9}\n";
-
-void print_header(ShellOutput& out) {
-    out.print(ROW_FMT, " ", "ID", "NAME", "STATE", "CPU-TIME", "%CPU", "SCHED", "PRE", "YLD", "BLK", "SLP", "WAKE",
-              "LAT-AVG", "LAT-MAX");
-}
 
 // Sums a task's threads into one stat line; lat_max is the max across threads, lat_total the sum
 // (so the row's LAT-AVG is total/scheduled, the same weighting sched top uses per thread).
@@ -56,20 +49,6 @@ thread_stats aggregate(const ktl::vector<ktl::ref<Thread>>& threads) {
         if (st.lat_max_cycles > agg.lat_max_cycles) { agg.lat_max_cycles = st.lat_max_cycles; }
     }
     return agg;
-}
-
-void print_row(ShellOutput& out, const char* marker, uint64_t id, const char* name, const char* state,
-               const thread_stats& st, uint64_t total, uint64_t hz) {
-    char cpu_buf[24], pct_buf[8], lat_avg_buf[24], lat_max_buf[24];
-    if (total > 0) {
-        ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "{0}%", st.cpu_cycles * 100 / total);
-    } else {
-        ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "-");
-    }
-    out.print(ROW_FMT, marker, id, name, state, human_str(cpu_buf, sizeof(cpu_buf), st.cpu_cycles, hz), pct_buf,
-              st.scheduled, st.preemptions, st.yields, st.blocks, st.sleeps, st.wakes,
-              human_str(lat_avg_buf, sizeof(lat_avg_buf), st.scheduled ? st.lat_total_cycles / st.scheduled : 0, hz),
-              human_str(lat_max_buf, sizeof(lat_max_buf), st.lat_max_cycles, hz));
 }
 
 void render_tree(ShellOutput& out) {
@@ -105,20 +84,12 @@ void render_tree(ShellOutput& out) {
         }
     }
 
-    print_header(out);
+    print_stats_header(out);
     for (size_t i = 0; i < tasks.size(); ++i) {
         auto& task = tasks[i];
         ktl::vector<ktl::ref<Thread>> threads;
         task->snapshot_threads(threads);
-
-        // Threads within a task by cpu descending, same as sched top.
-        for (size_t a = 1; a < threads.size(); ++a) {
-            for (size_t b = a; b > 0 && threads[b]->stats().cpu_cycles > threads[b - 1]->stats().cpu_cycles; --b) {
-                ktl::ref<Thread> tmp = threads[b];
-                threads[b]           = threads[b - 1];
-                threads[b - 1]       = tmp;
-            }
-        }
+        sort_by_cpu(threads);
 
         bool owns_cur = false;
         for (size_t t = 0; cur && t < threads.size(); ++t) {
@@ -132,7 +103,8 @@ void render_tree(ShellOutput& out) {
             ktl::format::format_to_buffer_raw(task_name, sizeof(task_name), "task#{0}", task->id());
             tn = task_name;
         }
-        print_row(out, owns_cur ? "▸" : " ", static_cast<uint64_t>(task->id()), tn, "-", aggregate(threads), total, hz);
+        print_stats_row(out, owns_cur ? "▸" : " ", static_cast<uint64_t>(task->id()), tn, "-", aggregate(threads),
+                        total, hz);
         out.reset_style();
 
         for (size_t t = 0; t < threads.size(); ++t) {
@@ -140,8 +112,8 @@ void render_tree(ShellOutput& out) {
             bool is_cur = cur && cur->id() == th->id();
             char name_buf[16];
             ktl::format::format_to_buffer_raw(name_buf, sizeof(name_buf), " {0}", th->name() ? th->name() : "?");
-            print_row(out, is_cur ? ">" : " ", static_cast<uint64_t>(th->id()), name_buf, state_name(th->state()),
-                      th->stats(), total, hz);
+            print_stats_row(out, is_cur ? ">" : " ", static_cast<uint64_t>(th->id()), name_buf, state_name(th->state()),
+                            th->stats(), total, hz);
         }
     }
 }

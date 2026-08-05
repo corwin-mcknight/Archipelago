@@ -51,6 +51,10 @@ struct boot_info {
     // True when the paging mode the port's paging code assumes is in effect
     // (Sv48 on riscv64; always true on x86_64, where long mode fixes the walk).
     bool paging_mode_ok;
+    // UNIX time in seconds when the machine booted, as reported by the boot
+    // protocol (Limine reads the firmware RTC). Zero when the protocol
+    // supplied none; consumers then have no wall clock.
+    int64_t boot_epoch_seconds;
     // CPUs reported by the boot protocol, densely indexed by list position.
     // Zero when the protocol supplied no CPU list. boot_cpu_index is the boot
     // CPU's position in that list, or SIZE_MAX if the list omits it; it is

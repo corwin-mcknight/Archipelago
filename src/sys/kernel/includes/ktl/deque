@@ -17,9 +17,18 @@ template <typename T> class deque {
 
     struct block {
         ktl::vector<T> values;
+        // First live element; slots below it are consumed (moved-from) and are reused by
+        // push_front. Advancing it makes pop_front O(1) instead of shifting the block.
+        size_t head = 0;
 
-        size_t size() const { return values.size(); }
+        size_t size() const { return values.size() - head; }
         bool empty() const { return size() == 0; }
+
+        // Destroys the consumed slots and makes the whole block reusable.
+        void reset() {
+            values.clear();
+            head = 0;
+        }
     };
 
    public:
@@ -110,8 +119,8 @@ template <typename T> class deque {
 
         ktl::maybe<T> value     = back_block.values.pop_back();
         if (value.has_value()) {
+            if (back_block.empty()) { back_block.reset(); }
             --m_size;
-            remove_empty_back_blocks();
         }
         return value;
     }
@@ -122,12 +131,9 @@ template <typename T> class deque {
         size_t front_index = first_non_empty_block_index();
         block& front_block = m_blocks[front_index];
 
-        T result           = ktl::move(front_block.values[0]);
-        for (size_t i = 1; i < front_block.size(); ++i) {
-            front_block.values[i - 1] = ktl::move(front_block.values[i]);
-        }
-        auto discard = front_block.values.pop_back();
-        (void)discard;
+        T result           = ktl::move(front_block.values[front_block.head]);
+        ++front_block.head;
+        if (front_block.empty()) { front_block.reset(); }
 
         --m_size;
         remove_empty_front_blocks();
@@ -136,19 +142,19 @@ template <typename T> class deque {
 
     ktl::maybe<T> front() const {
         if (empty()) { return ktl::nothing; }
-        size_t index = first_non_empty_block_index();
-        return m_blocks[index].values[0];
+        const block& blk = m_blocks[first_non_empty_block_index()];
+        return blk.values[blk.head];
     }
 
     ktl::maybe<T> back() const {
         if (empty()) { return ktl::nothing; }
         size_t index            = last_non_empty_block_index();
         const block& back_block = m_blocks[index];
-        return back_block.values[back_block.size() - 1];
+        return back_block.values[back_block.values.size() - 1];
     }
 
     void clear() {
-        for (size_t i = 0; i < m_blocks.size(); ++i) { m_blocks[i].values.clear(); }
+        for (size_t i = 0; i < m_blocks.size(); ++i) { m_blocks[i].reset(); }
         m_blocks.clear();
         m_size = 0;
     }
@@ -182,7 +188,7 @@ template <typename T> class deque {
         size_t remaining = index;
         for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
             const block& blk = m_blocks[block_index];
-            if (remaining < blk.size()) { return blk.values[remaining]; }
+            if (remaining < blk.size()) { return blk.values[blk.head + remaining]; }
             remaining -= blk.size();
         }
         panic("deque index out of range");
@@ -214,9 +220,12 @@ template <typename T> class deque {
     bool emplace_front_internal(T&& value) {
         if (!ensure_front_block()) { return false; }
         block& front_block = m_blocks[0];
-        if (!front_block.values.push_back(ktl::move(value))) { return false; }
-        if (front_block.size() > 1) {
-            for (size_t i = front_block.size() - 1; i > 0; --i) {
+        if (front_block.head > 0) {
+            // Refill a slot vacated by pop_front; the moved-from element there is assignable.
+            front_block.values[--front_block.head] = ktl::move(value);
+        } else {
+            if (!front_block.values.push_back(ktl::move(value))) { return false; }
+            for (size_t i = front_block.values.size() - 1; i > 0; --i) {
                 ktl::swap(front_block.values[i], front_block.values[i - 1]);
             }
         }
@@ -224,18 +233,20 @@ template <typename T> class deque {
         return true;
     }
 
+    // Room checks are against physical occupancy (values.size()), not live size: consumed
+    // front slots are only reusable by push_front, via the head index.
     bool ensure_back_block() {
         if (m_blocks.empty()) { return append_empty_block_back(); }
 
         block& back_block = m_blocks[m_blocks.size() - 1];
-        if (back_block.size() < k_block_capacity) { return true; }
+        if (back_block.values.size() < k_block_capacity) { return true; }
         return append_empty_block_back();
     }
 
     bool ensure_front_block() {
         if (m_blocks.empty()) { return append_empty_block_back(); }
         block& front_block = m_blocks[0];
-        if (front_block.size() < k_block_capacity) { return true; }
+        if (front_block.head > 0 || front_block.values.size() < k_block_capacity) { return true; }
         return append_empty_block_front();
     }
 
@@ -258,16 +269,15 @@ template <typename T> class deque {
         return true;
     }
 
+    // Compacting shifts blocks down and keeps the vacated tail as reserve, so the block count never
+    // falls: the loop can only end by finding a non-empty block at the front. Once the deque has
+    // drained there is none, and every shift would leave the front empty again -- hence the early
+    // return. Blocks left empty are reused in place by the next push.
     void remove_empty_front_blocks() {
+        if (m_size == 0) { return; }
         while (m_blocks.size() > 1 && m_blocks[0].empty()) {
             for (size_t i = 0; i + 1 < m_blocks.size(); ++i) { m_blocks[i] = ktl::move(m_blocks[i + 1]); }
-            m_blocks[m_blocks.size() - 1].values.clear();
-        }
-    }
-
-    void remove_empty_back_blocks() {
-        if (m_blocks.size() > 1 && m_blocks[m_blocks.size() - 1].empty()) {
-            m_blocks[m_blocks.size() - 1].values.clear();
+            m_blocks[m_blocks.size() - 1].reset();
         }
     }
 

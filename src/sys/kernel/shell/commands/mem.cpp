@@ -363,9 +363,9 @@ void render_heap(ShellOutput& out) {
 
 // ── kernel aspace ─────────────────────────────────────────
 
-// "rwxu" with dashes for missing bits.
-const char* prot_str(vm_prot_t prot) {
-    static char buf[5];
+// "rwxu" with dashes for missing bits, rendered into the caller's buf (>= 5 bytes) and returned
+// for inline use, like human_bytes.
+const char* prot_str(char* buf, vm_prot_t prot) {
     buf[0] = (prot & vm_prot::READ) ? 'r' : '-';
     buf[1] = (prot & vm_prot::WRITE) ? 'w' : '-';
     buf[2] = (prot & vm_prot::EXECUTE) ? 'x' : '-';
@@ -391,13 +391,14 @@ void dump_region_tree(ShellOutput& out, const Region& region, char* prefix, size
     size_t index = 0;
     region.for_each_child([&](const region_child& slot) {
         bool last = ++index == child_count;
+        char prot_buf[5];
         out.sgr(C_DIM);
         out.print("{0}{1}", static_cast<const char*>(prefix), visual(out) ? (last ? "└─ " : "├─ ") : "");
         out.reset_style();
         if (slot.is_binding()) {
             out.print("map [0x{0:p}, 0x{1:p}) ", slot.base, slot.base + slot.size);
             out.sgr(C_YELLOW);
-            out.print("{0}", prot_str(slot.prot));
+            out.print("{0}", prot_str(prot_buf, slot.prot));
             out.reset_style();
             out.print(" {0}", cache_str(slot.cache));
             if (slot.vmo_ref.get() != nullptr) {
@@ -411,7 +412,7 @@ void dump_region_tree(ShellOutput& out, const Region& region, char* prefix, size
         } else {
             out.print("region [0x{0:p}, 0x{1:p}) max=", slot.child->base(), slot.child->base() + slot.child->size());
             out.sgr(C_YELLOW);
-            out.print("{0}", prot_str(slot.child->max_prot()));
+            out.print("{0}", prot_str(prot_buf, slot.child->max_prot()));
             out.reset_style();
             out.print("\n");
             if (prefix_len + 4 < prefix_cap) {

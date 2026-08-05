@@ -50,26 +50,6 @@ struct log_message {
                          const ktl::fixed_string<max_message_size> message)
         : timestamp(time), level_seq((static_cast<uint64_t>(level) << sequence_bits) | sequence), text(message) {}
 
-    log_message(log_message&& other) noexcept
-        : timestamp(other.timestamp), level_seq(other.level_seq), text(ktl::move(other.text)) {}
-
-    log_message(const log_message& other) noexcept
-        : timestamp(other.timestamp), level_seq(other.level_seq), text(other.text) {}
-
-    log_message& operator=(const log_message& other) noexcept {
-        timestamp = other.timestamp;
-        level_seq = other.level_seq;
-        text      = other.text;
-        return *this;
-    }
-
-    log_message& operator=(log_message&& other) noexcept {
-        timestamp = other.timestamp;
-        level_seq = other.level_seq;
-        text      = ktl::move(other.text);
-        return *this;
-    }
-
     // Sequence is the low 60 bits, level is the top 4 bits (and really only consumes 3).
     uint64_t sequence() const { return level_seq & 0xFFFFFFFFFFFFFFF; }
     log_level level() const { return static_cast<log_level>(level_seq >> sequence_bits); }

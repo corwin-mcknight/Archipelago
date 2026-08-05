@@ -2,8 +2,11 @@
 
 #include <kernel/sched/thread.h>
 #include <kernel/sched/trace.h>
+#include <kernel/shell/output.h>
 
 #include <ktl/fmt>
+#include <ktl/ref>
+#include <ktl/vector>
 
 // Display helpers shared by the scheduler-inspection shell commands (sched, top).
 
@@ -30,6 +33,40 @@ inline const char* human_str(char* buf, size_t len, uint64_t cycles, uint64_t hz
                                           h.unit);
     }
     return buf;
+}
+
+// Sorts threads by consumed CPU, descending. Insertion sort; thread counts are single digits.
+inline void sort_by_cpu(ktl::vector<ktl::ref<kernel::sched::Thread>>& threads) {
+    for (size_t i = 1; i < threads.size(); ++i) {
+        for (size_t j = i; j > 0 && threads[j]->stats().cpu_cycles > threads[j - 1]->stats().cpu_cycles; --j) {
+            ktl::ref<kernel::sched::Thread> tmp = threads[j];
+            threads[j]                          = threads[j - 1];
+            threads[j - 1]                      = tmp;
+        }
+    }
+}
+
+// Header and every row share one format so the columns cannot drift apart.
+inline constexpr const char* STATS_ROW_FMT =
+    "{0}{1:3} {2:-12} {3:-8} {4:9} {5:5} {6:5} {7:5} {8:5} {9:5} {10:5} {11:5} {12:9} {13:9}\n";
+
+inline void print_stats_header(ShellOutput& out) {
+    out.print(STATS_ROW_FMT, " ", "ID", "NAME", "STATE", "CPU-TIME", "%CPU", "SCHED", "PRE", "YLD", "BLK", "SLP",
+              "WAKE", "LAT-AVG", "LAT-MAX");
+}
+
+inline void print_stats_row(ShellOutput& out, const char* marker, uint64_t id, const char* name, const char* state,
+                            const kernel::sched::thread_stats& st, uint64_t total, uint64_t hz) {
+    char cpu_buf[24], pct_buf[8], lat_avg_buf[24], lat_max_buf[24];
+    if (total > 0) {
+        ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "{0}%", st.cpu_cycles * 100 / total);
+    } else {
+        ktl::format::format_to_buffer_raw(pct_buf, sizeof(pct_buf), "-");
+    }
+    out.print(STATS_ROW_FMT, marker, id, name, state, human_str(cpu_buf, sizeof(cpu_buf), st.cpu_cycles, hz), pct_buf,
+              st.scheduled, st.preemptions, st.yields, st.blocks, st.sleeps, st.wakes,
+              human_str(lat_avg_buf, sizeof(lat_avg_buf), st.scheduled ? st.lat_total_cycles / st.scheduled : 0, hz),
+              human_str(lat_max_buf, sizeof(lat_max_buf), st.lat_max_cycles, hz));
 }
 
 }  // namespace kernel::shell

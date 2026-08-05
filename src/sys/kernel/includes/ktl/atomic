@@ -50,9 +50,18 @@ class atomic {
         return __atomic_exchange_n(&m_value, value, static_cast<int>(order));
     }
 
+    bool compare_exchange(T& expected, T desired, memory_order success, memory_order failure) {
+        return __atomic_compare_exchange_n(&m_value, &expected, desired, false, static_cast<int>(success),
+                                           static_cast<int>(failure));
+    }
+
+    // The failure order defaults to the success order stripped of its release component, the
+    // strongest order the builtin permits on the load-only failure path.
     bool compare_exchange(T& expected, T desired, memory_order order = memory_order::seq_cst) {
-        return __atomic_compare_exchange_n(&m_value, &expected, desired, false, static_cast<int>(order),
-                                           static_cast<int>(order));
+        return compare_exchange(expected, desired, order,
+                                order == memory_order::acq_rel   ? memory_order::acquire
+                                : order == memory_order::release ? memory_order::relaxed
+                                                                 : order);
     }
 
    private:

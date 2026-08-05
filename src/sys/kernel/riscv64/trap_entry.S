@@ -123,6 +123,10 @@ riscv_trap_entry:
 // Registers are unrecoverable here (the faulting context already lost sp);
 // grab the trap CSRs as arguments and hand off to a noreturn panic.
 trap_sp_overflow:
+    // Reached with the stashed t0 still in sscratch. Clear it before running any
+    // further code: a nested trap reads a non-zero sscratch as "came from user"
+    // and would build its frame at that value.
+    csrw sscratch, zero
     la   sp, emergency_stack_top
     csrr a0, sepc
     csrr a1, stval

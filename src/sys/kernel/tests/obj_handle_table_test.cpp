@@ -59,10 +59,19 @@ KTEST_CASE(obj_handle_table_info_returns_metadata) {
 
 KTEST_CASE(obj_handle_table_duplicate_ands_rights) {
     HandleTable table;
-    KTEST_UNWRAP(src, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
+    KTEST_UNWRAP(src, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE));
     KTEST_UNWRAP(dup, table.duplicate(src, RIGHT_READ));
     KTEST_REQUIRE_VALUE(info, table.info(dup));
     KTEST_EXPECT_ALL(info.rights == RIGHT_READ, table.count() == 2);
+}
+
+// Duplication is itself a capability enforced by the table, not just by syscall dispatch: a
+// source handle without RIGHT_DUPLICATE is refused no matter which kernel path asks.
+KTEST_CASE(obj_handle_table_duplicate_requires_right) {
+    HandleTable table;
+    KTEST_UNWRAP(src, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
+    auto dup = table.duplicate(src, RIGHT_READ);
+    KTEST_EXPECT_ALL(dup.is_err(), dup.unwrap_err() == ktl::errc::rights_violation, table.count() == 1);
 }
 
 // One rights-enforcement story for get(): a cross-type get is rejected with wrong_type,
@@ -156,6 +165,76 @@ KTEST_CASE(obj_handle_table_destructor_closes_all) {
         KTEST_EXPECT_TRUE(table.emplace<TestObjA>(RIGHTS_ALL, &d2).is_ok());
     }
     KTEST_EXPECT_ALL(d1, d2);
+}
+
+namespace {
+
+// Closes another handle in the same table from its destructor, the way a dying Task closes
+// handles it holds in a parent's table. Piggybacks on TestObjA's registered type: the
+// registry only ever sees the stored type id.
+class CloseOnDeath : public Object {
+   public:
+    DECLARE_OBJECT_TYPE(CloseOnDeath, TEST_TYPE_A)
+    CloseOnDeath(HandleTable* table, const HandleId* victim) : Object(TYPE_ID), m_table(table), m_victim(victim) {}
+    ~CloseOnDeath() override { (void)m_table->close(*m_victim); }
+
+   private:
+    HandleTable* m_table;
+    const HandleId* m_victim;
+};
+
+}  // namespace
+
+// The destructor runs against the table's non-recursive mutex, so the last reference must be
+// dropped only after close() releases the lock.
+KTEST_CASE(obj_handle_table_close_reentrant_destructor) {
+    HandleTable table;
+    HandleId victim = HandleId::invalid();
+    KTEST_UNWRAP(closer, table.emplace<CloseOnDeath>(RIGHTS_ALL, &table, &victim));
+    KTEST_UNWRAP(v, table.emplace<TestObjA>(RIGHTS_ALL));
+    victim = v;
+    KTEST_EXPECT_TRUE(table.close(closer).is_ok());
+    KTEST_EXPECT_ALL(!table.is_valid(victim), table.count() == 0);
+}
+
+KTEST_CASE(obj_handle_table_clear_reentrant_destructor) {
+    HandleTable table;
+    HandleId victim = HandleId::invalid();
+    KTEST_REQUIRE_TRUE(table.emplace<CloseOnDeath>(RIGHTS_ALL, &table, &victim).is_ok());
+    KTEST_UNWRAP(v, table.emplace<TestObjA>(RIGHTS_ALL));
+    victim = v;
+    table.clear();
+    KTEST_EXPECT_ALL(table.count() == 0, !table.is_valid(victim));
+}
+
+// Unowned entries hold no strong reference: the object's lifetime belongs to its external
+// owner, and closing the entry destroys nothing.
+KTEST_CASE(obj_handle_table_unowned_entry_does_not_own) {
+    bool destroyed = false;
+    HandleTable table;
+    auto obj = ktl::make_ref<TestObjA>(&destroyed);
+    KTEST_REQUIRE_TRUE(static_cast<bool>(obj));
+    KTEST_UNWRAP(id, table.insert_unowned(obj, RIGHT_READ));
+    KTEST_EXPECT_TRUE(obj.ref_count() == 1);
+    KTEST_UNWRAP(got, table.get<TestObjA>(id, RIGHT_READ));
+    KTEST_EXPECT_TRUE(got.get() == obj.get());
+    got.reset();
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
+    KTEST_EXPECT_FALSE(destroyed);
+}
+
+// Duplicating an unowned entry mints an ordinary owning handle.
+KTEST_CASE(obj_handle_table_unowned_duplicate_owns) {
+    bool destroyed = false;
+    HandleTable table;
+    auto obj = ktl::make_ref<TestObjA>(&destroyed);
+    KTEST_UNWRAP(self, table.insert_unowned(obj, RIGHT_READ | RIGHT_DUPLICATE));
+    KTEST_UNWRAP(dup, table.duplicate(self, RIGHT_READ));
+    KTEST_EXPECT_TRUE(table.close(self).is_ok());
+    obj.reset();
+    KTEST_EXPECT_FALSE(destroyed);
+    KTEST_EXPECT_TRUE(table.close(dup).is_ok());
+    KTEST_EXPECT_TRUE(destroyed);
 }
 
 #endif

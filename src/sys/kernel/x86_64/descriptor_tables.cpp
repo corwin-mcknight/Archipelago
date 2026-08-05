@@ -43,7 +43,12 @@ void kernel::x86::init_gdt(int corenum) {
     // TSS
     uintptr_t tss_addr           = (uintptr_t)&gdts[corenum].tss;
 
-    gdts[corenum].entries[5]     = {sizeof(tss_entry),
+    // Must stay at or past the segment limit: that is what tells the CPU there is no I/O permission
+    // bitmap, so port access from CPL 3 faults. A base inside the limit -- zero included -- makes
+    // the CPU read the TSS's own bytes as the bitmap and grant whatever they happen to spell.
+    gdts[corenum].tss.iomap_base = sizeof(tss_entry);
+
+    gdts[corenum].entries[5]     = {sizeof(tss_entry) - 1,
                                     (uint16_t)(tss_addr & 0xFFFF),
                                     (uint8_t)((tss_addr >> 16) & 0xFF),
                                     0xE9,
@@ -52,7 +57,10 @@ void kernel::x86::init_gdt(int corenum) {
 
     gdts[corenum].tss_entry.base = (tss_addr >> 32) & 0xFFFFFFFF;
 
-    gdts[corenum].pointer.limit  = sizeof(gdts[corenum].entries) + sizeof(tss_entry) - 1;
+    // The table spans the descriptor array plus the TSS descriptor's upper half. The TSS structure
+    // sharing this struct is not part of it -- sizing the limit from sizeof(tss_entry) would let
+    // selectors past the real end resolve to neighbouring fields as if they were descriptors.
+    gdts[corenum].pointer.limit  = sizeof(gdts[corenum].entries) + sizeof(gdt_entry_high) - 1;
     gdts[corenum].pointer.base   = (uintptr_t)&gdts[corenum].entries;
 
     kernel_x86_install_gdt((uintptr_t)&gdts[corenum].pointer);

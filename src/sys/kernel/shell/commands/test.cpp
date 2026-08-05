@@ -20,8 +20,6 @@ extern "C" kernel::testing::ktest __start__ktests[], __stop__ktests[];
 
 namespace {
 
-constexpr size_t kHarnessBufferSize    = 512;
-
 kernel::testing::ktest* g_current_test = nullptr;
 bool g_current_test_failed             = false;
 bool g_failure_reason_recorded         = false;
@@ -32,15 +30,6 @@ kernel::testing::ktest* tests_end() { return __stop__ktests; }
 
 ktl::maybe<kernel::testing::ktest&> find_test(ktl::string_view name) {
     return ktl::find_if(tests_begin(), tests_end(), [&](const kernel::testing::ktest& t) { return name == t.name; });
-}
-
-template <typename... Args>
-void emit_harness_event(kernel::shell::ShellOutput& output, const char* fmt, const Args&... args) {
-    ktl::fixed_string<kHarnessBufferSize> buffer;
-    ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-    // Atomic: an interrupt-context log line splicing into a protocol event corrupts the
-    // harness JSON stream (seen live with the unhandled-vector warning during interrupt tests).
-    output.write_atomic(buffer.c_str());
 }
 
 void reset_test_state() {
@@ -58,30 +47,24 @@ void record_failure(const char* message) {
         g_failure_reason.m_buffer[copy_len] = '\0';
         g_failure_reason_recorded           = true;
     }
-    auto& output = kernel::shell::shell_output();
-    emit_harness_event(output, "@@HARNESS {{\"event\":\"error\",\"message\":\"{0}\"}}\n", message);
+    kernel::shell::shell_output().event("{{\"event\":\"error\",\"message\":\"{0}\"}}", message);
 }
 
 void send_test_start(kernel::shell::ShellOutput& output, const kernel::testing::ktest& test) {
     auto current_time = kernel::time::ns_since_boot();
-    emit_harness_event(output, "@@HARNESS {{\"event\":\"test_start\",\"name\":\"{0}\",\"timestamp\":{1}}}\n", test.name,
-                       current_time);
+    output.event("{{\"event\":\"test_start\",\"name\":\"{0}\",\"timestamp\":{1}}}", test.name, current_time);
 }
 
 void send_test_end(kernel::shell::ShellOutput& output, const kernel::testing::ktest& test, const char* status,
                    const char* reason = nullptr) {
     auto current_time = kernel::time::ns_since_boot();
     if (reason) {
-        emit_harness_event(output,
-                           "@@HARNESS "
-                           "{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"reason\":\"{2}\","
-                           "\"timestamp\":{3}}}\n",
-                           test.name, status, reason, current_time);
+        output.event(
+            "{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"reason\":\"{2}\",\"timestamp\":{3}}}",
+            test.name, status, reason, current_time);
     } else {
-        emit_harness_event(output,
-                           "@@HARNESS "
-                           "{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"timestamp\":{2}}}\n",
-                           test.name, status, current_time);
+        output.event("{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"timestamp\":{2}}}", test.name,
+                     status, current_time);
     }
 }
 
@@ -110,8 +93,8 @@ void list_tests(kernel::shell::ShellOutput& output) {
         bool expects_crash    = (test->flags & kernel::testing::KTEST_FLAG_EXPECTS_CRASH) != 0;
         const char* clean_str = clean_env ? ",\"requires_clean_env\":true" : "";
         const char* crash_str = expects_crash ? ",\"expects_crash\":true" : "";
-        emit_harness_event(output, "@@HARNESS {{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}{3}}}\n",
-                           test->name, module, clean_str, crash_str);
+        output.event("{{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}{3}}}", test->name, module, clean_str,
+                     crash_str);
     }
 }
 
@@ -130,8 +113,7 @@ void test_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellO
         }
         auto test = find_test(argv[2]);
         if (!test) {
-            emit_harness_event(output, "@@HARNESS {{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}\n",
-                               argv[2]);
+            output.event("{{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}", argv[2]);
             return;
         }
         execute_test(output, *test);
@@ -177,7 +159,7 @@ void kernel::testing::abort(unsigned char exit_code) {
         g_current_test = nullptr;
     }
 
-    emit_harness_event(output, "@@HARNESS {{\"event\":\"abort\",\"code\":{0}}}\n", static_cast<unsigned>(exit_code));
+    output.event("{{\"event\":\"abort\",\"code\":{0}}}", static_cast<unsigned>(exit_code));
     kernel::platform::harness_exit(static_cast<uint8_t>(exit_code));
     hcf();
 }

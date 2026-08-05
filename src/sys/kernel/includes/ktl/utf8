@@ -1,0 +1,40 @@
+#pragma once
+
+#include <stddef.h>
+
+// Byte-level UTF-8 helpers. Kernel strings are opaque UTF-8: nothing validates
+// or interprets text, but code that measures or edits it (line editing, column
+// padding) must count codepoints rather than bytes. These helpers never reject
+// or rewrite invalid sequences; malformed bytes pass through unchanged.
+// ponytail: codepoints, not display cells -- CJK and emoji occupy two terminal
+// cells and will still misalign columns. Add a width table if that matters.
+
+namespace ktl {
+
+// True for UTF-8 continuation bytes (0b10xxxxxx).
+constexpr bool utf8_is_continuation(char c) { return (static_cast<unsigned char>(c) & 0xC0) == 0x80; }
+
+// Number of codepoints in the first len bytes: every byte except continuations
+// starts one. Malformed bytes each count as a codepoint.
+constexpr size_t utf8_codepoints(const char* s, size_t len) {
+    size_t count = 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (!utf8_is_continuation(s[i])) { ++count; }
+    }
+    return count;
+}
+
+// Returns len shortened past any incomplete multibyte sequence at the end, as
+// left by a byte-limited truncation. Complete sequences and malformed bytes
+// that never formed a truncated sequence are kept.
+constexpr size_t utf8_trim_partial(const char* s, size_t len) {
+    size_t lead = len;
+    while (lead > 0 && len - lead < 3 && utf8_is_continuation(s[lead - 1])) { --lead; }
+    if (lead == 0) { return len; }
+    unsigned char c = static_cast<unsigned char>(s[lead - 1]);
+    size_t expected = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+    if (c >= 0xC0 && len - (lead - 1) < expected) { return lead - 1; }
+    return len;
+}
+
+}  // namespace ktl

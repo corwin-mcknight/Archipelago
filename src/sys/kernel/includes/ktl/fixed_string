@@ -25,9 +25,11 @@ template <size_t N> class fixed_string {
 
     operator const char*() const { return m_buffer; }
 
+    // Bounded scan: an unterminated buffer must not be over-read.
     size_t length() const {
-        size_t len = strlen(m_buffer);
-        return len > N ? N : len;
+        size_t len = 0;
+        while (len < N && m_buffer[len] != '\0') { ++len; }
+        return len;
     }
 
     size_t size() const { return N; }

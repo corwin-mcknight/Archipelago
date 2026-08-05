@@ -263,4 +263,69 @@ KTEST_CASE(ktl_deque_index_across_blocks) {
     KTEST_EXPECT_FALSE(dq.at(static_cast<size_t>(element_count)).has_value());
 }
 
+KTEST_CASE(ktl_deque_push_front_refills_popped_slots) {
+    // pop_front vacates head slots; push_front must reuse them in place, and
+    // indexing/back must stay correct while the front block's head is nonzero.
+    ktl::deque<int> d;
+    for (int i = 0; i < 40; ++i) { d.push_back(i); }  // spans multiple 16-slot blocks
+    for (int i = 0; i < 5; ++i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == i); }
+    KTEST_EXPECT_TRUE(d.front().value_or(-1) == 5);
+    KTEST_EXPECT_TRUE(d.back().value_or(-1) == 39);
+
+    for (int i = 0; i < 5; ++i) { d.push_front(100 + i); }
+    KTEST_EXPECT_TRUE(d.size() == 40);
+    KTEST_EXPECT_TRUE(d.front().value_or(-1) == 104);
+    KTEST_EXPECT_TRUE(d[0] == 104);
+    KTEST_EXPECT_TRUE(d[4] == 100);
+    KTEST_EXPECT_TRUE(d[5] == 5);
+    KTEST_EXPECT_TRUE(d[39] == 39);
+
+    for (int i = 4; i >= 0; --i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == 100 + i); }
+    for (int i = 5; i < 40; ++i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == i); }
+    KTEST_EXPECT_TRUE(d.empty());
+}
+
+KTEST_CASE(ktl_deque_drain_to_empty_from_front) {
+    // Draining every element through pop_front is the scheduler run queue's access pattern, and it
+    // is the case that leaves every block empty at once. Block compaction has to terminate there
+    // rather than shifting empty blocks forever; a regression hangs this case instead of failing.
+    constexpr int element_count = 40;
+
+    ktl::deque<int> dq;
+    for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i)); }
+    for (int i = 0; i < element_count; ++i) { KTEST_EXPECT_VALUE(dq.pop_front(), i); }
+
+    KTEST_EXPECT_TRUE(dq.empty());
+    KTEST_EXPECT_EQUAL(dq.size(), static_cast<size_t>(0));
+    KTEST_EXPECT_FALSE(dq.pop_front().has_value());
+
+    // The emptied blocks are kept as reserve, so refilling must still land elements in order.
+    for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i * 2)); }
+    KTEST_REQUIRE_EQUAL(dq.size(), static_cast<size_t>(element_count));
+    for (int i = 0; i < element_count; ++i) { KTEST_EXPECT_VALUE(dq.pop_front(), i * 2); }
+    KTEST_EXPECT_TRUE(dq.empty());
+}
+
+KTEST_CASE(ktl_deque_drain_to_empty_alternating) {
+    // Same compaction path reached with the front and back ends emptying against each other.
+    constexpr int element_count = 40;
+
+    ktl::deque<int> dq;
+    for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i)); }
+
+    int low  = 0;
+    int high = element_count - 1;
+    while (low <= high) {
+        KTEST_EXPECT_VALUE(dq.pop_front(), low);
+        ++low;
+        if (low > high) { break; }
+        KTEST_EXPECT_VALUE(dq.pop_back(), high);
+        --high;
+    }
+
+    KTEST_EXPECT_TRUE(dq.empty());
+    KTEST_REQUIRE_TRUE(dq.push_front(99));
+    KTEST_EXPECT_VALUE(dq.pop_back(), 99);
+}
+
 #endif  // CONFIG_KERNEL_TESTING

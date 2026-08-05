@@ -17,6 +17,21 @@
 
 extern "C" void init_global_constructors_array(void);
 
+// Published per running thread by the scheduler; defined in core/sched/scheduler.cpp.
+extern "C" uintptr_t g_kstack_floor;
+
+// The interrupt stubs compare rsp against g_kstack_floor, so it has to describe the stack in use
+// before interrupts are enabled; left at zero the comparison never trips and the boot stack runs
+// untripwired, as does the idle thread that sched::init seeds from this same value. Limine
+// guarantees at least 64 KiB below the entry sp and this runs near its top, so 48 KiB down is
+// legitimately reachable and the last 16 KiB is the tripwire. Boot processor only: one global
+// floor cannot describe the APs' stacks too, and they park rather than schedule.
+static void arm_boot_stack_tripwire() {
+    uintptr_t sp;
+    asm volatile("mov %%rsp, %0" : "=r"(sp));
+    g_kstack_floor = sp - 48 * 1024;
+}
+
 // Enable EFER.NXE so a present PTE may carry the no-execute bit (bit 63).
 // Must run on every CPU before any NX mapping is installed; with NXE clear that
 // bit is reserved and faults. EFER is MSR 0xC0000080, NXE is bit 11.
@@ -43,6 +58,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     kernel::arch::syscall_init();
 
     if (is_boot_processor) {
+        arm_boot_stack_tripwire();
         g_interrupt_manager.initialize();
         kernel::platform::interrupt_init();
     }

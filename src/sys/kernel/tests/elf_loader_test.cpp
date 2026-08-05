@@ -163,6 +163,26 @@ KTEST_CASE(elf_loader_enforces_segment_policy) {
     KTEST_EXPECT_TRUE(rejects_with(stray_entry, elf_error::bad_entry));
 }
 
+KTEST_CASE(elf_loader_caps_mapped_size) {
+    // p_memsz is not bounded by the file, so a small image can ask for an arbitrary mapping. The
+    // ceiling has to hold whether one segment is oversized or several add up past it.
+    Image huge;
+    huge.phdr(0).p_memsz = MAX_IMAGE_BYTES + 0x1000;
+    KTEST_EXPECT_TRUE(rejects_with(huge, elf_error::image_too_large));
+
+    // Neither segment breaches the ceiling alone; together they do.
+    Image summed(2);
+    summed.phdr(0).p_memsz = MAX_IMAGE_BYTES - 0x1000;
+    summed.phdr(1).p_memsz = MAX_IMAGE_BYTES - 0x1000;
+    summed.phdr(1).p_vaddr = summed.phdr(0).p_vaddr + MAX_IMAGE_BYTES;
+    KTEST_EXPECT_TRUE(rejects_with(summed, elf_error::image_too_large));
+
+    // A segment right at the ceiling still loads.
+    Image at_limit;
+    at_limit.phdr(0).p_memsz = MAX_IMAGE_BYTES;
+    KTEST_EXPECT_TRUE(at_limit.parse().is_ok());
+}
+
 KTEST_CASE(elf_loader_rejects_out_of_bounds_offsets) {
     // Program header table claims to start past the end of the image.
     Image far_table;

@@ -14,6 +14,17 @@
 - Linker scripts stayed in `<arch>/`: the higher-half load address is an arch and boot-protocol fact, not a board one. Revisit only if a board needs a different load address.
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
 - Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.
+- Post-Milestone-1 review findings, architecture and boot:
+    - `fp_walk_result` is declared identically in both arch crash files and `core/crash.cpp`, and the whole `crash::arch` interface is declared in a `.cpp` rather than `kernel/crash.h`, so the implementations are never checked against it. `is_canonical`, `in_kernel_half`, and the register-format `emit()` helper are duplicated verbatim too.
+    - riscv64 calls `fault_enter()` only inside the page-fault branch while x86_64 calls it for every exception, so identical faults reach the crash path with different fault depth and different `blocking_allowed()` behaviour.
+    - `trap_sp_overflow` on x86_64 branches out before `isr_common`'s `cld`, so the panic and crash-dump path runs with DF in whatever state the faulting context left it.
+    - The riscv64 board timebase is defined in both `platforms/virt/platform.cpp` and `platforms/virt/timer.cpp`, and `timer.cpp` re-implements `rdtime()` instead of calling `kernel::arch::timestamp()`.
+    - `enable_nxe()`'s comment claims it must run before any NX mapping is installed, but `init_memory()` clones and activates Limine's page tables (NX bits included) first; it survives only because Limine already set EFER.NXE. Fix the order or the comment. `MSR_EFER` is also defined in both `main.cpp` and `arch.cpp`.
+    - The `gdts[]` array has no alignment attribute while the IDT does; `struct gdt` nests only packed members, so entries land at arbitrary alignment.
+    - `.init_array` is placed in the executable `text` PHDR on both arches; the constructor pointer table belongs in `:rodata`. The unexplained `. += 0x1000;` in `.bss` also deserves a comment naming what it pads.
+    - Boot memmap entries are trusted for wrap and overlap: `translate_memmap` coalesces without checking that `base + length` wraps, and `init_memory` validates only page alignment, so an overlapping USABLE entry would hand kernel-image frames to the PMM. `cpu_hw_id`/`start_cpu` bound-check with `assert`, which compiles out under NDEBUG.
+    - Dead includes in `x86_64/arch.cpp` (log, panic, time, ioport), `riscv64/arch.cpp` (panic), and `descriptor_tables.cpp` (`kernel/cpu.h`).
+    - The board source glob in the kernel Makefile picks up `*.cpp` and `*.S` but not `*.s`, the extension every existing x86 assembly file uses, so a board assembly file would be silently dropped from the link.
 
 ## Kernel Core
 - Add severity filtering to the log pipeline (compile-time and/or runtime min-level threshold); buffered sinks and crash dump emission are already done.
@@ -29,6 +40,7 @@
 - vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
 - Result/maybe monadic combinators (map/and_then/or_else) are const-only and operate on copies -- add rvalue-qualified overloads that move.
 - rb_tree has no reverse iteration or predecessor query; find_le covers the interval-lookup need for now.
+    - Zero non-test callers, candidates for deletion: `ktl::tuple` (whole header), `take_view`/`drop_view`/`views::transform`, eight of the eleven `ktl::bit` functions, `maybe`'s `filter`/`take`/`ptr_or`/`from_ptr` and its duplicate non-const `has_value()`, `static_vector::peek_back()`, and the `strcpy`/`strncpy`/`strlcpy`/`atoi`/ctype surface in the std shims.
 
 ## Memory Management
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
@@ -45,6 +57,18 @@
     - Page-table frames sit in descriptor state ACTIVE, not WIRED; revisit when eviction lands.
     - PAT programming for true write-combining (degrades to uncached today).
     - Clock replacement deferred to user-pager milestone (only pager-backed pages evictable); anonymous swap ruled out permanently. OOM = allocation failure via Result.
+- Post-Milestone-1 review findings, memory management:
+    - `page_frame_allocator::free` validates nothing: it accepts unaligned addresses, double frees, and frees of WIRED/MMIO frames, even though `g_page_descriptors` already knows each frame's state.
+    - `Region::protect` starts its scan at `lower_bound(base)`, so a binding straddling the range start keeps its old wider protection and the call still returns ok. `unmap` already does the partial-overlap pre-scan this needs.
+    - `map_page`/`unmap_page` accept kernel-half addresses, where intermediate tables are shared across every address space, so a kernel-half map on a user aspace would mutate all of them and `arch_destroy` would leak the tables.
+    - The documented "OOM = allocation failure via Result" contract is unreachable: the nothrow `operator new` forwards to `early_heap::alloc`, which panics on exhaustion, so every downstream `errc::oom` path and `make_ref` null check is dead code. Needs a non-panicking alloc entry point.
+    - `early_heap` guards its block list with interrupts off rather than a lock, which is mutual exclusion only while one core allocates. Upgrading to a spinlock needs a constant-initialised lock, because `on_boot()` runs before the global constructors.
+    - The `total_consumed > block->size` rejection in `early_heap::alloc` is unreachable; the preceding `usable < size` check already guarantees it.
+    - The vmo constructor ignores chunk-index allocation failure, producing a VMO whose `size_pages()` exceeds what its index covers; the grow path in `set_size` handles the same failure correctly.
+    - `create_device_vmo` marks its range WIRED before the vmo exists and nothing ever un-marks it, so a failed construction or a destroyed device VMO leaves the range permanently WIRED.
+    - `alloc_contiguous(0)` matches the first region and returns a valid-looking base having reserved nothing.
+    - Both arch `flush_tlb_page` implementations duplicate the same active-root guard and its comment; only the invalidate instruction differs.
+    - `page_descriptor.h`'s `coverage_end()` hardcodes `0x1000` instead of `KERNEL_MINIMUM_PAGE_SIZE`.
 - Deliver slab allocators and the unified heap backed by the Archipelago Unified Memory Interface.
 - Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
 
@@ -55,6 +79,17 @@
 - Cross-CPU load balancing, once multi-core scheduling lands.
 - Back per-core identity with a GS-based per-CPU pointer before AP scheduling replaces the current x86 CPUID/dense-index lookup; make per-core lapic_id atomic to close the bring-up read/write race.
 - VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
+- Post-Milestone-1 review findings, scheduler and synchronization:
+    - `lockdep` mutates the per-CPU held-lock stack non-atomically with interrupts enabled for mutex guards; an ISR taking any tracked spinlock would corrupt it. Latent until the planned UART RX interrupt path lands.
+    - The self-handle window in `create_user_task` relies on an unenforced invariant: `spawn_into` enqueues the payload before the handles are inserted, and anything that blocks in between lets the thread run without ABI slots 0 and 1. Split spawn into create + enqueue so the handles land first.
+    - Self-handle insert failure is only a warning and the task still starts; if the first insert fails and the second succeeds, a Thread occupies slot 0 and the documented ABI becomes type confusion. Route it through the existing `fail()` path.
+    - `switch_to` publishes `g_kstack_floor` and the TSS stack while still running on the outgoing stack, so a fault in that window is checked against the incoming thread's floor. Publish from `sched_finish_switch`, which already runs first on the incoming stack.
+    - `switch_to` republishes the syscall kernel stack only when `kstack_top() != 0`, leaving the previous thread's value live for stackless threads; publish unconditionally with a poison value so a stray syscall faults.
+    - `spawn` counts and traces a spawn before the run-queue push whose failure unwinds it, so failed spawns are recorded as real.
+    - `register_task` swallows push failure with `(void)`, unlike every other scheduler queue push, which asserts.
+    - `yield()` and `service_pending_preemption()` duplicate the same pop-next / demote / requeue / switch sequence, differing only in stat counter and reason.
+    - Stale assert text: `service_pending_preemption` reports "on_tick: run queue allocation failed".
+    - Dead: `execution_context::irq_depth` is write-only bookkeeping never read by `blocking_allowed` or anything else, `assert_thread_context` has no callers, and `synchronization::semaphore` has no users, duplicates `obj::Semaphore`, and busy-waits in a way that would hard-hang a single core.
 - IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 
 ## Handles & Syscalls
@@ -62,6 +97,7 @@
     - Rights bits and type ids are kernel constants, not installed ABI; `obj_info` returns them raw, so a user program can compare but not name them. Move them into `abi/` when a program first needs to request a specific right.
     - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
     - The self-handle ABI (first-generation slots 0 and 1) leans on fresh-table allocation order; a bootstrap-message scheme should replace it if the IPC milestone reshapes startup anyway.
+    - Self-handles are unowned (`HandleTable::insert_unowned`), and the slot-1 thread entry stays safe only because reap of the initial thread tears down the whole task; a thread-spawn syscall must close the self-thread entry when its thread is reaped, or the entry dangles.
 - Implement handle transfer between tables for cross-process capability passing.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
@@ -70,6 +106,19 @@
     - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
     - Buffers occupy fixed slots in a reserved address-space region because the VMM has no first-fit search; 64 slots per task, one bitmap word. Revisit with first-fit.
     - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
+- Post-Milestone-1 review findings, syscall and handle pipeline:
+    - `syscall.cpp` reaches a task through `static_ref_cast<Task>(self->owner())` with no type check; `Thread` accepts any `Object` owner, so a non-Task owner is silent type confusion. Same pattern in `scheduler.cpp` and `reaper.cpp`.
+    - `SYS_SLEEP` passes its argument straight into `now() + ticks`, so a large value wraps to a deadline in the past and returns on the next tick.
+    - `sys_write`'s copy loop runs with interrupts masked for a user-chosen length up to the full IPC buffer; cap the per-call length or re-enable interrupts around it.
+    - `ipc_buffer::kernel_at` indexes `m_frames[]` with no bound, safe only because its one caller checks `contains()` first; assert the invariant in the function.
+    - `dispatch_handle_op` takes the table lock in `verify` and again in each handler, re-resolving the id, so verify-then-execute is not actually held across one lock; and `unpack(handle)` is computed twice.
+    - A partial `grow()` failure returns after appending some entries without chaining them, orphaning those slots permanently.
+    - `create_handle` uses the free-list head without asserting `grow()` actually produced a slot; `-1` would index as `SIZE_MAX`.
+    - `TypeRegistry` writes take `m_lock` but `lookup`, `lookup_by_name`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
+    - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
+    - An unknown syscall number returns raw `-1` while an unknown handle op returns `invalid_operation`; pick one.
+    - `pack`/`unpack` implement the handle layout that `abi/syscall.h` only describes in prose; move them next to the comment that specifies them.
+    - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `TypeRegistry::lookup_by_name`, `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
 - Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
@@ -83,6 +132,13 @@
     - `MAX_SEGMENTS` is a fixed 8, chosen for static binaries; a real toolchain image with more loadable segments would be refused.
     - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image; first-fit virtual address search is a VMM to-do.
     - `PT_GNU_STACK` is ignored -- the stack is mapped `READ|WRITE` unconditionally.
+    - `e_phentsize` is accepted at any value at or above `sizeof(Elf64_Phdr)`, but only entry 0's alignment is checked, so a stride that is not a multiple of 8 misaligns every later header -- the UB the existing alignment check exists to prevent, and invisible to ASan. Require the stride to be a multiple of the alignment.
+    - `entry_covered` ignores segment flags, so an entry point inside a non-executable segment parses clean and faults on the first instruction fetch.
+    - A `PT_LOAD` without `PF_R` is accepted; on x86_64 write-without-read cannot be encoded, so it maps readable, wider than requested.
+    - `i * e_phentsize` in the header walk is `int` arithmetic that can sign-overflow; reachable only past 2 GiB of image, so theoretical today.
+    - A segment with `p_filesz > 0` and `p_memsz == 0` is skipped before `check_segment` sees it, so a malformed shape is ignored rather than rejected.
+    - `symbols.cpp` bounds-checks with the declared `e_shentsize`/`sh_entsize` but walks the arrays at `sizeof` stride, so any larger declared entry size silently misparses every entry after the first. It also truncates `st_size` to 32 bits and can wrap the extent test in `find_entry`.
+    - `elf_parse.cpp` and `elf_loader.cpp` each define `PAGE_SIZE` and hand-roll the same page round-up; share one helper.
 - Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
 
 ## IPC & Services
@@ -102,7 +158,7 @@
 - Add keyboard (PS/2) and framebuffer/console drivers; wire the Limine framebuffer request (UART hardening already landed).
 - UART: pre-init panics lose their output (writes before init are dropped by the health gate); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
 - UART RX interrupt path (IOAPIC/PLIC routing) so shell input can block on a wait queue instead of sleep-polling; QEMU's chardev backpressure makes the current 1 ms poll lossless, but a real 16550's 16-byte FIFO would drop pasted input.
-- Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers.
+- Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers. Wall-clock time already comes from the Limine date-at-boot request (`boot_info::boot_epoch_seconds`, shell `date`); an RTC driver is still wanted for non-Limine boot paths and for re-syncing drift on long uptimes.
 
 ## Security & Reliability
 - Enforce memory zeroisation, W^X policies, and static analysis for privileged code paths.
@@ -117,6 +173,8 @@
 - Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
 - Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
 - KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
+- Harness assertion messages are interpolated raw into the `@@HARNESS` JSON, so any assertion text containing a quote or backslash corrupts the stream; route them through the existing `kernel::write_json_escaped`.
+- Fuzz coverage gaps found in the post-Milestone-1 review: `elf_symbols_fuzz` stops at `locate_symbol_tables` and never reaches the per-symbol string handling in `init()`, which is where the bounds checks live; `elf_loader_fuzz`'s oracle asserts only `filesz <= memsz` and the file-byte read, not page alignment, the W+X rejection, extent wrap, or entry coverage.
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/apic.cpp` (LAPIC timer), and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience

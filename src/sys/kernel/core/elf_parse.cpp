@@ -1,6 +1,8 @@
 #include <kernel/config.h>
 #include <kernel/elf_loader.h>
 
+#include <ktl/maybe>
+
 // The pure half of the loader. Deliberately its own translation unit: it pulls in no VMM and no
 // hardware, so the host test runner and the fuzz lane can link it directly.
 
@@ -10,13 +12,19 @@ namespace {
 
 constexpr uint64_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE;
 
+// Bytes a segment occupies once mapped, or nothing when rounding overflows.
+ktl::maybe<uint64_t> mapped_bytes(uint64_t memsz) {
+    uint64_t rounded = memsz + (PAGE_SIZE - 1);
+    if (rounded < memsz) { return ktl::nothing; }
+    return rounded & ~(PAGE_SIZE - 1);
+}
+
 // A segment's mapping is [vaddr, vaddr + round_up(memsz)). Reject anything whose extent would wrap
 // the address space rather than letting the arithmetic silently alias low memory.
 bool extent_wraps(uint64_t vaddr, uint64_t memsz) {
-    uint64_t pages_bytes = memsz + (PAGE_SIZE - 1);
-    if (pages_bytes < memsz) { return true; }
-    pages_bytes &= ~(PAGE_SIZE - 1);
-    return vaddr + pages_bytes < vaddr;
+    auto bytes = mapped_bytes(memsz);
+    if (!bytes.has_value()) { return true; }
+    return vaddr + bytes.value() < vaddr;
 }
 
 ktl::result<void, elf_error> check_segment(const Elf64_Phdr& ph, size_t size) {
@@ -53,6 +61,7 @@ const char* to_string(elf_error error) {
         case elf_error::wx_segment: return "segment is writable and executable";
         case elf_error::unaligned_segment: return "segment is not page-aligned";
         case elf_error::bad_segment: return "malformed segment";
+        case elf_error::image_too_large: return "mapped image exceeds the size ceiling";
         default: return "?";
     }
 }
@@ -73,8 +82,9 @@ ktl::result<image, elf_error> parse_image(const void* data, size_t size) {
         return ktl::err(elf_error::truncated);
     }
 
-    image img = {};
-    img.entry = hdr->e_entry;
+    image img      = {};
+    img.entry      = hdr->e_entry;
+    uint64_t total = 0;
 
     for (uint16_t i = 0; i < hdr->e_phnum; i++) {
         const auto& ph = *reinterpret_cast<const Elf64_Phdr*>(base + hdr->e_phoff + i * hdr->e_phentsize);
@@ -85,6 +95,13 @@ ktl::result<image, elf_error> parse_image(const void* data, size_t size) {
         auto checked = check_segment(ph, size);
         if (checked.is_err()) { return ktl::err(checked.unwrap_err()); }
         if (img.count == MAX_SEGMENTS) { return ktl::err(elf_error::too_many_segments); }
+
+        // check_segment already proved the rounding does not overflow, and each addend is capped
+        // before it is added, so the running total cannot wrap.
+        uint64_t bytes = mapped_bytes(ph.p_memsz).value();
+        if (bytes > MAX_IMAGE_BYTES) { return ktl::err(elf_error::image_too_large); }
+        total += bytes;
+        if (total > MAX_IMAGE_BYTES) { return ktl::err(elf_error::image_too_large); }
 
         img.segments[img.count++] = {
             .file_offset = ph.p_offset,

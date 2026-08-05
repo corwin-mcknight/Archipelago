@@ -4,6 +4,7 @@
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
 
+#include <ktl/atomic>
 #include <ktl/result>
 
 namespace kernel::obj {
@@ -22,17 +23,17 @@ class Semaphore : public Object {
     void release();
 
     bool try_acquire() {
-        uint32_t current = __atomic_load_n(&m_count, __ATOMIC_RELAXED);
+        uint32_t current = m_count.load(ktl::memory_order::relaxed);
         while (current != 0) {
-            if (__atomic_compare_exchange_n(&m_count, &current, current - 1, false, __ATOMIC_ACQUIRE,
-                                            __ATOMIC_RELAXED)) {
+            if (m_count.compare_exchange(current, current - 1, ktl::memory_order::acquire,
+                                         ktl::memory_order::relaxed)) {
                 return true;
             }
         }
         return false;
     }
 
-    uint32_t count() const { return __atomic_load_n(&m_count, __ATOMIC_RELAXED); }
+    uint32_t count() const { return m_count.load(ktl::memory_order::relaxed); }
 
     static ktl::result<void> register_type(TypeRegistry& registry) {
         return registry.register_type(TYPE_ID, "semaphore", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE,
@@ -40,7 +41,7 @@ class Semaphore : public Object {
     }
 
    private:
-    volatile uint32_t m_count;
+    ktl::atomic<uint32_t> m_count;
 };
 
 }  // namespace kernel::obj

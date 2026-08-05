@@ -7,8 +7,9 @@ namespace kernel::x86 {
 
 namespace {
 constexpr uint32_t MSR_APIC_BASE   = 0x1B;
-// Vector 0x2F is IRQ15's stub; nothing registers a handler there, so a spurious
-// interrupt dispatches to nobody and is dropped. The low four bits must be set for old APICs.
+// Handled by the dedicated spurious stub in interrupt_handlers.s, which returns without
+// dispatching or EOIing (a spurious interrupt sets no ISR bit, so an EOI would dismiss the
+// interrupt actually in service). The low four bits must be set for old APICs.
 constexpr uint32_t SPURIOUS_VECTOR = 0x2F;
 
 // Register byte offsets into the 4 KiB LAPIC window.

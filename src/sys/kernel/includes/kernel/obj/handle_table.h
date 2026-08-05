@@ -49,6 +49,10 @@ class HandleTable {
 
     // Share an already-existing object into this table.
     ktl::result<HandleId> insert(ktl::ref<Object> object, Rights rights);
+    // Insert without taking a reference: the entry points at the object but does not keep it
+    // alive. Only for self-handles, where the object outlives the entry by construction (the
+    // entry lives inside the object's own table).
+    ktl::result<HandleId> insert_unowned(const ktl::ref<Object>& object, Rights rights);
     // Close every live handle and rebuild the free list.
     void clear();
 
@@ -75,7 +79,10 @@ class HandleTable {
 
    private:
     struct HandleEntry {
-        ktl::ref<Object> object;
+        // `object` marks a live entry and is what lookups read; `strong` holds the table's
+        // reference and stays empty for unowned (self-handle) entries.
+        ktl::unowned_ref<Object> object;
+        ktl::ref<Object> strong;
         Rights rights       = 0;
         uint32_t generation = 0;
         int32_t next_free   = -1;
@@ -90,7 +97,7 @@ class HandleTable {
 
     ktl::result<void> grow();
     HandleEntry* lookup_entry(HandleId id);
-    ktl::result<HandleId> create_handle(ktl::ref<Object> object, Rights rights);
+    ktl::result<HandleId> create_handle(ktl::ref<Object> object, Rights rights, bool owning);
 };
 
 // Template implementations
@@ -99,7 +106,7 @@ template <typename T, typename... Args> ktl::result<HandleId> HandleTable::empla
     auto obj = ktl::make_ref<T>(ktl::forward<Args>(args)...);
     if (!obj) { return ktl::err(ktl::errc::oom); }
     ktl::ref<Object> base_ref = obj;
-    return create_handle(ktl::move(base_ref), rights);
+    return create_handle(ktl::move(base_ref), rights, true);
 }
 
 template <typename T> ktl::result<ktl::ref<T>> HandleTable::get(HandleId id, Rights required_rights) {

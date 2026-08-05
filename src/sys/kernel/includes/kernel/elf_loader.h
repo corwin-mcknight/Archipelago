@@ -37,6 +37,7 @@ enum class elf_error {
     wx_segment,         // writable and executable at once
     unaligned_segment,  // p_vaddr is not page-aligned
     bad_segment,        // p_filesz > p_memsz, or the mapping would wrap
+    image_too_large,    // mapped extent exceeds MAX_IMAGE_BYTES
 };
 
 const char* to_string(elf_error error);
@@ -53,7 +54,12 @@ struct segment {
 
 // A small fixed cap: real static binaries carry a handful of PT_LOADs, and a fixed array keeps
 // parse_image() allocation-free and therefore usable from the fuzz lane.
-constexpr size_t MAX_SEGMENTS = 8;
+constexpr size_t MAX_SEGMENTS      = 8;
+
+// Ceiling on the summed page-rounded p_memsz of every PT_LOAD. p_memsz is not bounded by the file
+// -- a few-KB image may declare gigabytes of .bss -- and map_image() sizes a VMO and commits frames
+// from it, so without a ceiling a small binary decides how much of the machine's memory to consume.
+constexpr uint64_t MAX_IMAGE_BYTES = 64ull * 1024 * 1024;
 
 struct image {
     segment segments[MAX_SEGMENTS];

@@ -92,7 +92,6 @@ irq_handler         interrupt_irq3,  35
 irq_handler         interrupt_irq4,  36
 irq_handler         interrupt_irq5,  37
 irq_handler         interrupt_irq6,  38
-irq_handler         interrupt_irq7,  39
 irq_handler         interrupt_irq8,  40
 irq_handler         interrupt_irq9,  41
 irq_handler         interrupt_irq10, 42
@@ -100,7 +99,15 @@ irq_handler         interrupt_irq11, 43
 irq_handler         interrupt_irq12, 44
 irq_handler         interrupt_irq13, 45
 irq_handler         interrupt_irq14, 46
-irq_handler         interrupt_irq15, 47
+
+; Spurious vectors: 0x27/0x2F carry the PIC's spurious IRQ7/IRQ15 and 0x2F is also the
+; LAPIC's spurious vector. A spurious interrupt sets no ISR bit, so an EOI here would
+; dismiss whatever real interrupt is in service -- return with no EOI and no dispatch.
+global interrupt_irq7
+global interrupt_irq15
+interrupt_irq7:
+interrupt_irq15:
+    iretq
 
 extern x86_trap_stack_overflow
 

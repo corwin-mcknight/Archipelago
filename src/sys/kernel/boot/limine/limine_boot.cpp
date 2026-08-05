@@ -36,6 +36,10 @@ __attribute__((used, section(".limine_requests"))) static volatile struct limine
 __attribute__((used, section(".limine_requests"))) static volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
 
+__attribute__((used,
+               section(".limine_requests"))) static volatile struct limine_date_at_boot_request date_at_boot_request = {
+    .id = LIMINE_DATE_AT_BOOT_REQUEST, .revision = 0, .response = nullptr};
+
 #if defined(__riscv)
 // Pin the paging mode: the riscv64 paging code assumes a 4-level Sv48 walk and
 // a mode-9 satp, so Sv39/Sv57 would silently corrupt every table access.
@@ -178,6 +182,10 @@ const boot_info& collect() {
 
     if (executable_cmdline_request.response != nullptr) {
         g_info.cmdline = executable_cmdline_request.response->cmdline;
+    }
+
+    if (date_at_boot_request.response != nullptr) {
+        g_info.boot_epoch_seconds = date_at_boot_request.response->timestamp;
     }
 
 #if defined(__riscv)

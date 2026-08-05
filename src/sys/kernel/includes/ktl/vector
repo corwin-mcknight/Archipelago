@@ -184,7 +184,6 @@ template <typename T> class vector {
 
     bool reserve(size_t new_capacity) {
         if (new_capacity <= m_capacity) { return true; }
-        if (new_capacity < m_size) { new_capacity = m_size; }
         return reallocate(new_capacity);
     }
 

@@ -6,6 +6,8 @@
 #include <kernel/synchronization/lockdep.h>
 #include <stdint.h>
 
+#include <ktl/atomic>
+
 namespace kernel::synchronization {
 
 class mutex {
@@ -22,13 +24,13 @@ class mutex {
     void lock();
     bool try_lock();
     void unlock();
-    bool is_locked() const { return __atomic_load_n(&m_state, __ATOMIC_RELAXED) != 0; }
+    bool is_locked() const { return m_state.load(ktl::memory_order::relaxed) != 0; }
     uint32_t lockdep_id() const { return m_lockdep_id; }
 
    private:
     bool try_acquire();
 
-    volatile uint8_t m_state = 0;
+    ktl::atomic<uint8_t> m_state{0};
     kernel::sched::wait_queue m_waiters;
 #ifndef NDEBUG
     uint32_t m_lockdep_id;

@@ -3,16 +3,15 @@
 #include <stddef.h>
 
 #include <ktl/deque>
+#include <ktl/type_traits>
 #include <ktl/utility>
 
 namespace ktl {
 
 template <typename T, typename Container = ktl::deque<T>> class stack {
-    template <typename U> static U&& declval();
-
-    using pop_return_type        = decltype(declval<Container&>().pop_back());
-    using back_return_type       = decltype(declval<Container&>().back());
-    using const_back_return_type = decltype(declval<const Container&>().back());
+    using pop_return_type        = decltype(ktl::declval<Container&>().pop_back());
+    using back_return_type       = decltype(ktl::declval<Container&>().back());
+    using const_back_return_type = decltype(ktl::declval<const Container&>().back());
 
    public:
     using value_type     = T;

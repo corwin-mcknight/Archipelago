@@ -29,7 +29,7 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
     return &entry;
 }
 
-ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
+ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights, bool owning) {
     if (!object) { return ktl::err(ktl::errc::null_argument); }
 
     // Requested rights must stay within the contract registered for this object's type.
@@ -45,11 +45,12 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
         if (grown.is_err()) { return ktl::err(grown.unwrap_err()); }
     }
 
-    int32_t slot    = m_free_head;
-    auto& entry     = m_entries[static_cast<size_t>(slot)];
-    m_free_head     = entry.next_free;
+    int32_t slot = m_free_head;
+    auto& entry  = m_entries[static_cast<size_t>(slot)];
+    m_free_head  = entry.next_free;
 
-    entry.object    = ktl::move(object);
+    entry.object = ktl::unowned_ref<Object>(object);
+    if (owning) { entry.strong = ktl::move(object); }
     entry.rights    = rights;
     entry.next_free = -1;
     m_count++;
@@ -59,25 +60,43 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
 }
 
 ktl::result<HandleId> HandleTable::insert(ktl::ref<Object> object, Rights rights) {
-    return create_handle(ktl::move(object), rights);
+    return create_handle(ktl::move(object), rights, true);
+}
+
+ktl::result<HandleId> HandleTable::insert_unowned(const ktl::ref<Object>& object, Rights rights) {
+    return create_handle(object, rights, false);
 }
 
 void HandleTable::clear() {
+    // Close every live entry, releasing each dropped reference with the lock free: the last
+    // reference may run an arbitrary destructor, and destructors may re-enter this table.
+    size_t index = 0;
+    for (;;) {
+        ktl::ref<Object> victim;  // declared before the guard so it drops after the unlock
+        kernel::synchronization::lock_guard guard(m_lock);
+        while (index < m_entries.size() && !m_entries[index].object) { index++; }
+        if (index >= m_entries.size()) { break; }
+        auto& entry = m_entries[index];
+        victim      = ktl::move(entry.strong);
+        entry.object.reset();
+        entry.rights = 0;
+        m_count--;
+        if (entry.generation != UINT32_MAX) { entry.generation++; }
+    }
+
+    // Rebuild the free list over the dead slots in ascending index order -- fresh-table slot
+    // order is ABI (see grow()). Retired slots stay off the list.
     kernel::synchronization::lock_guard guard(m_lock);
     m_free_head = -1;
     for (size_t i = m_entries.size(); i-- > 0;) {
         auto& entry = m_entries[i];
-        entry.object.reset();
-        entry.rights = 0;
-        if (entry.generation == UINT32_MAX) {
+        if (entry.object || entry.generation == UINT32_MAX) {
             entry.next_free = -1;
             continue;
         }
-        entry.generation++;
         entry.next_free = m_free_head;
         m_free_head     = static_cast<int32_t>(i);
     }
-    m_count = 0;
 }
 
 ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask) {
@@ -88,19 +107,27 @@ ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask
         kernel::synchronization::lock_guard guard(m_lock);
         HandleEntry* src = lookup_entry(source);
         if (!src) { return ktl::err(ktl::errc::handle_invalid); }
+        // Duplication is itself a capability: a source handle without the right is refused no
+        // matter which kernel path asks.
+        if ((src->rights & RIGHT_DUPLICATE) == 0) { return ktl::err(ktl::errc::rights_violation); }
         new_rights = src->rights & rights_mask;
-        obj_copy   = src->object;
+        obj_copy   = src->object.promote();
     }
 
-    return create_handle(ktl::move(obj_copy), new_rights);
+    // Duplicates always own, including duplicates of unowned self-handle entries.
+    return create_handle(ktl::move(obj_copy), new_rights, true);
 }
 
 ktl::result<void> HandleTable::close(HandleId id) {
+    // Declared before the guard so the reference drops after the unlock: the last reference
+    // may run an arbitrary destructor, and destructors may re-enter this table.
+    ktl::ref<Object> victim;
     kernel::synchronization::lock_guard guard(m_lock);
 
     HandleEntry* entry = lookup_entry(id);
     if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
 
+    victim = ktl::move(entry->strong);
     entry->object.reset();
     entry->rights = 0;
     m_count--;
@@ -128,7 +155,7 @@ ktl::result<VerifiedHandle> HandleTable::verify(HandleId id, Rights required_rig
         return ktl::err(ktl::errc::wrong_type);
     }
     if ((entry->rights & required_rights) != required_rights) { return ktl::err(ktl::errc::rights_violation); }
-    return ktl::result<VerifiedHandle>::ok(VerifiedHandle{entry->object, entry->rights});
+    return ktl::result<VerifiedHandle>::ok(VerifiedHandle{entry->object.promote(), entry->rights});
 }
 
 ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {
