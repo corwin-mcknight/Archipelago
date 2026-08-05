@@ -6,6 +6,7 @@
 #include <kernel/mm/early_heap.h>
 #include <kernel/mm/page_descriptor.h>
 #include <kernel/mm/pmm.h>
+#include <kernel/mm/slab_heap.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/shell/output.h>
 
@@ -64,10 +65,21 @@ void mem_handler(int, const ktl::string_view[], ShellOutput& output) {
     }
 
     auto heap = g_early_heap.stats();
-    output.print("heap: {0} used / {1} total, {2} blocks, {3} allocations, {4} frees\n",
+    output.print("early heap: {0} used / {1} total, {2} blocks, {3} allocations, {4} frees\n",
                  human_bytes(heap_used, sizeof(heap_used), heap.used_bytes),
                  human_bytes(heap_total, sizeof(heap_total), heap.used_bytes + heap.free_bytes), heap.blocks,
                  heap.alloc_calls, heap.free_calls);
+
+    if (heap_slab_active()) {
+        auto slab = g_slab_heap.stats();
+        output.print("slab heap: {0} allocations, {1} frees, {2} failures, large: {3} allocs / {4} pages\n",
+                     slab.alloc_calls, slab.free_calls, slab.failures, slab.large_allocs, slab.large_pages);
+        for (const auto& cls : slab.classes) {
+            if (cls.slabs == 0) { continue; }
+            output.print("  {0}B: {1} slabs, {2} live, {3} free slots\n", cls.object_size, cls.slabs, cls.live_objects,
+                         cls.free_slots);
+        }
+    }
 
     vm_aspace& aspace = kernel_aspace();
     if (aspace.has_root()) {

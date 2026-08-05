@@ -18,7 +18,10 @@ template <typename T, size_t N> class static_vector {
         m_buffer[m_count++] = ktl::move(value);
     }
 
-    maybe<T> pop_back() { return m_count > 0 ? m_buffer[--m_count] : ktl::nothing; }
+    maybe<T> pop_back() {
+        if (m_count == 0) { return ktl::nothing; }
+        return ktl::move(m_buffer[--m_count]);
+    }
     maybe<T> peek_back() { return m_count > 0 ? m_buffer[m_count - 1] : ktl::nothing; }
 
     void clear() { m_count = 0; }

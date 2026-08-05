@@ -54,4 +54,11 @@ void wake_due_sleepers() {
 
 size_t sleeper_count() { return g_sleepers.size(); }
 
+bool sleepers_reserve(size_t capacity) {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    bool ok        = g_sleepers.reserve(capacity);
+    kernel::arch::restore_interrupts(flags);
+    return ok;
+}
+
 }  // namespace kernel::sched

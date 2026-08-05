@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include <ktl/maybe>
-#include <ktl/stack>
 #include <ktl/vector>
 
 #include "kernel/mm/page.h"
@@ -86,8 +85,27 @@ class page_frame_allocator {
     uint64_t m_alloc_failures = 0;
     uint64_t m_zeroer_pages   = 0;
 
-    ktl::stack<vm_paddr_t> m_zeroed;
-    ktl::stack<vm_paddr_t> m_dirty;
+    // The page pools are intrusive: each free frame's first word holds the next frame's address,
+    // written and read through the physmap, so the pools own no storage and pushing can never
+    // fail or allocate. That last property is load-bearing -- the PMM sits below the heap, and a
+    // pool that grew through operator new would re-enter the PMM inside its own lock (the exact
+    // deadlock the slab-heap switchover exposed). pop() re-zeroes the link word on the way out,
+    // which is what keeps the zeroed pool's all-zero guarantee intact.
+    class frame_stack {
+       public:
+        void push(vm_paddr_t addr);
+        ktl::maybe<vm_paddr_t> pop();
+        size_t size() const { return m_count; }
+
+       private:
+        // Physical 0 is a valid frame address in principle, so empty is a sentinel, not zero.
+        static constexpr vm_paddr_t NIL = ~static_cast<vm_paddr_t>(0);
+        vm_paddr_t m_head               = NIL;
+        size_t m_count                  = 0;
+    };
+
+    frame_stack m_zeroed;
+    frame_stack m_dirty;
     ktl::vector<vm_page_region> m_regions;
 
     // Sets pre_zeroed when the popped page needs no memset (a pre-zeroed

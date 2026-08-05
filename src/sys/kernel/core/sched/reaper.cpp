@@ -2,6 +2,7 @@
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/log.h>
+#include <kernel/sched/internal.h>
 #include <kernel/sched/reaper.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
@@ -39,6 +40,7 @@ void reap(ktl::ref<Thread> zombie) {
     release_thread_ipc(*task, zombie->ipc());
     if (zombie->kstack_phys() != 0) { stack_pool_release(zombie->kstack_phys()); }
     if (task.get() != kernel_task().get() && task->thread_count() == 0) { teardown_user_task(ktl::move(task)); }
+    note_thread_reaped();
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     g_reaped += 1;
     kernel::arch::restore_interrupts(flags);

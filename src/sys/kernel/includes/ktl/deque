@@ -170,7 +170,12 @@ template <typename T> class deque {
 
     bool reserve(size_t new_capacity) {
         if (new_capacity > SIZE_MAX - (k_block_capacity - 1)) { new_capacity = SIZE_MAX - (k_block_capacity - 1); }
-        size_t required_blocks = (new_capacity + k_block_capacity - 1) / k_block_capacity;
+        // One block beyond the size-based need: room checks run against physical occupancy, and
+        // the front block can hold up to k_block_capacity - 1 consumed (not yet compacted) slots,
+        // so a push/pop cycle within the reserved size can still fill one extra block. Without it,
+        // the first such push past a block boundary would allocate -- exactly what callers that
+        // push from interrupt context called reserve() to prevent.
+        size_t required_blocks = (new_capacity + k_block_capacity - 1) / k_block_capacity + 1;
         if (!m_blocks.reserve(required_blocks)) { return false; }
 
         while (m_blocks.size() < required_blocks) {
@@ -273,11 +278,18 @@ template <typename T> class deque {
     // falls: the loop can only end by finding a non-empty block at the front. Once the deque has
     // drained there is none, and every shift would leave the front empty again -- hence the early
     // return. Blocks left empty are reused in place by the next push.
+    //
+    // The front block's storage is rotated to the tail rather than shifted over: a plain shift
+    // would move-assign away its vector storage and leave the tail block with zero capacity, so a
+    // later push into it would allocate -- breaking reserve()'s promise that pushes within
+    // capacity never touch the heap, which the scheduler's interrupt path depends on.
     void remove_empty_front_blocks() {
         if (m_size == 0) { return; }
         while (m_blocks.size() > 1 && m_blocks[0].empty()) {
+            block vacated = ktl::move(m_blocks[0]);
+            vacated.reset();
             for (size_t i = 0; i + 1 < m_blocks.size(); ++i) { m_blocks[i] = ktl::move(m_blocks[i + 1]); }
-            m_blocks[m_blocks.size() - 1].reset();
+            m_blocks[m_blocks.size() - 1] = ktl::move(vacated);
         }
     }
 

@@ -53,7 +53,8 @@ HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
 SUPPORT_SRCS := $(KSRC)/std/stdlib.cpp $(KSRC)/core/object.cpp $(KSRC)/core/handle_table.cpp \
 	$(KSRC)/core/channel.cpp $(KSRC)/core/type_registry.cpp $(KSRC)/core/sched/task.cpp \
 	$(KSRC)/core/synchronization/execution_context.cpp $(KSRC)/core/synchronization/lockdep.cpp \
-	$(KSRC)/core/synchronization/mutex.cpp $(KSRC)/core/elf_parse.cpp $(KSRC)/core/handle_dispatch.cpp
+	$(KSRC)/core/synchronization/mutex.cpp $(KSRC)/core/elf_parse.cpp $(KSRC)/core/handle_dispatch.cpp \
+	$(KSRC)/mm/slab_heap.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))

@@ -8,6 +8,8 @@
 #include <kernel/sched/thread.h>
 #include <kernel/sched/wait_queue.h>
 
+#include <ktl/static_vector>
+
 namespace kernel::sched {
 
 void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx) {
@@ -37,9 +39,12 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
 }
 
 namespace {
-void drain(ktl::vector<ktl::ref<Thread>>& threads) {
-    for (size_t i = 0; i < threads.size(); ++i) { make_ready(ktl::move(threads[i])); }
-}
+// Wakes drain through a fixed stack batch instead of a heap-allocated list: waking is what
+// interrupt-side paths call (the timer today, interrupt objects later), and the heap forbids
+// interrupt-context allocation. A batch that fills simply triggers another collection pass;
+// waiters that re-block between passes are re-checked by block_if's predicate, so an extra wake
+// is spurious, never wrong.
+constexpr size_t WAKE_BATCH = 8;
 }  // namespace
 
 void wait_queue::wake_one() {
@@ -57,39 +62,53 @@ void wait_queue::wake_one() {
 }
 
 void wait_queue::wake_all() {
-    ktl::vector<ktl::ref<Thread>> woken;
-    {
-        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-        for (size_t i = 0; i < m_nodes.size();) {
-            if (m_nodes[i].mask != 0) {
-                ++i;
-                continue;
+    while (true) {
+        ktl::static_vector<ktl::ref<Thread>, WAKE_BATCH> batch;
+        bool scanned_all = false;
+        {
+            kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+            size_t i = 0;
+            while (i < m_nodes.size() && batch.size() < batch.capacity()) {
+                if (m_nodes[i].mask != 0) {
+                    ++i;
+                    continue;
+                }
+                batch.push_back(ktl::move(m_nodes[i].thread));
+                m_nodes.swap_remove(i);
             }
-            bool ok = woken.push_back(ktl::move(m_nodes[i].thread));
-            assert(ok, "wait_queue: wake list allocation failed");
-            m_nodes.swap_remove(i);
+            scanned_all = i == m_nodes.size();
         }
+        for (auto woken = batch.pop_back(); woken.has_value(); woken = batch.pop_back()) {
+            make_ready(ktl::move(*woken));
+        }
+        if (scanned_all) { return; }
     }
-    drain(woken);
 }
 
 size_t wait_queue::wake_matching(uint32_t signals) {
-    ktl::vector<ktl::ref<Thread>> woken;
-    {
-        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-        for (size_t i = 0; i < m_nodes.size();) {
-            if (m_nodes[i].mask == 0 || (m_nodes[i].mask & signals) == 0) {
-                ++i;
-                continue;
+    size_t woken_count = 0;
+    while (true) {
+        ktl::static_vector<ktl::ref<Thread>, WAKE_BATCH> batch;
+        bool scanned_all = false;
+        {
+            kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+            size_t i = 0;
+            while (i < m_nodes.size() && batch.size() < batch.capacity()) {
+                if (m_nodes[i].mask == 0 || (m_nodes[i].mask & signals) == 0) {
+                    ++i;
+                    continue;
+                }
+                batch.push_back(ktl::move(m_nodes[i].thread));
+                m_nodes.swap_remove(i);
             }
-            bool ok = woken.push_back(ktl::move(m_nodes[i].thread));
-            assert(ok, "wait_queue: wake list allocation failed");
-            m_nodes.swap_remove(i);
+            scanned_all = i == m_nodes.size();
         }
+        woken_count += batch.size();
+        for (auto woken = batch.pop_back(); woken.has_value(); woken = batch.pop_back()) {
+            make_ready(ktl::move(*woken));
+        }
+        if (scanned_all) { return woken_count; }
     }
-    size_t n = woken.size();
-    drain(woken);
-    return n;
 }
 
 bool wait_queue::has_waiters() {

@@ -3,7 +3,6 @@
 #include <std/string.h>
 
 #include "kernel/config.h"
-#include "kernel/log.h"
 #include "kernel/mm/page.h"
 #include "kernel/mm/page_descriptor.h"
 
@@ -35,18 +34,34 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
     return page;
 }
 
+void page_frame_allocator::frame_stack::push(vm_paddr_t addr) {
+    *reinterpret_cast<vm_paddr_t*>(addr + g_hhdm_offset) = m_head;
+    m_head                                               = addr;
+    ++m_count;
+}
+
+ktl::maybe<vm_paddr_t> page_frame_allocator::frame_stack::pop() {
+    if (m_head == NIL) { return ktl::nothing; }
+    vm_paddr_t addr = m_head;
+    auto* link      = reinterpret_cast<vm_paddr_t*>(addr + g_hhdm_offset);
+    m_head          = *link;
+    *link           = 0;  // the link word was a zeroed page's only nonzero bytes
+    --m_count;
+    return addr;
+}
+
 void page_frame_allocator::free(vm_paddr_t addr) {
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-    if (m_dirty.push(addr)) {
-        ++m_free_pages;
-        ++m_free_count;
-        g_page_descriptors.set_state(addr, page_state::FREE);
-    } else {
-        g_log.error("pmm: Failed to free page at 0x{0:p}", addr);
-    }
+    m_dirty.push(addr);
+    ++m_free_pages;
+    ++m_free_count;
+    g_page_descriptors.set_state(addr, page_state::FREE);
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {
+    // A zero-page run would "succeed" at the first region's tail with a base above its free
+    // space -- an address the allocator does not own. There is nothing coherent to return.
+    if (count == 0) { return ktl::nothing; }
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);
     for (size_t i = m_regions.size(); i-- > 0;) {
         auto& region = m_regions[i];
@@ -103,12 +118,8 @@ bool page_frame_allocator::zero_one_page() {
     if (auto page = m_dirty.pop()) {
         zero_page(page.value());
         ++m_zeroer_pages;
-        if (m_zeroed.push(page.value())) {
-            g_page_descriptors.set_state(page.value(), page_state::ZEROED);
-        } else if (!m_dirty.push(page.value())) {
-            g_log.error("pmm: Failed to repool zeroed page at 0x{0:p}", page.value());
-            --m_free_pages;  // the page is leaked; keep the count honest
-        }
+        m_zeroed.push(page.value());
+        g_page_descriptors.set_state(page.value(), page_state::ZEROED);
         return true;
     }
 

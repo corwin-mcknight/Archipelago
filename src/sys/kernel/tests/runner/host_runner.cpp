@@ -221,6 +221,46 @@ uintptr_t channel_page_alloc() { return reinterpret_cast<uintptr_t>(malloc(4096)
 void channel_page_free(uintptr_t page) { free(reinterpret_cast<void*>(page)); }
 }  // namespace kernel::obj
 
+// Slab heap pages likewise; aligned_alloc because the slab layout does page-mask arithmetic on
+// the base address. The whole run is one host allocation, so freeing by base frees it all. The
+// run table mirrors what the kernel stores in page descriptors; take on an unknown base panics,
+// matching the kernel's never-produced-pointer check.
+namespace kernel::mm {
+uintptr_t heap_pages_alloc(size_t pages) {
+    // Mirror the kernel seam's failure shape: a zero or overflowing page count is exhaustion,
+    // not a tiny wrapped host allocation that would mask kernel-side arithmetic bugs.
+    if (pages == 0 || pages > SIZE_MAX / 4096) { return 0; }
+    return reinterpret_cast<uintptr_t>(aligned_alloc(4096, pages * 4096));
+}
+void heap_pages_free(uintptr_t base, size_t) { free(reinterpret_cast<void*>(base)); }
+
+static struct {
+    uintptr_t base;
+    size_t pages;
+} g_host_runs[4096];
+
+void heap_pages_note_run(uintptr_t base, size_t pages) {
+    for (auto& run : g_host_runs) {
+        if (run.base == 0) {
+            run = {base, pages};
+            return;
+        }
+    }
+    panic("host heap stub: run table full");
+}
+
+size_t heap_pages_take_run(uintptr_t base) {
+    for (auto& run : g_host_runs) {
+        if (run.base == base) {
+            size_t pages = run.pages;
+            run          = {0, 0};
+            return pages;
+        }
+    }
+    panic("heap: free of a pointer the heap never produced");
+}
+}  // namespace kernel::mm
+
 // Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child
 // _exit()s, which skips the runtime's atexit writer, so we flush this child's counters explicitly.
 // Weak: in a normal (non-coverage) build the symbol is absent and the call is skipped.

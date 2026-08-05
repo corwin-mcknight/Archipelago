@@ -56,6 +56,14 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
         return ktl::err(added.unwrap_err());
     }
 
+    auto reserved = ensure_tick_capacity();
+    if (reserved.is_err()) {
+        task->remove_thread(thread->id());
+        release_thread_ipc(*task, thread->ipc());
+        stack_pool_release(*phys);
+        return ktl::err(reserved.unwrap_err());
+    }
+
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     thread->set_ready_ts(kernel::arch::timestamp());
     g_stats.spawned += 1;
@@ -63,6 +71,7 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
     bool ok = cur_cpu().run_queue.push_back(thread);
     kernel::arch::restore_interrupts(flags);
     if (!ok) {
+        note_thread_reaped();
         task->remove_thread(thread->id());
         release_thread_ipc(*task, thread->ipc());
         stack_pool_release(*phys);

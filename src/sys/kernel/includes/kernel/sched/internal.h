@@ -22,6 +22,17 @@ struct cpu_sched {
 };
 cpu_sched& cur_cpu();
 
+// The tick path (wake sleepers, requeue the preempted thread) pushes to the run queue and scans
+// the sleeper list from interrupt context, where the heap forbids allocation. Capacity for the
+// worst case -- every live thread runnable or sleeping at once -- is therefore reserved here, in
+// thread context, before a new thread first enters scheduling. spawn calls this once per thread;
+// the reaper gives the slot back. Failure is a clean spawn error, never a tick-time allocation.
+ktl::result<void> ensure_tick_capacity();
+void note_thread_reaped();
+
+// Reserve the sleeper list (owned by sleep.cpp) to `capacity` entries; interrupts-off internally.
+bool sleepers_reserve(size_t capacity);
+
 // Counters and the flight recorder live in stats.cpp. g_last_switch_ts anchors per-thread cycle
 // accounting shared between switch_to and stats_snapshot.
 extern global_stats g_stats;

@@ -139,16 +139,22 @@ KTEST_CASE_INTEGRATION(pmm_zeroer_and_stats) {
     // Phase 2: a dirtied, freed page drained through zero_one_page must come
     // back from the zeroed pool actually clean; alloc does not re-zero pool
     // pages, so a missed memset in zero_one_page shows up as a dirty
-    // allocation here.
+    // allocation here. The page cannot be inspected while pooled -- the pools
+    // are intrusive, so a pooled page carries the freelist link word -- which
+    // is why the check happens at reallocation, where the guarantee is owed.
+    // Phase 1 drained every earlier dirty page, so this page is the zeroed
+    // stack's top and the next alloc returns exactly it.
     {
         KTEST_REQUIRE_VALUE(addr, pmm.alloc());
         dirty_page(addr);
         pmm.free(addr);
 
-        // Stop once the page is clean rather than draining to full quiescence;
-        // dirty pages drain ahead of region pre-zeroing, so this stays short.
-        while (!page_is_zeroed(addr) && pmm.zero_one_page()) {}
-        KTEST_EXPECT_TRUE(page_is_zeroed(addr));
+        while (pmm.stats().dirty != 0 && pmm.zero_one_page()) {}
+
+        KTEST_REQUIRE_VALUE(again, pmm.alloc());
+        KTEST_EXPECT_EQUAL(again, addr);
+        KTEST_EXPECT_TRUE(page_is_zeroed(again));
+        pmm.free(again);
     }
 
     // Phase 3: stats track alloc/free counts and the low-water mark. All

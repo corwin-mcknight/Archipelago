@@ -14,6 +14,7 @@
 #include "kernel/drivers/uart.h"
 #include "kernel/log.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/mm/slab_heap.h"
 #include "kernel/mm/vm_aspace.h"
 #include "kernel/obj/event.h"
 #include "kernel/panic.h"
@@ -127,6 +128,12 @@ void init_memory() {
                        kind_name(entry.kind));
             continue;
         }
+        // A range whose end wraps the address space would make every derived extent computation
+        // (PMM region tails, descriptor coverage) wrap with it. Bootloader data is still input.
+        if (entry.base + entry.length < entry.base) {
+            g_log.warn("pmm: skipping wrapping region base=0x{0:p} length=0x{1:p}", entry.base, entry.length);
+            continue;
+        }
         size_t pages = entry.length / 0x1000;
 
         if (entry.kind == memory_kind::USABLE) {
@@ -134,14 +141,19 @@ void init_memory() {
                 g_log.warn("pmm: skipping empty usable region base=0x{0:p}", entry.base);
                 continue;
             }
+            // A range the descriptor table cannot cover must not reach the PMM either: the heap
+            // and VMM record per-frame truth in descriptors, so an allocatable-but-uncovered
+            // frame would panic the first time something looks its descriptor up. Losing the
+            // memory is the safe direction.
+            if (usable_range_count == MAX_MEMMAP_RANGES) {
+                g_log.warn("pmm: dropping usable range base=0x{0:p} pages={1} (descriptor range cap)", entry.base,
+                           pages);
+                continue;
+            }
             g_log.info("pmm: adding region base=0x{0:p} pages={1}", entry.base, pages);
             kernel::mm::g_page_frame_allocator.add_region({.start = entry.base, .count = pages});
             total_usable_pages += pages;
-            if (usable_range_count < MAX_MEMMAP_RANGES) {
-                usable_ranges[usable_range_count++] = {.start = entry.base, .count = pages};
-            } else {
-                g_log.warn("vmm: dropping usable range base=0x{0:p} from descriptor coverage", entry.base);
-            }
+            usable_ranges[usable_range_count++] = {.start = entry.base, .count = pages};
         } else if (entry.kind == memory_kind::KERNEL) {
             g_log.info("pmm: reserved region base=0x{0:p} pages={1} (kernel)", entry.base, pages);
             kernel::mm::g_page_frame_allocator.add_reserved(pages);
@@ -156,6 +168,9 @@ void init_memory() {
     g_log.info("Memory subsystem initialized ({0} usable pages)", total_usable_pages);
 
     kernel::mm::vmm_init(usable_ranges, usable_range_count, wired_ranges, wired_range_count);
+
+    kernel::mm::heap_activate();
+    g_log.info("Slab heap active; early heap serves boot-lifetime allocations only");
 }
 
 #if CONFIG_KERNEL_SHELL

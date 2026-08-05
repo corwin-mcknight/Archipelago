@@ -26,6 +26,13 @@ class early_heap {
     void* alloc(size_t size, size_t alignment = 1);
     void free(void* ptr);
 
+    // Whether ptr came from this heap's region -- how operator delete routes frees between the
+    // early heap and the slab heap after the switchover.
+    bool contains(const void* ptr) const {
+        uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
+        return address >= heap_start && address < heap_end;
+    }
+
     early_heap_stats stats();
     // Visits blocks in address order as (ctx, payload_bytes, is_free); the
     // block type stays private to the implementation.

@@ -105,6 +105,29 @@ bool current_is_idle() {
     return idle;
 }
 
+namespace {
+// Live threads known to scheduling; the high-water mark of this count is what the run queue and
+// sleeper list stay reserved for, so tick-context pushes never grow them.
+ktl::atomic<size_t> g_live_threads{0};
+}  // namespace
+
+ktl::result<void> ensure_tick_capacity() {
+    size_t live    = g_live_threads.fetch_add(1, ktl::memory_order::relaxed) + 1;
+    size_t target  = live + 2;  // the idle thread and the boot context scheduling as threads
+
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    bool ok        = cur_cpu().run_queue.reserve(target);
+    kernel::arch::restore_interrupts(flags);
+    if (ok) { ok = sleepers_reserve(target); }
+    if (!ok) {
+        g_live_threads.fetch_sub(1, ktl::memory_order::relaxed);
+        return ktl::err(ktl::errc::oom);
+    }
+    return ktl::result<void>::ok();
+}
+
+void note_thread_reaped() { g_live_threads.fetch_sub(1, ktl::memory_order::relaxed); }
+
 void make_ready(ktl::ref<Thread> thread) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     assert(thread->state() == thread_state::BLOCKED, "make_ready: thread is not blocked");
