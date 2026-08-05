@@ -8,8 +8,7 @@
 #if CONFIG_KERNEL_SHELL
 
 // Drives the mem shell command through run_line with a capture sink and
-// asserts on the rendered text: subcommand routing, protocol-mode escape
-// hygiene, and error handling.
+// asserts that its plain summary is also clean in protocol mode.
 
 namespace {
 
@@ -46,26 +45,17 @@ bool captured_contains(const char* needle) {
 
 KTEST_MODULE("shell/mem");
 
-// Normal-mode story: subcommand routing renders only the requested section, and unknown
-// subcommands print usage. Each phase resets the capture buffer via make_capture_output.
-KTEST_CASE_INTEGRATION(shell_mem_normal_mode_routing_and_usage) {
+KTEST_CASE_INTEGRATION(shell_mem_summary) {
     {
         auto out = make_capture_output();
-        kernel::shell::run_line("mem heap", out);
-        KTEST_EXPECT_TRUE(captured_contains("heap (early)"));
-        KTEST_EXPECT_TRUE(captured_contains("largest free"));
-        KTEST_EXPECT_TRUE(!captured_contains("kernel aspace"));
-        KTEST_EXPECT_TRUE(!captured_contains("physical"));
-    }
-    {
-        auto out = make_capture_output();
-        kernel::shell::run_line("mem bogus", out);
-        KTEST_EXPECT_TRUE(captured_contains("usage: mem"));
+        kernel::shell::run_line("mem", out);
+        KTEST_EXPECT_TRUE(captured_contains("physical:"));
+        KTEST_EXPECT_TRUE(captured_contains("pages:"));
+        KTEST_EXPECT_TRUE(captured_contains("heap:"));
+        KTEST_EXPECT_TRUE(captured_contains("kernel aspace:"));
     }
 }
 
-// Protocol-mode story: the full dump is escape-clean while keeping field lines, and
-// interactive-only subcommands refuse to run.
 KTEST_CASE_INTEGRATION(shell_mem_protocol_mode_escape_hygiene) {
     {
         auto out = make_capture_output();
@@ -77,15 +67,8 @@ KTEST_CASE_INTEGRATION(shell_mem_protocol_mode_escape_hygiene) {
             if (g_capture[i] == '\x1b') { clean = false; }
         }
         KTEST_EXPECT_TRUE(clean);
-        // Field lines still present for harness matching.
-        KTEST_EXPECT_TRUE(captured_contains("physical"));
-        KTEST_EXPECT_TRUE(captured_contains("allocs"));
-    }
-    {
-        auto out = make_capture_output();
-        out.set_protocol_mode(true);
-        kernel::shell::run_line("mem top", out);
-        KTEST_EXPECT_TRUE(captured_contains("disabled in protocol mode"));
+        KTEST_EXPECT_TRUE(captured_contains("physical:"));
+        KTEST_EXPECT_TRUE(captured_contains("pmm:"));
     }
 }
 

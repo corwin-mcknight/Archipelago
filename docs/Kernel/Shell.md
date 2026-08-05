@@ -40,12 +40,7 @@ Commands use a subcommand structure -- the first word selects a command group, t
 | `help` | List available commands |
 
 ## Memory Debug View
-The `mem` command prints a dense overview of every memory subsystem: the physical allocator, page descriptor states, the early heap, the kernel address space tree, and the VMO inventory.
-Subcommands select a single section of the same view.
-Interactive output is colored and includes usage meters, a physical memory map strip, a heap block map, and a box-drawing region tree.
-Protocol mode receives the same information as plain line-oriented fields with no escape sequences, so harness tests can match on stable field names.
-A live variant redraws the full view about twice per second, adds per-second rates and sparklines for free memory and fault rate, and exits on `x` or `q`.
-The live variant is interactive-only and refuses to start in protocol mode.
+The `mem` command prints a plain, line-oriented memory summary: physical allocator totals, page descriptor states, early-heap statistics, and kernel address-space bounds and faults. Its output is identical in interactive and protocol modes, so harness tests can match stable field names without terminal escape sequences.
 
 ## Command Registration
 Command groups self-register using a linker section, following the same pattern as kernel tests.
