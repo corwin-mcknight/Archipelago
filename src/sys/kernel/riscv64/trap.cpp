@@ -3,6 +3,7 @@
 #include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/registers.h>
+#include <kernel/sched/user_task.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/syscall.h>
 
@@ -76,10 +77,13 @@ extern "C" void riscv_trap_handler(register_frame_t* regs) {
         return;
     }
 
+    // Keep synchronous traps in the same execution-context state as x86_64. In particular, the
+    // user-fault handoff below must explicitly leave fault context before it schedules away.
+    kernel::synchronization::fault_enter();
+
     // Page faults get one shot at demand-paging resolution before the crash
     // path; an unresolvable fault falls through with diagnostics intact.
     if (is_page_fault(regs->scause)) {
-        kernel::synchronization::fault_enter();
         if (try_resolve_page_fault(regs)) {
             kernel::synchronization::fault_exit();
             return;
@@ -88,11 +92,17 @@ extern "C" void riscv_trap_handler(register_frame_t* regs) {
 
     constexpr uint64_t CAUSE_ECALL_U = 8;
     if (regs->scause == CAUSE_ECALL_U) {
+        kernel::synchronization::fault_exit();
         // User ABI: a7 = number, a0..a5 = args. The trap frame already saves them all, and riscv64
         // has enough argument registers to pass every one of them plus the number.
         regs->a0 = syscall_dispatch(regs->a7, regs->a0, regs->a1, regs->a2, regs->a3, regs->a4, regs->a5);
         regs->sepc += 4;
         return;
+    }
+
+    if ((regs->sstatus & SSTATUS_SPP) == 0) {
+        kernel::synchronization::fault_exit();
+        kernel::sched::terminate_current_user_task_from_fault(regs->scause, regs->stval, regs->sepc);
     }
 
     kernel::crash::dispatch(kernel::crash::trigger_kind::exception, regs);

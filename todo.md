@@ -74,7 +74,7 @@
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
 ## Task & Thread Lifecycle
-- Terminate only the faulting user task for unresolved user-mode faults; the current path panics the kernel until task-kill machinery exists.
+- [x] Terminate only the faulting user task for unresolved user-mode faults; the fault path logs a structured report, leaves fault context, and lets the reaper publish TERMINATED after teardown.
 - Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
 - Extract the userspace runtime once a second user program exists. `src/sys/init/` currently owns `_start` (per arch), the syscall wrappers, the linker script, and its freestanding compile flags; each exists once, so factoring now would build a library with one caller. The second program is the trigger, and the thing to extract is a C runtime -- `_start`, syscall stubs, linker script -- as a package installing headers and a static archive next to `sys/kernel-headers`, not a libc. Nothing needs malloc, stdio, string, or locale, and naming it `libc` invites someone to supply them. Initrd will likely reshape userspace anyway, so committing late is cheaper than committing now.
 - ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):

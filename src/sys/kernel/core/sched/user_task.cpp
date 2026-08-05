@@ -1,4 +1,5 @@
 #include <kernel/arch.h>
+#include <kernel/assert.h>
 #include <kernel/config.h>
 #include <kernel/elf_loader.h>
 #include <kernel/log.h>
@@ -124,6 +125,23 @@ void teardown_user_task(ktl::ref<Task> task) {
     // teardown step; publishing it earlier exposes a half-torn-down task.
     task->set_state(task_state::TERMINATED);
     if (lifecycle_log_enabled()) { g_log.debug("task: torn down id={0}", task->id()); }
+}
+
+[[noreturn]] void terminate_current_user_task_from_fault(uint64_t cause, uint64_t detail, uintptr_t pc) {
+    auto thread = current();
+    auto task   = ktl::static_ref_cast<Task>(thread->owner());
+    assert(task && task.get() != kernel_task().get(), "user fault has no user task");
+
+    // Keep this a single parseable record: a fault path must report enough to correlate an
+    // architecture-specific trap with the task and thread it terminated, without invoking the
+    // crash dumper or touching faultable user memory.
+    g_log.error("task_fault task={0} thread={1} cause={2} detail=0x{3:x} pc=0x{4:p} action=terminate", task->id(),
+                thread->id(), cause, detail, pc);
+
+    // exit_current() queues the thread and switches stacks. It may not run while fault_depth is
+    // nonzero, so callers must fault_exit() before this handoff.
+    kernel::synchronization::assert_blocking_allowed("user fault termination still in fault context");
+    exit_current();
 }
 
 }  // namespace kernel::sched

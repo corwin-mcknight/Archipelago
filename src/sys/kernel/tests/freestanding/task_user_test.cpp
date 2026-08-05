@@ -3,10 +3,12 @@
 #if CONFIG_KERNEL_TESTING
 
 #include <kernel/boot.h>
+#include <kernel/elf.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/syscall.h>
+#include <std/string.h>
 
 #include <ktl/vector>
 
@@ -72,6 +74,74 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     ktl::vector<ktl::ref<Task>> tasks;
     KTEST_REQUIRE_TRUE(snapshot_tasks(tasks));
     for (size_t i = 0; i < tasks.size(); ++i) { KTEST_EXPECT_TRUE(tasks[i]->id() != task->id()); }
+}
+
+namespace {
+
+// Build a test-only copy of init with its entry overwritten by a small native store through the
+// unmapped null page. It remains a normal loader input, while avoiding a second user-program
+// package solely for this regression test.
+bool make_faulting_image(const kernel::boot::boot_module& module, ktl::vector<uint8_t>& image) {
+    if (!image.reserve(module.size)) { return false; }
+    for (size_t i = 0; i < module.size; ++i) {
+        if (!image.push_back(static_cast<const uint8_t*>(module.data)[i])) { return false; }
+    }
+
+    auto* header = reinterpret_cast<kernel::elf::Elf64_Ehdr*>(image.data());
+    if (header->e_phoff > image.size() || header->e_phnum == 0 ||
+        header->e_phentsize < sizeof(kernel::elf::Elf64_Phdr)) {
+        return false;
+    }
+
+    uint64_t entry_offset = 0;
+    bool found_entry      = false;
+    for (size_t i = 0; i < header->e_phnum; ++i) {
+        uint64_t offset = header->e_phoff + i * header->e_phentsize;
+        if (offset > image.size() || sizeof(kernel::elf::Elf64_Phdr) > image.size() - offset) { return false; }
+        auto* phdr = reinterpret_cast<kernel::elf::Elf64_Phdr*>(image.data() + offset);
+        if (phdr->p_type != kernel::elf::PT_LOAD || header->e_entry < phdr->p_vaddr ||
+            header->e_entry - phdr->p_vaddr >= phdr->p_filesz) {
+            continue;
+        }
+        entry_offset = phdr->p_offset + header->e_entry - phdr->p_vaddr;
+        found_entry  = true;
+        break;
+    }
+
+#if defined(ARCH_X86_64)
+    constexpr uint8_t FAULT_CODE[] = {0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00, 0xc6, 0x00, 0x00};
+#elif defined(ARCH_RISCV64)
+    constexpr uint8_t FAULT_CODE[] = {0x93, 0x02, 0x00, 0x00, 0x23, 0x80, 0x02, 0x00};
+#else
+#error unsupported architecture
+#endif
+
+    if (!found_entry || entry_offset > image.size() || sizeof(FAULT_CODE) > image.size() - entry_offset) {
+        return false;
+    }
+    memcpy(image.data() + entry_offset, FAULT_CODE, sizeof(FAULT_CODE));
+    return true;
+}
+
+}  // namespace
+
+KTEST_CASE_INTEGRATION(user_task_unresolved_fault_terminates_task) {
+    const auto* module = kernel::boot::find_module("init");
+    KTEST_REQUIRE_TRUE(module != nullptr);
+
+    ktl::vector<uint8_t> image;
+    KTEST_REQUIRE_TRUE(make_faulting_image(*module, image));
+    auto created = create_user_task("ufault", image.data(), image.size());
+    KTEST_REQUIRE_TRUE(created.is_ok());
+    ktl::ref<Task> task = created.unwrap();
+
+    for (int i = 0; i < 2000 && task->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
+
+    KTEST_REQUIRE_TRUE(task->state() == task_state::TERMINATED);
+    KTEST_EXPECT_EQUAL(task->thread_count(), 0u);
+    KTEST_EXPECT_TRUE(task->aspace() == nullptr);
+    // Returning a passing test result makes the harness wait for the next shell-ready record,
+    // proving the kernel remained live and the shell stayed reachable after the fault.
 }
 
 #endif

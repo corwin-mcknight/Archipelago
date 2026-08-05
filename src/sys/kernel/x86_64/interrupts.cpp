@@ -3,6 +3,7 @@
 #include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/registers.h>
+#include <kernel/sched/user_task.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/x86/apic.h>
 #include <kernel/x86/descriptor_tables.h>
@@ -18,6 +19,14 @@ extern "C" void k_exception_handler(register_frame_t* regs) {
     if (regs->int_no == 14 && x86_try_resolve_page_fault(regs)) {
         kernel::synchronization::fault_exit();
         return;
+    }
+
+    // The privilege level saved by the CPU is authoritative for every exception, unlike the page
+    // fault error-code U bit, which is meaningful only for #PF. Leave fault context before the
+    // non-returning scheduler handoff so it cannot block on the faulting thread's kernel stack.
+    if (regs->int_no < 32 && (regs->cs & 0x3) == 0x3) {
+        kernel::synchronization::fault_exit();
+        kernel::sched::terminate_current_user_task_from_fault(regs->int_no, regs->err_code, regs->rip);
     }
 
     // Vectors 0..31 are real CPU exceptions. The dispatcher never returns;
