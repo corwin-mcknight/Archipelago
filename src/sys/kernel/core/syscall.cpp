@@ -14,14 +14,21 @@ constexpr size_t k_debug_line_max = 120;
 char g_debug_line[k_debug_line_max + 1];
 size_t g_debug_len = 0;
 
-void log_putc(char c) {
-    if (c != '\n') {
-        g_debug_line[g_debug_len++] = c;
-        if (g_debug_len < k_debug_line_max) { return; }
-    }
+void log_flush_line() {
     g_debug_line[g_debug_len] = '\0';
     g_log.info("user: {0}", static_cast<const char*>(g_debug_line));
     g_debug_len = 0;
+}
+
+// Every exit leaves g_debug_len < k_debug_line_max, so the append below is always in bounds even
+// when two threads' writes interleave at a flush boundary.
+void log_putc(char c) {
+    if (c == '\n') {
+        log_flush_line();
+        return;
+    }
+    g_debug_line[g_debug_len++] = c;
+    if (g_debug_len == k_debug_line_max) { log_flush_line(); }
 }
 
 // Emit [offset, offset + length) of the calling thread's IPC buffer. Output goes through the log
@@ -69,9 +76,8 @@ uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1) {
 
 uint64_t errc_of(ktl::errc error) { return static_cast<uint64_t>(error); }
 
-// Copy kernel bytes into a pre-validated IPC buffer range, page run by page run -- the backing
-// frames are not physically contiguous. Callers check contains() first. This is the kernel-to-user
-// copy-out direction; the user-to-kernel direction lives in sys_channel_send's staging loop.
+// Copy between a pre-validated IPC buffer range and contiguous kernel memory, page run by page
+// run -- the backing frames are not physically contiguous. Callers check contains() first.
 void buffer_write(const kernel::sched::ipc_buffer& buffer, uint64_t offset, const void* src, size_t length) {
     size_t done = 0;
     while (done < length) {
@@ -79,6 +85,17 @@ void buffer_write(const kernel::sched::ipc_buffer& buffer, uint64_t offset, cons
         void* to    = reinterpret_cast<void*>(buffer.kernel_at(offset + done, run));
         size_t take = run < length - done ? run : length - done;
         __builtin_memcpy(to, static_cast<const uint8_t*>(src) + done, take);
+        done += take;
+    }
+}
+
+void buffer_read(const kernel::sched::ipc_buffer& buffer, uint64_t offset, void* dst, size_t length) {
+    size_t done = 0;
+    while (done < length) {
+        size_t run       = 0;
+        const void* from = reinterpret_cast<const void*>(buffer.kernel_at(offset + done, run));
+        size_t take      = run < length - done ? run : length - done;
+        __builtin_memcpy(static_cast<uint8_t*>(dst) + done, from, take);
         done += take;
     }
 }
@@ -127,13 +144,7 @@ uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length) {
     auto created = kernel::obj::MessageBuffer::create(length);
     if (created.is_err()) { return errc_of(created.unwrap_err()); }
     auto message = created.unwrap();
-    for (uint64_t done = 0; done < length;) {
-        size_t run       = 0;
-        const void* from = reinterpret_cast<const void*>(buffer.kernel_at(offset + done, run));
-        uint64_t take    = run < length - done ? run : length - done;
-        __builtin_memcpy(message.data() + done, from, take);
-        done += take;
-    }
+    if (length != 0) { buffer_read(buffer, offset, message.data(), length); }
 
     auto channel = ktl::static_ref_cast<kernel::obj::Channel>(verified.unwrap().object);
     auto sent    = channel->write(ktl::move(message));

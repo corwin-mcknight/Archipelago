@@ -33,14 +33,14 @@ class page_frame_allocator {
     ktl::maybe<vm_paddr_t> alloc();
     void free(vm_paddr_t addr);
     // Carve a physically contiguous, zeroed run of pages from an untouched
-    // region tail. No free_contiguous -- the only caller (the page
-    // descriptor array) lives for the kernel's lifetime.
+    // region tail. No free_contiguous: boot-lifetime callers (the page
+    // descriptor array) never free, and the heap's multi-page runs return
+    // through free() page by page, at the documented tail-depletion cost.
     ktl::maybe<vm_paddr_t> alloc_contiguous(size_t count);
     // Zero one free page; false when there is nothing left to do. Dirty pages
     // always drain into the zeroed pool; region tail pages are zeroed in place
-    // (tracked by a per-region count, not pool entries) until roughly half of
-    // free memory is zeroed. The zeroer thread's work loop; safe to race with
-    // alloc/free.
+    // (tracked by a per-region count, not pool entries) until all free memory
+    // is zeroed. The zeroer thread's work loop; safe to race with alloc/free.
     bool zero_one_page();
 
     pmm_stats stats();

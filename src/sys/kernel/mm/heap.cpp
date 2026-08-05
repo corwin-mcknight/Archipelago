@@ -1,7 +1,7 @@
-#include "kernel/mm/early_heap.h"
-#include "kernel/mm/slab_heap.h"
-#include "kernel/panic.h"
-#include "std/new.h"
+#include <kernel/mm/early_heap.h>
+#include <kernel/mm/slab_heap.h>
+#include <kernel/panic.h>
+#include <std/new.h>
 
 namespace std { const nothrow_t nothrow{}; }  // namespace std
 

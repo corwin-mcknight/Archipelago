@@ -7,8 +7,8 @@
 #include <ktl/ref>
 
 // Scheduler-private interfaces shared by the core/sched/ translation units (scheduler, sleep,
-// spawn, stats). Everything here is guarded by interrupts-off on the single scheduling core.
-// Nothing outside core/sched/ may include this header.
+// spawn, reaper, stats). Everything here is guarded by interrupts-off on the single scheduling
+// core. Nothing outside core/sched/ may include this header.
 
 namespace kernel::sched {
 
@@ -30,8 +30,10 @@ cpu_sched& cur_cpu();
 ktl::result<void> ensure_tick_capacity();
 void note_thread_reaped();
 
-// Reserve the sleeper list (owned by sleep.cpp) to `capacity` entries; interrupts-off internally.
+// Reserve the sleeper list (owned by sleep.cpp) and the zombie list (owned by reaper.cpp) to
+// `capacity` entries; both take interrupts-off internally.
 bool sleepers_reserve(size_t capacity);
+bool zombies_reserve(size_t capacity);
 
 // Counters and the flight recorder live in stats.cpp. g_last_switch_ts anchors per-thread cycle
 // accounting shared between switch_to and stats_snapshot.

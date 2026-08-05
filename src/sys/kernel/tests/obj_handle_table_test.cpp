@@ -144,7 +144,7 @@ KTEST_CASE(obj_handle_table_rejects_unregistered_type) {
 KTEST_CASE(obj_handle_table_generation_wrap_retires_slot) {
     HandleTable table;
     KTEST_UNWRAP(initial, table.emplace<TestObjA>(RIGHTS_ALL));
-    KTEST_REQUIRE_VALUE(id, table.testing_set_generation(initial, 0xFFFFFFFFu));
+    KTEST_REQUIRE_VALUE(id, table.testing_set_generation(initial, 0x7FFFFFFFu));
     KTEST_REQUIRE_TRUE(table.is_valid(id));
     KTEST_EXPECT_TRUE(table.close(id).is_ok());
     KTEST_EXPECT_ALL(!table.is_valid(id), table.count() == 0);

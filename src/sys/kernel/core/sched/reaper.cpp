@@ -65,10 +65,20 @@ void reap(ktl::ref<Thread> zombie) {
 void reaper_start() { spawn("reaper", reaper_main, nullptr).expect("sched: reaper spawn failed"); }
 
 void reaper_enqueue(ktl::ref<Thread> zombie) {
-    // Interrupts are already disabled by the caller (exit_current, mid-teardown).
+    // Interrupts are already disabled by the caller (exit_current, mid-teardown). The push cannot
+    // allocate: ensure_tick_capacity reserved a zombie slot per live thread at spawn, and a
+    // thread dies at most once. The check survives NDEBUG because a silent failure here would be
+    // a permanently leaked thread, not a caught bug.
     bool ok = g_zombies.push_back(ktl::move(zombie));
-    assert(ok, "reaper_enqueue: zombie list allocation failed");
+    ensure(ok, "reaper_enqueue: zombie list push failed despite reservation");
     g_reaper_wq.wake_one();
+}
+
+bool zombies_reserve(size_t capacity) {
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    bool ok        = g_zombies.reserve(capacity);
+    kernel::arch::restore_interrupts(flags);
+    return ok;
 }
 
 size_t reaper_zombie_count() {

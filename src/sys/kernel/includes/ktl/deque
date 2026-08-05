@@ -215,10 +215,41 @@ template <typename T> class deque {
 
    private:
     bool emplace_back_internal(T&& value) {
-        if (!ensure_back_block()) { return false; }
-        block& back_block = m_blocks[m_blocks.size() - 1];
+        size_t target;
+        if (!select_back_block(target)) { return false; }
+        block& back_block = m_blocks[target];
         if (!back_block.values.push_back(ktl::move(value))) { return false; }
         ++m_size;
+        return true;
+    }
+
+    // Pick the block push_back fills: the last non-empty block while it has physical room, then
+    // the already-provisioned empty block behind it, appending a fresh block only when neither
+    // exists. Filling provisioned empties in order is what makes reserve()'s no-allocation
+    // promise hold for bursts longer than one block -- targeting only the physically-last block
+    // would leave every pre-created block unreachable in front of it, and the promise is what
+    // lets the scheduler push from interrupt context. Non-empty blocks stay contiguous, so
+    // indexing and the pop paths are unaffected.
+    bool select_back_block(size_t& target) {
+        if (m_blocks.empty()) {
+            if (!append_empty_block_back()) { return false; }
+            target = 0;
+            return true;
+        }
+        size_t last_live = last_non_empty_block_index();  // 0 when the deque is fully empty
+        if (m_blocks[last_live].values.size() < k_block_capacity) {
+            target = last_live;
+            return true;
+        }
+        if (last_live + 1 < m_blocks.size()) {
+            // Blocks past the last non-empty one are always reset() with their storage intact
+            // (reserve pre-provisions them; rotation and pop_back preserve them), so this push
+            // cannot allocate.
+            target = last_live + 1;
+            return true;
+        }
+        if (!append_empty_block_back()) { return false; }
+        target = m_blocks.size() - 1;
         return true;
     }
 
@@ -240,14 +271,6 @@ template <typename T> class deque {
 
     // Room checks are against physical occupancy (values.size()), not live size: consumed
     // front slots are only reusable by push_front, via the head index.
-    bool ensure_back_block() {
-        if (m_blocks.empty()) { return append_empty_block_back(); }
-
-        block& back_block = m_blocks[m_blocks.size() - 1];
-        if (back_block.values.size() < k_block_capacity) { return true; }
-        return append_empty_block_back();
-    }
-
     bool ensure_front_block() {
         if (m_blocks.empty()) { return append_empty_block_back(); }
         block& front_block = m_blocks[0];

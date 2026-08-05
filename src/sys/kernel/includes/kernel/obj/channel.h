@@ -16,8 +16,9 @@ struct channel_state;
 // Message pages: the PMM is the message allocator. A message is at most MAX_MESSAGE_BYTES, which
 // fits one page, so message storage needs no heap -- no fragmentation, quota accounting in the
 // same currency as everything else (pages), and exhaustion is a clean error instead of the early
-// heap's panic. Kernel builds implement these over the PMM through the physmap (mm/channel_pages
-// .cpp); the host runner supplies malloc-backed stubs, so hosted tests see message logic only.
+// heap's panic. Kernel builds implement these over the PMM through the physmap, in
+// mm/channel_pages.cpp; the host runner supplies malloc-backed stubs, so hosted tests see
+// message logic only.
 // Returns 0 when no page is available.
 uintptr_t channel_page_alloc();
 void channel_page_free(uintptr_t page);

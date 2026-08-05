@@ -52,6 +52,14 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::frame_stack::pop() {
 
 void page_frame_allocator::free(vm_paddr_t addr) {
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+    // A frame already back in a pool would be threaded onto the intrusive stack twice, aliasing
+    // two future allocations forever -- with descriptor coverage a double free is detectable, so
+    // detect it. Uncovered frames (pre-VMM boot) stay tolerated, matching set_state's contract.
+    if (const auto* descriptor = g_page_descriptors.lookup(addr)) {
+        if (descriptor->state == page_state::FREE || descriptor->state == page_state::ZEROED) {
+            panic("pmm: double free of a frame");
+        }
+    }
     m_dirty.push(addr);
     ++m_free_pages;
     ++m_free_count;
@@ -62,26 +70,41 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {
     // A zero-page run would "succeed" at the first region's tail with a base above its free
     // space -- an address the allocator does not own. There is nothing coherent to return.
     if (count == 0) { return ktl::nothing; }
-    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-    for (size_t i = m_regions.size(); i-- > 0;) {
-        auto& region = m_regions[i];
-        if (region.count < count) { continue; }
-        region.count -= count;
-        vm_paddr_t base = region.start + region.count * PAGE_SIZE;
-        // The carved run's high end may overlap the pre-zeroed tail; only the
-        // low pages still need a memset.
-        size_t pre      = region.zeroed_count < count ? region.zeroed_count : count;
-        region.zeroed_count -= pre;
-        m_region_zeroed -= pre;
-        for (size_t p = 0; p < count - pre; ++p) { zero_page(base + p * PAGE_SIZE); }
-        for (size_t p = 0; p < count; ++p) { g_page_descriptors.set_state(base + p * PAGE_SIZE, page_state::ACTIVE); }
-        m_free_pages -= count;
-        ++m_contig_count;
-        if (m_free_pages < m_low_water) { m_low_water = m_free_pages; }
-        return base;
+
+    vm_paddr_t base  = 0;
+    size_t need_zero = 0;
+    bool carved      = false;
+    {
+        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+        for (size_t i = m_regions.size(); i-- > 0;) {
+            auto& region = m_regions[i];
+            if (region.count < count) { continue; }
+            region.count -= count;
+            base       = region.start + region.count * PAGE_SIZE;
+            // The carved run's high end may overlap the pre-zeroed tail; only the
+            // low pages still need a memset.
+            size_t pre = region.zeroed_count < count ? region.zeroed_count : count;
+            region.zeroed_count -= pre;
+            m_region_zeroed -= pre;
+            need_zero = count - pre;
+            for (size_t p = 0; p < count; ++p) {
+                g_page_descriptors.set_state(base + p * PAGE_SIZE, page_state::ACTIVE);
+            }
+            m_free_pages -= count;
+            ++m_contig_count;
+            if (m_free_pages < m_low_water) { m_low_water = m_free_pages; }
+            carved = true;
+            break;
+        }
+        if (!carved) { ++m_alloc_failures; }
     }
-    ++m_alloc_failures;
-    return ktl::nothing;
+    if (!carved) { return ktl::nothing; }
+
+    // Zero outside the lock: an unbounded memset under the IRQ-off spinlock would stall the whole
+    // core for the run's length. The pages are already carved and marked ACTIVE, so this thread
+    // is their sole owner and nothing else can hand them out or scan them mid-zero.
+    for (size_t p = 0; p < need_zero; ++p) { zero_page(base + p * PAGE_SIZE); }
+    return base;
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page(bool& pre_zeroed) {

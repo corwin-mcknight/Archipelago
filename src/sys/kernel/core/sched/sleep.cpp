@@ -35,7 +35,7 @@ void sleep_ticks(uint64_t ticks) {
     c.current->stats().sleeps += 1;
     c.current->set_state(thread_state::BLOCKED);
     bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
-    assert(ok, "sleep_ticks: sleeper allocation failed");
+    ensure(ok, "sleep_ticks: sleeper push failed despite reservation");
     schedule_out(switch_reason::SLEEP);
     kernel::arch::restore_interrupts(flags);
 }

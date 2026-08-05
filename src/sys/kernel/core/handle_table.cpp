@@ -3,7 +3,12 @@
 
 namespace kernel::obj {
 
-HandleTable::~HandleTable() = default;
+// Generations retire one bit early: a slot whose generation reached this value is never recycled.
+// Capping below 2^31 keeps bit 63 of every packed handle clear, which is what lets user code
+// classify a syscall return as handle-vs-error with a plain sign test (see abi/syscall.h).
+constexpr uint32_t MAX_GENERATION = 0x7FFFFFFF;
+
+HandleTable::~HandleTable()       = default;
 
 ktl::result<void> HandleTable::grow() {
     size_t old_size = m_entries.size();
@@ -81,7 +86,7 @@ void HandleTable::clear() {
         entry.object.reset();
         entry.rights = 0;
         m_count--;
-        if (entry.generation != UINT32_MAX) { entry.generation++; }
+        if (entry.generation != MAX_GENERATION) { entry.generation++; }
     }
 
     // Rebuild the free list over the dead slots in ascending index order -- fresh-table slot
@@ -90,7 +95,7 @@ void HandleTable::clear() {
     m_free_head = -1;
     for (size_t i = m_entries.size(); i-- > 0;) {
         auto& entry = m_entries[i];
-        if (entry.object || entry.generation == UINT32_MAX) {
+        if (entry.object || entry.generation == MAX_GENERATION) {
             entry.next_free = -1;
             continue;
         }
@@ -135,7 +140,7 @@ ktl::result<void> HandleTable::close(HandleId id) {
     // If the generation counter is saturated, incrementing would wrap to 0 and let a stale
     // (index, generation) HandleId revalidate against a recycled slot. Retire the slot permanently
     // instead of returning it to the free list.
-    if (entry->generation == UINT32_MAX) {
+    if (entry->generation == MAX_GENERATION) {
         entry->next_free = -1;
         return ktl::result<void>::ok();
     }

@@ -1,5 +1,9 @@
 # TODO
 
+## Next Up
+- Handle transfer through channel messages (kernel-table escrow per `docs/Design/IPC Primitives.md`): move the handle into task zero's table on send, into the receiver's on dequeue, close normally if the channel dies in between. Unblocked by the slab heap -- the escrow table now grows on an allocator that fails cleanly instead of panicking.
+- AUMI per-type arena phase: named object caches with zero-on-free layered over the slab heap. First clients: Thread, channel_state, and handle-table entry batches; Umbra-style exact-size chains are the shape to steal.
+
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
 - SBI timer hardcodes QEMU virt's 10 MHz timebase; read the DTB's /cpus/timebase-frequency for real hardware (VisionFive 2 is 4 MHz).
@@ -77,6 +81,7 @@
 - Per-CPU trace rings and accounting once AP scheduling lands (today's ring and stats assume a single scheduling core).
 - Latency percentiles and richer `sched` shell views if thread counts grow beyond what the flat per-thread tables can show at a glance.
 - Cross-CPU load balancing, once multi-core scheduling lands.
+- SMP park/wake handshake (decided: per-thread on-cpu flag, Linux style): block_if's unlock-to-switch window is safe only on a single scheduling core. When AP scheduling lands, each thread gets an on-cpu flag cleared from sched_finish_switch once its state is fully saved; a waker that finds the thread parked spins until the flag clears before running it. Chosen over holding the queue lock across the switch so the never-switch-while-holding-a-lock discipline stays intact.
 - Back per-core identity with a GS-based per-CPU pointer before AP scheduling replaces the current x86 CPUID/dense-index lookup; make per-core lapic_id atomic to close the bring-up read/write race.
 - VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
 - Post-Milestone-1 review findings, scheduler and synchronization:

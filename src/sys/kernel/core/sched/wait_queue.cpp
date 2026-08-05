@@ -15,6 +15,12 @@ namespace kernel::sched {
 void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx) {
     assert(!current_is_idle(), "block_if: idle thread cannot block");
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
+    // The node lives in this frame, which survives exactly as long as the thread stays parked, so
+    // parking allocates nothing and cannot fail -- there is no OOM path out of a blocking wait.
+    // The waker unlinks the node and moves the ref out before make_ready, after which the node is
+    // dead memory nobody references; this frame only unwinds once the thread runs again.
+    wait_node node;
+    node.mask      = mask;
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     kernel::synchronization::preempt_disable();
     m_lock.lock();
@@ -27,8 +33,11 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
     ktl::ref<Thread> self = current();
     self->stats().blocks += 1;
     self->set_state(thread_state::BLOCKED);
-    bool pushed = m_nodes.push_back(wait_node{ktl::move(self), mask});
-    assert(pushed, "wait_queue: waiter allocation failed");
+    node.thread = ktl::move(self);
+    node.next   = m_waiters;
+    node.prev   = nullptr;
+    if (m_waiters != nullptr) { m_waiters->prev = &node; }
+    m_waiters = &node;
     m_lock.unlock();
     kernel::synchronization::preempt_enable();
     // Interrupts stay off between unlock and the switch: on the single scheduling core nothing
@@ -36,6 +45,16 @@ void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx)
     schedule_out(switch_reason::BLOCK);
     kernel::arch::restore_interrupts(flags);
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: woke id={0}", current()->id()); }
+}
+
+// Unlink under the queue lock; the caller takes the thread ref before the node becomes dead
+// memory on the (about-to-wake) thread's stack.
+void wait_queue::unlink(wait_node* node) {
+    if (node->prev != nullptr) { node->prev->next = node->next; }
+    if (node->next != nullptr) { node->next->prev = node->prev; }
+    if (m_waiters == node) { m_waiters = node->next; }
+    node->next = nullptr;
+    node->prev = nullptr;
 }
 
 namespace {
@@ -51,10 +70,10 @@ void wait_queue::wake_one() {
     ktl::ref<Thread> woken;
     {
         kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-        for (size_t i = 0; i < m_nodes.size(); ++i) {
-            if (m_nodes[i].mask != 0) { continue; }  // signal waiters are woken by wake_matching
-            woken = ktl::move(m_nodes[i].thread);
-            m_nodes.swap_remove(i);
+        for (wait_node* node = m_waiters; node != nullptr; node = node->next) {
+            if (node->mask != 0) { continue; }  // signal waiters are woken by wake_matching
+            woken = ktl::move(node->thread);
+            unlink(node);
             break;
         }
     }
@@ -67,16 +86,16 @@ void wait_queue::wake_all() {
         bool scanned_all = false;
         {
             kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-            size_t i = 0;
-            while (i < m_nodes.size() && batch.size() < batch.capacity()) {
-                if (m_nodes[i].mask != 0) {
-                    ++i;
-                    continue;
+            wait_node* node = m_waiters;
+            while (node != nullptr && batch.size() < batch.capacity()) {
+                wait_node* next = node->next;
+                if (node->mask == 0) {
+                    (void)batch.push_back(ktl::move(node->thread));
+                    unlink(node);
                 }
-                batch.push_back(ktl::move(m_nodes[i].thread));
-                m_nodes.swap_remove(i);
+                node = next;
             }
-            scanned_all = i == m_nodes.size();
+            scanned_all = node == nullptr;
         }
         for (auto woken = batch.pop_back(); woken.has_value(); woken = batch.pop_back()) {
             make_ready(ktl::move(*woken));
@@ -92,16 +111,16 @@ size_t wait_queue::wake_matching(uint32_t signals) {
         bool scanned_all = false;
         {
             kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-            size_t i = 0;
-            while (i < m_nodes.size() && batch.size() < batch.capacity()) {
-                if (m_nodes[i].mask == 0 || (m_nodes[i].mask & signals) == 0) {
-                    ++i;
-                    continue;
+            wait_node* node = m_waiters;
+            while (node != nullptr && batch.size() < batch.capacity()) {
+                wait_node* next = node->next;
+                if (node->mask != 0 && (node->mask & signals) != 0) {
+                    (void)batch.push_back(ktl::move(node->thread));
+                    unlink(node);
                 }
-                batch.push_back(ktl::move(m_nodes[i].thread));
-                m_nodes.swap_remove(i);
+                node = next;
             }
-            scanned_all = i == m_nodes.size();
+            scanned_all = node == nullptr;
         }
         woken_count += batch.size();
         for (auto woken = batch.pop_back(); woken.has_value(); woken = batch.pop_back()) {
@@ -113,7 +132,7 @@ size_t wait_queue::wake_matching(uint32_t signals) {
 
 bool wait_queue::has_waiters() {
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-    return m_nodes.size() != 0;
+    return m_waiters != nullptr;
 }
 
 }  // namespace kernel::sched

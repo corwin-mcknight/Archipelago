@@ -26,8 +26,9 @@ constexpr uint64_t SYS_WRITE                  = 3;
 // Reusing a closed handle fails the generation check -- a recycled slot has a new generation.
 //
 // Error returns occupy the small negative band (roughly -1 .. -64). A successful
-// SYS_HANDLE_DUPLICATE returns the new handle, which cannot fall in that band: it would take a
-// slot index above 0xFFFFFFC0 -- four billion live handles -- for a handle to look negative.
+// SYS_HANDLE_DUPLICATE returns the new handle, which can never look negative: the kernel retires
+// a slot when its generation reaches 2^31 - 1, so bit 63 of a packed handle is always clear, and
+// a slot index would have to exceed 0xFFFFFFC0 -- four billion live handles -- to reach the band.
 constexpr uint64_t SYS_HANDLE_CLOSE           = 4;  // arg0 = handle. Returns 0.
 constexpr uint64_t SYS_HANDLE_DUPLICATE       = 5;  // arg0 = handle (needs the duplicate right),
                                                     // arg1 = rights mask. Returns the new handle.

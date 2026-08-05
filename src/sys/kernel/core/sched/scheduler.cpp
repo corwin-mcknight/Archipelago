@@ -11,6 +11,8 @@
 #include <kernel/sched/task.h>
 #include <kernel/synchronization/execution_context.h>
 
+#include <ktl/atomic>
+
 // Stack tripwire floor for the running thread, consumed by the arch trap entries. Published on
 // every switch. Zero disables the check (x86 idle; pre-scheduler riscv boot writes a real floor
 // from trap_init).
@@ -113,12 +115,17 @@ ktl::atomic<size_t> g_live_threads{0};
 
 ktl::result<void> ensure_tick_capacity() {
     size_t live    = g_live_threads.fetch_add(1, ktl::memory_order::relaxed) + 1;
-    size_t target  = live + 2;  // the idle thread and the boot context scheduling as threads
+    // +2 is slack, not accounting: the boot context registers as the idle thread without passing
+    // through spawn (idle is handed off directly, but a requeue path touching it must not be the
+    // thing that discovers the queue is exactly full), plus one for off-by-one churn while a
+    // spawn and a reap race the counter. The reservations only need to be >= the worst case.
+    size_t target  = live + 2;
 
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     bool ok        = cur_cpu().run_queue.reserve(target);
     kernel::arch::restore_interrupts(flags);
     if (ok) { ok = sleepers_reserve(target); }
+    if (ok) { ok = zombies_reserve(target); }
     if (!ok) {
         g_live_threads.fetch_sub(1, ktl::memory_order::relaxed);
         return ktl::err(ktl::errc::oom);
@@ -137,7 +144,7 @@ void make_ready(ktl::ref<Thread> thread) {
     g_stats.wakes += 1;
     trace_push(trace_kind::WAKE, switch_reason::NONE, cur_cpu().current ? cur_cpu().current->id() : 0, thread->id());
     bool ok = cur_cpu().run_queue.push_back(ktl::move(thread));
-    assert(ok, "make_ready: run queue allocation failed");
+    ensure(ok, "make_ready: run queue push failed despite reservation");
     kernel::arch::restore_interrupts(flags);
 }
 
@@ -167,7 +174,7 @@ void yield() {
             c.current->set_state(thread_state::READY);
             c.current->set_ready_ts(kernel::arch::timestamp());
             bool ok = c.run_queue.push_back(c.current);
-            assert(ok, "yield: run queue allocation failed");
+            ensure(ok, "yield: run queue push failed despite reservation");
         }
         switch_to(ktl::move(*next), switch_reason::YIELD);
     }
@@ -204,7 +211,7 @@ void service_pending_preemption() {
         c.current->set_state(thread_state::READY);
         c.current->set_ready_ts(kernel::arch::timestamp());
         bool ok = c.run_queue.push_back(c.current);
-        assert(ok, "on_tick: run queue allocation failed");
+        ensure(ok, "service_pending_preemption: run queue push failed despite reservation");
     }
     switch_to(ktl::move(*next), switch_reason::PREEMPT);
     kernel::arch::restore_interrupts(flags);

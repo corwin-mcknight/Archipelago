@@ -20,6 +20,9 @@
 
 namespace kernel::mm {
 
+// Shared by slab_heap and its stats struct, which is declared first.
+inline constexpr size_t SLAB_HEAP_CLASS_COUNT = 7;  // 16, 32, 64, 128, 256, 512, 1024
+
 // Page source seam: kernel builds implement these over the PMM through the physmap
 // (mm/heap_pages.cpp); the host runner supplies aligned_alloc-backed stubs so hosted tests
 // exercise the slab logic under ASan. Returns a page-aligned run, or 0 when exhausted.
@@ -41,7 +44,7 @@ struct slab_class_stats {
 };
 
 struct slab_heap_stats {
-    slab_class_stats classes[7];
+    slab_class_stats classes[SLAB_HEAP_CLASS_COUNT];
     size_t large_allocs;  // live allocations above the largest class
     size_t large_pages;   // pages those occupy
     uint64_t alloc_calls;
@@ -51,7 +54,7 @@ struct slab_heap_stats {
 
 class slab_heap {
    public:
-    static constexpr size_t CLASS_COUNT     = 7;  // 16, 32, 64, 128, 256, 512, 1024
+    static constexpr size_t CLASS_COUNT     = SLAB_HEAP_CLASS_COUNT;
     static constexpr size_t MAX_CLASS_BYTES = 1024;
     // Slab slots deliver up to cache-line alignment; anything stricter routes to the large path,
     // whose runs are naturally page-aligned. Alignment above a page has no client and panics.

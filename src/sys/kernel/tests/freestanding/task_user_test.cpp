@@ -51,7 +51,7 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     {
         using namespace kernel::obj;
         auto owner      = task->owner_handle();
-        uint64_t packed = static_cast<uint64_t>(owner.index) | (static_cast<uint64_t>(owner.generation) << 32);
+        uint64_t packed = pack_handle(owner);
 
         uint64_t info   = syscall_dispatch(kernel::syscall::SYS_OBJ_INFO, packed, 0, 0, 0, 0, 0);
         KTEST_EXPECT_ALL((info & 0xFFFFFFFF) == type_ids::TASK,

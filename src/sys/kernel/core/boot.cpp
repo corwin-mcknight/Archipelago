@@ -119,11 +119,15 @@ void init_memory() {
     uint64_t total_usable_pages = 0;
     for (size_t i = 0; i < info.memory_map_count; i++) {
         const memory_range& entry = info.memory_map[i];
+        // Only USABLE and KERNEL entries feed the PMM/VMM; validating (and warning about) ranges
+        // the kernel never consumes would just be noise.
+        if (entry.kind != memory_kind::USABLE && entry.kind != memory_kind::KERNEL) { continue; }
 
         // A malformed entry must not corrupt the PMM: a misaligned base or non-page-multiple length
         // would hand the allocator a partial frame. Skip such regions with a warning rather than
         // truncating silently.
-        if ((entry.base & 0xFFF) != 0 || (entry.length & 0xFFF) != 0) {
+        if ((entry.base & (KERNEL_MINIMUM_PAGE_SIZE - 1)) != 0 ||
+            (entry.length & (KERNEL_MINIMUM_PAGE_SIZE - 1)) != 0) {
             g_log.warn("pmm: skipping misaligned region base=0x{0:p} length=0x{1:p} kind={2}", entry.base, entry.length,
                        kind_name(entry.kind));
             continue;
@@ -134,7 +138,7 @@ void init_memory() {
             g_log.warn("pmm: skipping wrapping region base=0x{0:p} length=0x{1:p}", entry.base, entry.length);
             continue;
         }
-        size_t pages = entry.length / 0x1000;
+        size_t pages = entry.length / KERNEL_MINIMUM_PAGE_SIZE;
 
         if (entry.kind == memory_kind::USABLE) {
             if (pages == 0) {

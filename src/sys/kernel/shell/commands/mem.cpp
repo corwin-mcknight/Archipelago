@@ -48,12 +48,13 @@ const char* human_pages(char* buf, size_t size, uint64_t pages) { return human_b
 
 void mem_handler(int, const ktl::string_view[], ShellOutput& output) {
     auto pmm = g_page_frame_allocator.stats();
-    char free[24], total[24], reserved[24], heap_used[24], heap_total[24];
+    char free[24], total[24], used[24], reserved[24], heap_used[24], heap_total[24];
     size_t used_pages = pmm.total_pages - pmm.free_pages - pmm.reserved_pages;
 
     output.print("physical: {0} free / {1} total, {2} used, {3} reserved\n",
                  human_pages(free, sizeof(free), pmm.free_pages), human_pages(total, sizeof(total), pmm.total_pages),
-                 used_pages, human_pages(reserved, sizeof(reserved), pmm.reserved_pages));
+                 human_pages(used, sizeof(used), used_pages),
+                 human_pages(reserved, sizeof(reserved), pmm.reserved_pages));
     output.print("pmm: {0} zeroed, {1} dirty, {2} allocations, {3} frees, {4} failures\n", pmm.zeroed_pooled, pmm.dirty,
                  pmm.alloc_count, pmm.free_count, pmm.alloc_failures);
 

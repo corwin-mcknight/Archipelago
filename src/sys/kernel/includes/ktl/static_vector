@@ -8,14 +8,16 @@ namespace ktl {
 
 template <typename T, size_t N> class static_vector {
    public:
-    void push_back(T value) {
-        if (m_count == N) { return; }
+    bool push_back(T value) {
+        if (m_count == N) { return false; }
         m_buffer[m_count++] = ktl::move(value);
+        return true;
     }
 
-    void emplace_back(T&& value) {
-        if (m_count == N) { return; }
+    bool emplace_back(T&& value) {
+        if (m_count == N) { return false; }
         m_buffer[m_count++] = ktl::move(value);
+        return true;
     }
 
     maybe<T> pop_back() {

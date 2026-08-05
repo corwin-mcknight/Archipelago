@@ -88,8 +88,12 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
 
         // Wait for READABLE on the receiving end. The message is already queued, so this returns
         // immediately -- what it proves is the wait path itself observing the asserted signal.
-        sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE);
-        ok  = ok && (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
+        // Gated on ok: after an earlier failure the signal may never assert, and an unconditional
+        // wait would hang forever instead of reporting CHANNEL BROKEN.
+        if (ok) {
+            sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE);
+            ok  = (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
+        }
 
         uint64_t got = init::channel_recv(ends[1], REPLY_AT, 128);
         ok           = ok && got == ping_len;
@@ -99,10 +103,13 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         ok = ok && init::is_error(init::channel_recv(ends[1], REPLY_AT, 128));
 
         // Closing one end hangs up the other: PEER_CLOSED is already asserted by the time the
-        // close returns, so this wait also cannot block.
-        ok  = ok && !init::is_error(init::handle_close(ends[0]));
-        sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
-        ok  = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) != 0;
+        // close returns, so this wait also cannot block (and is skipped after any failure, like
+        // the READABLE wait above).
+        ok = ok && !init::is_error(init::handle_close(ends[0]));
+        if (ok) {
+            sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
+            ok  = (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) != 0;
+        }
 
         ok = ok && !init::is_error(init::handle_close(ends[1]));
         ipc.print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");

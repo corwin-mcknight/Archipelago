@@ -34,8 +34,20 @@ void kernel_assert(T condition, const char* message, const char* message_text, c
     }
 }
 
+// Always-on companion to assert, for invariants whose failure must never be silent: at these
+// sites a compiled-out check would mean a silently lost thread or leaked resource rather than a
+// caught bug, so the panic survives NDEBUG.
+template <typename T>
+void kernel_ensure(T condition, const char* message, const char* message_text, const char* fname, int line) {
+    if (!condition) {
+        g_log.fatal("Invariant failed: {0} ({1}), {2}:{3}", message_text, message, fname, line);
+        kernel::crash::dispatch(kernel::crash::trigger_kind::assertion, nullptr, message_text, fname, line);
+    }
+}
+
 #undef assert
 #define assert(x, msg) kernel_assert(x, msg, #x, __FILE__, __LINE__)
 #define assert_and(x, msg, y) kernel_assert(x, msg, #x, __FILE__, __LINE__, y)
+#define ensure(x, msg) kernel_ensure(x, msg, #x, __FILE__, __LINE__)
 
 #endif
