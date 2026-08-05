@@ -18,12 +18,6 @@ struct op_context {
 
 uint64_t errc_of(ktl::errc error) { return static_cast<uint64_t>(error); }
 
-uint64_t pack(HandleId id) { return static_cast<uint64_t>(id.index) | (static_cast<uint64_t>(id.generation) << 32); }
-
-HandleId unpack(uint64_t handle) {
-    return HandleId{static_cast<uint32_t>(handle), static_cast<uint32_t>(handle >> 32)};
-}
-
 uint64_t op_close(op_context& ctx) {
     auto closed = ctx.table.close(ctx.id);
     return closed.is_ok() ? 0 : errc_of(closed.unwrap_err());
@@ -32,7 +26,7 @@ uint64_t op_close(op_context& ctx) {
 uint64_t op_duplicate(op_context& ctx) {
     auto dup = ctx.table.duplicate(ctx.id, static_cast<Rights>(ctx.arg));
     if (dup.is_err()) { return errc_of(dup.unwrap_err()); }
-    return pack(dup.unwrap());
+    return pack_handle(dup.unwrap());
 }
 
 uint64_t op_info(op_context& ctx) {
@@ -60,9 +54,9 @@ constexpr op_spec OPS[] = {
 uint64_t dispatch_handle_op(HandleTable& table, uint64_t nr, uint64_t handle, uint64_t arg) {
     for (const op_spec& op : OPS) {
         if (op.nr != nr) { continue; }
-        auto verified = table.verify(unpack(handle), op.required_rights, op.expected_type);
+        auto verified = table.verify(unpack_handle(handle), op.required_rights, op.expected_type);
         if (verified.is_err()) { return errc_of(verified.unwrap_err()); }
-        op_context ctx{table, unpack(handle), verified.unwrap(), arg};
+        op_context ctx{table, unpack_handle(handle), verified.unwrap(), arg};
         return op.handler(ctx);
     }
     return errc_of(ktl::errc::invalid_operation);

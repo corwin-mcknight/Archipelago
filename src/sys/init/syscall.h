@@ -51,6 +51,9 @@ inline uint64_t syscall6(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uin
     return ret;
 }
 
+inline uint64_t syscall3(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2) {
+    return syscall6(nr, a0, a1, a2, 0, 0, 0);
+}
 inline uint64_t syscall2(uint64_t nr, uint64_t a0, uint64_t a1) { return syscall6(nr, a0, a1, 0, 0, 0, 0); }
 inline uint64_t syscall1(uint64_t nr, uint64_t a0) { return syscall6(nr, a0, 0, 0, 0, 0, 0); }
 
@@ -66,6 +69,22 @@ inline uint64_t handle_duplicate(uint64_t handle, uint64_t rights_mask) {
     return syscall2(abi::syscall::SYS_HANDLE_DUPLICATE, handle, rights_mask);
 }
 inline uint64_t obj_info(uint64_t handle) { return syscall1(abi::syscall::SYS_OBJ_INFO, handle); }
+
+// Channel syscalls; like everything else, data rides in the IPC buffer and arguments are offsets
+// into it. create writes the two endpoint handles at `offset`; recv returns the byte count landed.
+inline uint64_t channel_create(uint64_t offset) { return syscall1(abi::syscall::SYS_CHANNEL_CREATE, offset); }
+inline uint64_t channel_send(uint64_t handle, uint64_t offset, uint64_t length) {
+    return syscall3(abi::syscall::SYS_CHANNEL_SEND, handle, offset, length);
+}
+inline uint64_t channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity) {
+    return syscall3(abi::syscall::SYS_CHANNEL_RECV, handle, offset, capacity);
+}
+
+// Nonzero mask blocks until any of those signal bits assert and returns the signals observed;
+// zero mask polls, returning the current signals immediately.
+inline uint64_t object_wait(uint64_t handle, uint64_t mask) {
+    return syscall2(abi::syscall::SYS_OBJECT_WAIT, handle, mask);
+}
 
 // This thread's IPC buffer, as handed over at entry. Every program stashes it before doing anything
 // else; there is no way to ask for it again.

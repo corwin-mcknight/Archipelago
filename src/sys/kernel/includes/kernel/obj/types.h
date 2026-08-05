@@ -17,6 +17,7 @@ constexpr TypeId VMO       = 4;
 constexpr TypeId THREAD    = 5;
 constexpr TypeId TASK      = 6;
 constexpr TypeId SEMAPHORE = 7;
+constexpr TypeId CHANNEL   = 8;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;

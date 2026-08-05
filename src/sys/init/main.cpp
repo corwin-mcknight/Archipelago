@@ -64,6 +64,50 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
     uint64_t dup = init::handle_duplicate(abi::syscall::SELF_TASK_HANDLE, ~0ull);
     ipc.print(init::is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
 
+    // A channel pair, exercised whole: create hands back two handles through the buffer (the first
+    // kernel-to-user copy-out), a message sent on one end comes back byte-identical on the other,
+    // a second recv correctly reports the queue empty, and both ends close.
+    {
+        constexpr size_t HANDLES_AT = 512;   // where create lands the two handles
+        constexpr size_t REPLY_AT   = 768;   // where recv lands the message
+        const char* ping            = "ping across the pair";
+
+        bool ok = !init::is_error(init::channel_create(HANDLES_AT));
+        uint64_t ends[2];
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(ends)[i] = ipc.base[HANDLES_AT + i];
+        }
+
+        // Poll (zero mask): a fresh endpoint is writable and has nothing to read.
+        uint64_t sig = init::object_wait(ends[0], 0);
+        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_WRITABLE) != 0 &&
+             (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0;
+
+        size_t ping_len = ipc.stage(0, ping);
+        ok              = ok && !init::is_error(init::channel_send(ends[0], 0, ping_len));
+
+        // Wait for READABLE on the receiving end. The message is already queued, so this returns
+        // immediately -- what it proves is the wait path itself observing the asserted signal.
+        sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE);
+        ok  = ok && (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
+
+        uint64_t got = init::channel_recv(ends[1], REPLY_AT, 128);
+        ok           = ok && got == ping_len;
+        for (size_t i = 0; ok && i < ping_len; i++) { ok = ipc.base[REPLY_AT + i] == ping[i]; }
+
+        // Drained queue: the error comes back immediately, the kernel never blocks for us.
+        ok = ok && init::is_error(init::channel_recv(ends[1], REPLY_AT, 128));
+
+        // Closing one end hangs up the other: PEER_CLOSED is already asserted by the time the
+        // close returns, so this wait also cannot block.
+        ok  = ok && !init::is_error(init::handle_close(ends[0]));
+        sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
+        ok  = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) != 0;
+
+        ok = ok && !init::is_error(init::handle_close(ends[1]));
+        ipc.print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");
+    }
+
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task.
     volatile char stack_probe[64];
     for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }

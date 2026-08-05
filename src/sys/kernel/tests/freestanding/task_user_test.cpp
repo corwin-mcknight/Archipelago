@@ -4,6 +4,7 @@
 
 #include <kernel/boot.h>
 #include <kernel/elf.h>
+#include <kernel/obj/channel.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
@@ -74,6 +75,42 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     ktl::vector<ktl::ref<Task>> tasks;
     KTEST_REQUIRE_TRUE(snapshot_tasks(tasks));
     for (size_t i = 0; i < tasks.size(); ++i) { KTEST_EXPECT_TRUE(tasks[i]->id() != task->id()); }
+}
+
+// SYS_OBJECT_WAIT through the real dispatch path from kernel context, on a channel pair in task
+// zero's table. Every wait here targets a signal that is already asserted, so nothing can block;
+// the genuinely-blocking wake path is sched_test's territory (wait_signals with a signaling
+// thread). What this adds is the syscall layer: poll semantics, mask validation, and the rights
+// check.
+KTEST_CASE_INTEGRATION(object_wait_syscall) {
+    using namespace kernel::obj;
+    namespace sys = kernel::syscall;
+
+    auto& table   = kernel::sched::kernel_task()->handles();
+    KTEST_UNWRAP(pair, Channel::create());
+    KTEST_UNWRAP(first_id, table.insert(pair.first, Channel::DEFAULT_RIGHTS));
+    uint64_t first  = pack_handle(first_id);
+
+    // Fresh endpoint, polled (zero mask): writable, nothing to read.
+    uint64_t polled = syscall_dispatch(sys::SYS_OBJECT_WAIT, first, 0, 0, 0, 0, 0);
+    KTEST_EXPECT_TRUE(polled == Channel::SIGNAL_WRITABLE);
+
+    // A wait on an already-asserted bit returns immediately with the observed signals.
+    KTEST_REQUIRE_TRUE(pair.second->write(kernel::obj::MessageBuffer{}).is_ok());
+    uint64_t observed = syscall_dispatch(sys::SYS_OBJECT_WAIT, first, Channel::SIGNAL_READABLE, 0, 0, 0, 0);
+    KTEST_EXPECT_TRUE((observed & Channel::SIGNAL_READABLE) != 0);
+
+    // Signals are 32 bits: a mask with any higher bit set is rejected, not truncated.
+    uint64_t wide = syscall_dispatch(sys::SYS_OBJECT_WAIT, first, 1ull << 32, 0, 0, 0, 0);
+    KTEST_EXPECT_TRUE(wide == static_cast<uint64_t>(ktl::errc::out_of_range));
+
+    // A handle without the wait right is refused before any wait machinery runs.
+    KTEST_UNWRAP(no_wait_id, table.insert(pair.second, RIGHT_READ | RIGHT_WRITE));
+    uint64_t refused = syscall_dispatch(sys::SYS_OBJECT_WAIT, pack_handle(no_wait_id), 0, 0, 0, 0, 0);
+    KTEST_EXPECT_TRUE(refused == static_cast<uint64_t>(ktl::errc::rights_violation));
+
+    KTEST_EXPECT_TRUE(table.close(first_id).is_ok());
+    KTEST_EXPECT_TRUE(table.close(no_wait_id).is_ok());
 }
 
 namespace {

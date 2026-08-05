@@ -16,6 +16,7 @@
 #include <csetjmp>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -211,6 +212,13 @@ void restore_interrupts(uint64_t) {}
 namespace kernel::obj {
 class Object;
 void object_signal_wake(Object*) {}
+}  // namespace kernel::obj
+
+// Channel message pages come from the PMM in kernel builds; the host has malloc. Sized at the
+// kernel's page size so ASan redzones sit exactly where the real page boundary would.
+namespace kernel::obj {
+uintptr_t channel_page_alloc() { return reinterpret_cast<uintptr_t>(malloc(4096)); }
+void channel_page_free(uintptr_t page) { free(reinterpret_cast<void*>(page)); }
 }  // namespace kernel::obj
 
 // Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child

@@ -23,6 +23,16 @@ struct HandleId {
     bool operator!=(const HandleId& other) const { return !(*this == other); }
 };
 
+// The packed user-facing form specified in <abi/syscall.h>: slot index in the low 32 bits, slot
+// generation in the high 32.
+inline uint64_t pack_handle(HandleId id) {
+    return static_cast<uint64_t>(id.index) | (static_cast<uint64_t>(id.generation) << 32);
+}
+
+inline HandleId unpack_handle(uint64_t handle) {
+    return HandleId{static_cast<uint32_t>(handle), static_cast<uint32_t>(handle >> 32)};
+}
+
 struct HandleInfo {
     HandleId id;
     Rights rights;

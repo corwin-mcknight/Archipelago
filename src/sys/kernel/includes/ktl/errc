@@ -18,6 +18,8 @@ enum class errc : intptr_t {
     capacity_exhausted = -10,
     out_of_range       = -11,
     truncated          = -12,
+    would_block        = -13,
+    peer_closed        = -14,
 };
 
 }  // namespace ktl

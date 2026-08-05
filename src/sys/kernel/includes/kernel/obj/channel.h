@@ -1,0 +1,125 @@
+#pragma once
+
+#include <abi/syscall.h>
+#include <kernel/obj/object.h>
+#include <kernel/obj/type_registry.h>
+#include <kernel/obj/types.h>
+
+#include <ktl/ref>
+#include <ktl/result>
+#include <ktl/utility>
+
+namespace kernel::obj {
+
+struct channel_state;
+
+// Message pages: the PMM is the message allocator. A message is at most MAX_MESSAGE_BYTES, which
+// fits one page, so message storage needs no heap -- no fragmentation, quota accounting in the
+// same currency as everything else (pages), and exhaustion is a clean error instead of the early
+// heap's panic. Kernel builds implement these over the PMM through the physmap (mm/channel_pages
+// .cpp); the host runner supplies malloc-backed stubs, so hosted tests see message logic only.
+// Returns 0 when no page is available.
+uintptr_t channel_page_alloc();
+void channel_page_free(uintptr_t page);
+
+// One queued message: a single page carrying up to MAX_MESSAGE_BYTES, plus the byte count that is
+// actually meaningful. Move-only owner; the page returns to the PMM on destruction. A zero-length
+// message holds no page at all. The page is contiguous kernel memory, so filling it from a
+// non-contiguous source (the IPC buffer's page runs) is a memcpy per run into data() + offset.
+class MessageBuffer {
+   public:
+    MessageBuffer() = default;
+    ~MessageBuffer() { reset(); }
+
+    MessageBuffer(MessageBuffer&& other) noexcept : m_page(other.m_page), m_length(other.m_length) {
+        other.m_page   = 0;
+        other.m_length = 0;
+    }
+    MessageBuffer& operator=(MessageBuffer&& other) noexcept {
+        if (this != &other) {
+            reset();
+            m_page         = other.m_page;
+            m_length       = other.m_length;
+            other.m_page   = 0;
+            other.m_length = 0;
+        }
+        return *this;
+    }
+    MessageBuffer(const MessageBuffer&)            = delete;
+    MessageBuffer& operator=(const MessageBuffer&) = delete;
+
+    // errc::out_of_range past MAX_MESSAGE_BYTES, errc::oom when the PMM has no page.
+    static ktl::result<MessageBuffer> create(size_t length);
+
+    uint8_t* data() { return reinterpret_cast<uint8_t*>(m_page); }
+    const uint8_t* data() const { return reinterpret_cast<const uint8_t*>(m_page); }
+    size_t size() const { return m_length; }
+
+   private:
+    void reset() {
+        if (m_page != 0) { channel_page_free(m_page); }
+        m_page   = 0;
+        m_length = 0;
+    }
+
+    uintptr_t m_page = 0;
+    size_t m_length  = 0;
+};
+
+// One endpoint of a bidirectional, point-to-point message channel (docs/Design/IPC Primitives.md).
+// create() yields the two endpoints as a pair; each is its own kernel object with its own signal
+// state, and the queues between them live in state shared by the pair. Messages are opaque byte
+// payloads delivered FIFO per direction. Every operation fails immediately rather than blocking --
+// a caller that wants to wait parks on the signal bits instead.
+class Channel : public Object {
+   public:
+    DECLARE_OBJECT_TYPE(Channel, type_ids::CHANNEL)
+
+    // Kernel-managed signals: READABLE while this endpoint's incoming queue is non-empty, WRITABLE
+    // while the peer's incoming queue has room, PEER_CLOSED once the opposite endpoint is destroyed.
+    // The values are the installed ABI in <abi/syscall.h>; aliased here so kernel code and user
+    // programs cannot drift.
+    static constexpr uint32_t SIGNAL_READABLE    = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_READABLE);
+    static constexpr uint32_t SIGNAL_WRITABLE    = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_WRITABLE);
+    static constexpr uint32_t SIGNAL_PEER_CLOSED = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
+
+    // ponytail: fixed caps stand in for per-task quotas until the quota work lands with the rest of
+    // the task/IPC milestone. One page per message keeps a full queue bounded at 32K per direction.
+    static constexpr size_t MAX_MESSAGE_BYTES    = 4096;
+    static constexpr size_t QUEUE_DEPTH          = 8;
+
+    static constexpr Rights DEFAULT_RIGHTS       = RIGHT_READ | RIGHT_WRITE | RIGHT_WAIT;
+
+    struct Pair {
+        ktl::ref<Channel> first;
+        ktl::ref<Channel> second;
+    };
+    static ktl::result<Pair> create();
+
+    ~Channel() override;
+
+    // Queue `message` on the peer's incoming queue. peer_closed if the opposite endpoint is gone,
+    // capacity_exhausted if the peer's queue is full (wait on WRITABLE and retry). The size cap
+    // is enforced where the message is created, so an in-hand MessageBuffer always fits.
+    ktl::result<void> write(MessageBuffer message);
+
+    // Dequeue this endpoint's front message. truncated if it exceeds max_bytes (the message stays
+    // queued), would_block if the queue is empty, peer_closed if it is empty and can never refill.
+    ktl::result<MessageBuffer> read(size_t max_bytes);
+
+    // DUPLICATE is deliberately outside the valid mask: an endpoint handle is move-only. Two
+    // handles to one endpoint would interleave competing reads and make PEER_CLOSED (which fires
+    // on the last handle's close) unreadable as a hangup indicator.
+    static ktl::result<void> register_type(TypeRegistry& registry) {
+        return registry.register_type(TYPE_ID, "channel", DEFAULT_RIGHTS, DEFAULT_RIGHTS);
+    }
+
+    // Use create(); public only because make_ref needs it.
+    Channel(ktl::ref<channel_state> state, uint32_t side);
+
+   private:
+    ktl::ref<channel_state> m_state;
+    uint32_t m_side;
+};
+
+}  // namespace kernel::obj

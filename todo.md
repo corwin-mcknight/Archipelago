@@ -102,7 +102,6 @@
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
-    - Copy-out (kernel to user) does not exist; nothing returns data yet. It is the same page walk in the other direction.
     - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
     - Buffers occupy fixed slots in a reserved address-space region because the VMM has no first-fit search; 64 slots per task, one bitmap word. Revisit with first-fit.
     - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
@@ -117,7 +116,6 @@
     - `TypeRegistry` writes take `m_lock` but `lookup`, `lookup_by_name`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
     - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
     - An unknown syscall number returns raw `-1` while an unknown handle op returns `invalid_operation`; pick one.
-    - `pack`/`unpack` implement the handle layout that `abi/syscall.h` only describes in prose; move them next to the comment that specifies them.
     - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `TypeRegistry::lookup_by_name`, `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
 - Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
@@ -142,7 +140,8 @@
 - Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
 
 ## IPC & Services
-- Implement the message passing/channel API with capability-aware routing per the existing design in `docs/Design/IPC Primitives.md` (design is written; implementation is open).
+- [x] First minimal channel pair: `obj::Channel` endpoint objects with per-direction bounded FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals, and the create/send/recv syscalls moving data through the IPC buffer (create's handle delivery is the first kernel-to-user copy-out).
+- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: handle transfer through messages (kernel-table escrow), a timeout for `SYS_OBJECT_WAIT` (a wait whose signal never fires currently blocks forever; needs deadline support in the wait path), ports for multiplexed waiting, server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry three args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - Define service discovery, registration, and policy enforcement for core daemons.
 - Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.
@@ -166,7 +165,7 @@
 - Add watchdog firing (the crash trigger enum slot is already reserved) and structured fault isolation reporting; assertion escalation policy already exists.
 
 ## Testing & QA
-- Continue growing driver/core unit and stress coverage where gaps remain; add IPC suites once the IPC subsystem exists.
+- Continue growing driver/core unit and stress coverage where gaps remain; hosted channel-object suites exist (`tests/obj_channel_test.cpp`), and syscall-level channel coverage rides in the init program -- add dedicated IPC stress/fuzz suites as the subsystem grows (ports, handle transfer).
 - VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands) and OOM paths in the fault/commit paths (needs PMM fault injection).
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler fuzz targets (run-queue rotation, wait-queue bookkeeping, signal-mask matching) now that the scheduler exists, and syscall fuzz targets once syscalls exist.
