@@ -106,7 +106,10 @@ ktl::result<void> Region::map(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_re
     s->cache        = cache;
     if (s->vmo_ref.get() != nullptr) {
         s->cache = stricter_cache(cache, s->vmo_ref->backing_pager().cache_mode());
-        s->vmo_ref->add_mapping(m_aspace, *s);
+        if (!s->vmo_ref->add_mapping(m_aspace, *s)) {
+            remove_slot(*s);
+            return ktl::err(ktl::errc::oom);
+        }
     }
     return ktl::result<void>::ok();
 }

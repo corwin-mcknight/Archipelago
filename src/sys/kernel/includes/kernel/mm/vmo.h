@@ -55,7 +55,10 @@ class vmo : public obj::Object {
 
     // Mapping back-refs, maintained by Region::map/unmap under the VMM lock.
     // Consumed by decommit and resize to find every translation of a page.
-    void add_mapping(vm_aspace& aspace, region_child& binding);
+    // A back-ref that failed to record is a mapping decommit and shrink cannot
+    // see, so they would free its frames while its translation stayed live;
+    // the caller must undo the binding rather than keep an untracked one.
+    [[nodiscard]] bool add_mapping(vm_aspace& aspace, region_child& binding);
     void remove_mapping(region_child& binding);
     size_t mapping_count() const { return m_mappings.size(); }
 

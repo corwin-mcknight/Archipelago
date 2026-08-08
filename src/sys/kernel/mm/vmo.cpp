@@ -159,8 +159,8 @@ ktl::result<void> vmo::decommit(uint64_t page, size_t count) {
     return ktl::result<void>::ok();
 }
 
-void vmo::add_mapping(vm_aspace& aspace, region_child& binding) {
-    (void)m_mappings.push_back({.aspace = &aspace, .binding = &binding});
+bool vmo::add_mapping(vm_aspace& aspace, region_child& binding) {
+    return m_mappings.push_back({.aspace = &aspace, .binding = &binding});
 }
 
 void vmo::remove_mapping(region_child& binding) {
