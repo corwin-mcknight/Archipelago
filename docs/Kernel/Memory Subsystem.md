@@ -1,16 +1,20 @@
 # Memory Subsystem
 
 This page documents the kernel's allocators and virtual memory manager.
-The kernel has two memory allocators today: an early heap for boot-time allocation and a Physical Memory Manager, also known as the PMM, for page-granularity allocation.
+The kernel has three memory allocators today: an early heap for boot-time allocation, a Physical Memory Manager -- also known as the PMM -- for page-granularity allocation, and a slab heap that serves general allocation once the PMM exists.
 
 ## Early Heap
-A bump allocator that provides memory before the page allocator is available.
-It is initialized during [[Boot Process#1. Early Boot|early boot]] with a dedicated region in BSS.
+A block allocator that provides memory before the page allocator is available.
+It is initialized during [[Boot Process#1. Early Boot|early boot]] with a dedicated region in BSS, ahead of the global constructors, because constructing a global may itself allocate.
 
 The early heap maintains a linked list of blocks, each marked as free or allocated.
 On allocation, it walks the list for a free block large enough, splitting it if necessary.
 On free, it coalesces adjacent free blocks.
-`operator new` and `operator delete` delegate to the early heap.
+Exhaustion panics: nothing in the boot window can continue without memory.
+
+`operator new` and `operator delete` delegate to the early heap until memory initialization activates the slab heap.
+After that point allocation goes to the slab heap and exhaustion becomes a returned failure rather than a panic.
+Deallocation stays correct across the switch because the early heap owns a known address range, so a pointer from before the switch is recognized by address.
 
 ## Physical Memory Manager
 The PMM manages physical page frames.
@@ -21,12 +25,30 @@ Allocation pops from the zeroed pool; if the pool is empty, the PMM zeroes one p
 Free pushes the returned page to the dirty pool without scrubbing it.
 The PMM never hands out a dirty page.
 
-A background zeroing worker is the intended steady-state mechanism for moving pages from dirty to zeroed.
-Until the background zeroing worker is built, the inline fallback in allocation remains the only path that performs zeroing.
-The dirty pool is also drained on demand.
+A background zeroing thread, started at [[Boot Process#5. Kernel Entry|kernel entry]], is the steady-state mechanism for moving pages from dirty to zeroed.
+It works in small paced batches so that the initial climb to a zeroed supply trickles out instead of monopolizing the CPU.
+Dirty pages always drain into the zeroed pool first; once none remain, the worker pre-zeroes untouched region tails in place until all free memory is zeroed.
+The inline fallback in allocation is what covers the gap when the worker has not kept up.
 
 The PMM only counts reserved pages -- it does not own a list of reserved physical ranges.
 Tracking specific kernel-occupied ranges belongs to the VMM, which receives them at init separately from the PMM's free-page accounting.
+
+## Slab Heap
+The general-purpose kernel heap, backing `operator new` from memory initialization onward.
+It is built from PMM pages addressed through the direct map, and it sits directly above the PMM: the PMM must never allocate through the heap, or a page acquired inside the heap's own lock would re-enter the allocator beneath it.
+
+Requests up to a kilobyte are served from a small set of power-of-two size classes, one page per slab, with a tagged header at the front of the page and the slots following it.
+Freed slots are threaded through themselves, and slots never yet used are tracked by a bump cursor, so a fresh slab initializes nothing beyond its header.
+Larger requests skip the size classes entirely and take whole pages from the PMM.
+Those runs carry no in-page header -- their length is recorded in the first frame's page descriptor -- which is what makes a page-sized request cost exactly one page, and what lets a free classify a pointer by its alignment alone.
+
+Two rules make the heap safe rather than merely small.
+Allocation from interrupt context is forbidden outright, checked at runtime, not compiled out; handlers reserve what they need when they are bound.
+That single rule is what lets the heap run without reserved pools or interrupt-safe locking.
+The heap lock is also a leaf: pages are acquired from and returned to the PMM outside it, so holding any other lock while allocating cannot form a cycle through the heap.
+
+Corruption is detected rather than propagated.
+A per-slab bitmap of live slots turns a double free, a free of a slot never allocated, an interior pointer, and a pointer the heap never produced into deterministic panics instead of freelist corruption, and large runs are authenticated through their page descriptor tag under the heap lock so racing frees of one run cannot both succeed.
 
 ## Architecture
 ### Virtual Memory Manager
@@ -106,7 +128,6 @@ Another task writes the value and wakes waiters.
 Scoping futexes to a VMO offset rather than a raw virtual address keeps them within the capability model -- you need a handle to the VMO to wait on it.
 Suitable for performance-critical shared memory coordination where syscall overhead matters.
 
-### Slab Allocator and UMI
-The planned Unified Memory Interface (UMI) provides slab-based allocation for kernel objects, with per-type arenas and zero-on-free semantics.
-Allocation and deallocation reduce to bitmask operations.
-Not yet implemented.
+### Unified Memory Interface
+The size-class layer described above is the first phase of the planned Unified Memory Interface (UMI).
+The remaining phases layer per-type arenas over it: named object caches with zero-on-free semantics, allocation hardening (poisoning, redzones, a guard-page debug mode), and per-CPU magazines once SMP scheduling lands.

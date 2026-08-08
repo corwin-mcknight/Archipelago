@@ -34,6 +34,7 @@ The BSP waits for all APs to signal initialization before proceeding.
 ### 4. Physical Memory
 Memory regions from the bootloader's memory map are registered with the Physical Memory Manager.
 The page allocator is now available.
+The virtual memory manager initializes on top of it -- page descriptors, the kernel's own page tables, and the shared zero page -- and the slab heap then takes over general allocation from the early heap.
 See [[Memory Subsystem#Physical Memory Manager]].
 
 ### 5. Kernel Entry
