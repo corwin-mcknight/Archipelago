@@ -71,13 +71,17 @@ inline uint64_t handle_duplicate(uint64_t handle, uint64_t rights_mask) {
 inline uint64_t obj_info(uint64_t handle) { return syscall1(abi::syscall::SYS_OBJ_INFO, handle); }
 
 // Channel syscalls; like everything else, data rides in the IPC buffer and arguments are offsets
-// into it. create writes the two endpoint handles at `offset`; recv returns the byte count landed.
+// into it. create writes the two endpoint handles at `offset`. Messages can carry handles: send
+// reads `handle_count` uint64 handle values at `handles_offset`, recv lands arrived handles there
+// and reports their count in the high 32 bits of its return, the byte count in the low 32.
 inline uint64_t channel_create(uint64_t offset) { return syscall1(abi::syscall::SYS_CHANNEL_CREATE, offset); }
-inline uint64_t channel_send(uint64_t handle, uint64_t offset, uint64_t length) {
-    return syscall3(abi::syscall::SYS_CHANNEL_SEND, handle, offset, length);
+inline uint64_t channel_send(uint64_t handle, uint64_t offset, uint64_t length, uint64_t handles_offset = 0,
+                             uint64_t handle_count = 0) {
+    return syscall6(abi::syscall::SYS_CHANNEL_SEND, handle, offset, length, handles_offset, handle_count, 0);
 }
-inline uint64_t channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity) {
-    return syscall3(abi::syscall::SYS_CHANNEL_RECV, handle, offset, capacity);
+inline uint64_t channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity, uint64_t handles_offset = 0,
+                             uint64_t handle_capacity = 0) {
+    return syscall6(abi::syscall::SYS_CHANNEL_RECV, handle, offset, capacity, handles_offset, handle_capacity, 0);
 }
 
 // Nonzero mask blocks until any of those signal bits assert and returns the signals observed;

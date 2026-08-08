@@ -1,7 +1,6 @@
 # TODO
 
 ## Next Up
-- Handle transfer through channel messages (kernel-table escrow per `docs/Design/IPC Primitives.md`): move the handle into task zero's table on send, into the receiver's on dequeue, close normally if the channel dies in between. Unblocked by the slab heap -- the escrow table now grows on an allocator that fails cleanly instead of panicking.
 - AUMI per-type arena phase: named object caches with zero-on-free layered over the slab heap. First clients: Thread, channel_state, and handle-table entry batches; Umbra-style exact-size chains are the shape to steal.
 
 ## Second Architecture (riscv64)
@@ -53,6 +52,7 @@
 - Boot modules are never reclaimed. They are classified `KERNEL` (wired) because Limine reports the kernel image and every module under one memmap type, so a module range is not distinguishable from the memmap alone. `boot_info::modules` carries each module's address and size, which is what a future initrd path needs to hand the page-aligned interior to `pmm::add_region()` once it has consumed it; a `memory_kind::MODULE` should land with that reclaim path rather than before it.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
+- Memory-pressure signal userspace can wait on: a kernel Event with level bits (low, critical) sampled where the zeroer already runs, so servers drop caches before allocations start failing -- the kernel cannot reclaim server-held memory itself and anonymous memory is never swapped. Open questions: hysteresis at the boundary, global level versus per-task, and whether ignoring it has a consequence.
 - VMM follow-ups:
     - First-fit virtual address search for VMO bindings (map takes an explicit vaddr today).
     - Binding splitting for partial unmap/protect (whole-slot ranges only).
@@ -103,7 +103,7 @@
     - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
     - The self-handle ABI (first-generation slots 0 and 1) leans on fresh-table allocation order; a bootstrap-message scheme should replace it if the IPC milestone reshapes startup anyway.
     - Self-handles are unowned (`HandleTable::insert_unowned`), and the slot-1 thread entry stays safe only because reap of the initial thread tears down the whole task; a thread-spawn syscall must close the self-thread entry when its thread is reaped, or the entry dangles.
-- Implement handle transfer between tables for cross-process capability passing.
+- [x] Implement handle transfer between tables for cross-process capability passing (`HandleTable::take` plus channel-message escrow; see IPC & Services).
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
@@ -146,7 +146,9 @@
 
 ## IPC & Services
 - [x] First minimal channel pair: `obj::Channel` endpoint objects with per-direction bounded FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals, and the create/send/recv syscalls moving data through the IPC buffer (create's handle delivery is the first kernel-to-user copy-out).
-- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: handle transfer through messages (kernel-table escrow), a timeout for `SYS_OBJECT_WAIT` (a wait whose signal never fires currently blocks forever; needs deadline support in the wait path), ports for multiplexed waiting, server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry three args and touch the IPC buffer; fold them into the declarative op table when it learns both.
+- [x] Handle transfer through channel messages (kernel-table escrow per `docs/Design/IPC Primitives.md`): send moves each handle from the sender's table into task zero's, dequeue moves it into the receiver's, and a channel dying with messages queued closes escrowed handles normally. Gated by the transfer right on the channel handle.
+- Handle-transfer gaps: no per-handle transfer right yet (no object type registers TRANSFER; the channel-handle gate is the only check), a receiver-table insert failure on dequeue closes the arrived handle rather than failing the recv (the message is already dequeued), and an endpoint escrowed on its own pair's queue is an unreclaimable reference cycle (the exact self-channel case is refused; the peer-through-itself shape is not detectable cheaply).
+- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: a timeout for `SYS_OBJECT_WAIT` (a wait whose signal never fires currently blocks forever; needs deadline support in the wait path), ports for multiplexed waiting, server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - Define service discovery, registration, and policy enforcement for core daemons.
 - Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.

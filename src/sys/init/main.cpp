@@ -115,10 +115,57 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         ipc.print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");
     }
 
+    // Handle transfer: an endpoint of a second pair rides a message across a first pair. The
+    // sender's handle value dies with the send, the arrived value is new, and the transferred
+    // endpoint still works -- a message sent through it lands on its peer.
+    {
+        constexpr size_t CARRIER_AT = 512;   // the pair the transfer travels over
+        constexpr size_t CARGO_AT   = 528;   // the pair whose endpoint is transferred
+        constexpr size_t SENT_AT    = 544;   // the handle value given to send
+        constexpr size_t ARRIVED_AT = 552;   // where recv lands the transferred handle
+        constexpr size_t REPLY_AT   = 768;
+        const char* note            = "one endpoint enclosed";
+
+        bool ok = !init::is_error(init::channel_create(CARRIER_AT)) && !init::is_error(init::channel_create(CARGO_AT));
+        uint64_t carrier[2];
+        uint64_t cargo[2];
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(carrier)[i] = ipc.base[CARRIER_AT + i];
+            reinterpret_cast<char*>(cargo)[i]   = ipc.base[CARGO_AT + i];
+        }
+
+        size_t note_len = ipc.stage(0, note);
+        for (size_t i = 0; i < sizeof(uint64_t); i++) {
+            ipc.base[SENT_AT + i] = reinterpret_cast<const char*>(&cargo[0])[i];
+        }
+        ok = ok && !init::is_error(init::channel_send(carrier[0], 0, note_len, SENT_AT, 1));
+
+        // Consumed by the send: the old handle value must no longer resolve in our table.
+        ok = ok && init::is_error(init::obj_info(cargo[0]));
+
+        uint64_t got = init::channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
+        ok           = ok && !init::is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
+
+        uint64_t arrived = 0;
+        for (size_t i = 0; i < sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(&arrived)[i] = ipc.base[ARRIVED_AT + i];
+        }
+
+        // The arrived handle is a working channel endpoint: ping its peer through it.
+        ok              = ok && !init::is_error(init::obj_info(arrived));
+        size_t ping_len = ipc.stage(0, "via transferred end");
+        ok              = ok && !init::is_error(init::channel_send(arrived, 0, ping_len));
+        ok              = ok && init::channel_recv(cargo[1], REPLY_AT, 128) == ping_len;
+
+        ok = ok && !init::is_error(init::handle_close(carrier[0])) && !init::is_error(init::handle_close(carrier[1]));
+        ok = ok && !init::is_error(init::handle_close(arrived)) && !init::is_error(init::handle_close(cargo[1]));
+        ipc.print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
+    }
+
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task.
     volatile char stack_probe[64];
     for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }
-    init::sleep(20);
+    init::sleep(2000);
 
     init::exit();
     __builtin_unreachable();

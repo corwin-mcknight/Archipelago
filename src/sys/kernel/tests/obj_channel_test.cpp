@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_TESTING
 
 #include <kernel/obj/channel.h>
+#include <kernel/sched/task.h>
 #include <kernel/testing/test_objects.h>
 
 using namespace kernel::testing;
@@ -150,6 +151,53 @@ KTEST_CASE(obj_channel_peer_close) {
     KTEST_EXPECT_TRUE(payload_equals(last, "parting gift"));
     auto drained = pair.second->read(64);
     KTEST_EXPECT_ALL(drained.is_err(), drained.unwrap_err() == ktl::errc::peer_closed);
+}
+
+// Handle escrow: a message owns kernel-table entries for handles in transit. They ride FIFO with
+// the payload, a reader without room for them cannot dequeue the message, and detaching hands
+// them onward with rights intact and the kernel table back at its baseline.
+KTEST_CASE(obj_channel_escrow_rides_message) {
+    auto& escrow    = kernel::sched::kernel_task()->handles();
+    size_t baseline = escrow.count();
+
+    KTEST_UNWRAP(pair, Channel::create());
+    bool destroyed = false;
+    KTEST_UNWRAP(cargo, escrow.emplace<TestObjA>(RIGHT_READ, &destroyed));
+
+    auto msg = message_of("with cargo");
+    KTEST_REQUIRE_TRUE(msg.attach_handle(cargo));
+    KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(msg)).is_ok());
+
+    auto refused = pair.second->read(64, 0);
+    KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::truncated);
+    KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) != 0);
+
+    KTEST_UNWRAP(arrived, pair.second->read(64));
+    KTEST_EXPECT_ALL(payload_equals(arrived, "with cargo"), arrived.handle_count() == 1);
+
+    HandleId ids[MessageBuffer::MAX_HANDLES];
+    KTEST_REQUIRE_TRUE(arrived.detach_handles(ids) == 1);
+    KTEST_UNWRAP(taken, escrow.take(ids[0]));
+    KTEST_EXPECT_ALL(taken.rights == RIGHT_READ, !destroyed, escrow.count() == baseline);
+    taken.object.reset();
+    KTEST_EXPECT_TRUE(destroyed);
+}
+
+// The channel dies with a handle-carrying message still queued: the kernel closes the escrowed
+// handle normally -- no in-flight state survives the queue it rode in.
+KTEST_CASE(obj_channel_escrow_closed_with_channel) {
+    auto& escrow    = kernel::sched::kernel_task()->handles();
+    size_t baseline = escrow.count();
+    bool destroyed  = false;
+    {
+        KTEST_UNWRAP(pair, Channel::create());
+        KTEST_UNWRAP(cargo, escrow.emplace<TestObjA>(RIGHT_READ, &destroyed));
+        auto msg = message_of("never read");
+        KTEST_REQUIRE_TRUE(msg.attach_handle(cargo));
+        KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(msg)).is_ok());
+        KTEST_EXPECT_FALSE(destroyed);
+    }
+    KTEST_EXPECT_ALL(destroyed, escrow.count() == baseline);
 }
 
 #endif

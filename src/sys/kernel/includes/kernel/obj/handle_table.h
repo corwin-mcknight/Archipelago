@@ -68,6 +68,10 @@ class HandleTable {
 
     ktl::result<HandleId> duplicate(HandleId source, Rights rights_mask);
     ktl::result<void> close(HandleId id);
+    // Remove a live entry but hand its reference and rights to the caller instead of dropping
+    // them. This is the move half of handle transfer: the returned reference is what keeps the
+    // object alive while the handle is between tables.
+    ktl::result<VerifiedHandle> take(HandleId id);
 
     // The one verification path every handle operation goes through: slot-and-generation lookup,
     // then type check, then rights check, under a single lock acquisition. Errors come out in that
@@ -80,6 +84,10 @@ class HandleTable {
     ktl::maybe<HandleInfo> info(HandleId id);
     bool is_valid(HandleId id);
     size_t count();
+    // Copy every live entry's metadata under one lock acquisition, so callers can print or
+    // inspect without holding it. Returns false if the copy failed to allocate; out may be
+    // partially filled in that case.
+    bool snapshot(ktl::vector<HandleInfo>& out);
 
 #if CONFIG_KERNEL_TESTING
     // Test-only seam: force a slot's generation so generation-wrap retirement can be

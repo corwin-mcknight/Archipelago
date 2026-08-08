@@ -1,7 +1,7 @@
 # IPC Primitives
 
 > [!info] Design
-> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals, data-only messages) along with signal wait and poll on any handle (no timeout yet); ports, handle transfer, and server dispatch are not.
+> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals) along with signal wait and poll on any handle (no timeout yet) and handle transfer through kernel-table escrow, gated by the transfer right on the channel handle; ports, server dispatch, and the message metadata/header regions are not.
 
 The kernel provides several IPC primitives for communication between processes and between processes and servers.
 All are [[Object Model|kernel objects]] accessed through capability handles, and all operations go through the [[Object Model#Three-Path Dispatch|three-path dispatch model]].

@@ -100,9 +100,9 @@ void buffer_read(const kernel::sched::ipc_buffer& buffer, uint64_t offset, void*
     }
 }
 
-// Channel syscalls take three arguments (handle, offset, length), one more than the declarative
-// handle-op table carries, and need the calling thread's IPC buffer, which that pipeline is kept
-// free of. They run the same HandleTable::verify checks; only the dispatch is hand-rolled.
+// Channel syscalls take up to five arguments, more than the declarative handle-op table carries,
+// and need the calling thread's IPC buffer, which that pipeline is kept free of. They run the
+// same HandleTable::verify checks; only the dispatch is hand-rolled.
 
 uint64_t sys_channel_create(uint64_t offset) {
     auto self = kernel::sched::current();
@@ -128,26 +128,58 @@ uint64_t sys_channel_create(uint64_t offset) {
     return 0;
 }
 
-uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length) {
+uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uint64_t handles_offset,
+                          uint64_t handle_count) {
+    using namespace kernel::obj;
     auto self = kernel::sched::current();
     if (!self) { return errc_of(ktl::errc::invalid_operation); }
     const auto& buffer = self->ipc();
     if (!buffer.valid() || !buffer.contains(offset, length)) { return errc_of(ktl::errc::out_of_range); }
-    if (length > kernel::obj::Channel::MAX_MESSAGE_BYTES) { return errc_of(ktl::errc::out_of_range); }
+    if (length > Channel::MAX_MESSAGE_BYTES) { return errc_of(ktl::errc::out_of_range); }
+    if (handle_count > MessageBuffer::MAX_HANDLES) { return errc_of(ktl::errc::out_of_range); }
+    if (handle_count != 0 && !buffer.contains(handles_offset, handle_count * sizeof(uint64_t))) {
+        return errc_of(ktl::errc::out_of_range);
+    }
 
+    // Sending handles is gated by the transfer right on the channel handle itself.
     auto task     = calling_task(self);
-    auto verified = task->handles().verify(kernel::obj::unpack_handle(handle), kernel::obj::RIGHT_WRITE,
-                                           kernel::obj::type_ids::CHANNEL);
+    Rights needed = RIGHT_WRITE | (handle_count != 0 ? RIGHT_TRANSFER : 0);
+    auto verified = task->handles().verify(unpack_handle(handle), needed, type_ids::CHANNEL);
     if (verified.is_err()) { return errc_of(verified.unwrap_err()); }
+    auto channel = ktl::static_ref_cast<Channel>(verified.unwrap().object);
+
+    // Once escrow begins, the handles belong to the message: any later failure closes them (see
+    // <abi/syscall.h>). So fail the ordinary flow-control cases -- full queue, dead peer -- before
+    // consuming anything, by the same signals a waiting sender uses. A racing writer on this same
+    // endpoint can still fill the queue between this check and the write; that residual race is
+    // what the close-on-failure rule is for.
+    if (handle_count != 0) {
+        uint32_t signals = channel->signals();
+        if ((signals & Channel::SIGNAL_PEER_CLOSED) != 0) { return errc_of(ktl::errc::peer_closed); }
+        if ((signals & Channel::SIGNAL_WRITABLE) == 0) { return errc_of(ktl::errc::capacity_exhausted); }
+    }
 
     // The message page is contiguous, so staging is one memcpy per source page run.
-    auto created = kernel::obj::MessageBuffer::create(length);
+    auto created = MessageBuffer::create(length);
     if (created.is_err()) { return errc_of(created.unwrap_err()); }
     auto message = created.unwrap();
     if (length != 0) { buffer_read(buffer, offset, message.data(), length); }
 
-    auto channel = ktl::static_ref_cast<kernel::obj::Channel>(verified.unwrap().object);
-    auto sent    = channel->write(ktl::move(message));
+    uint64_t handle_values[MessageBuffer::MAX_HANDLES];
+    if (handle_count != 0) { buffer_read(buffer, handles_offset, handle_values, handle_count * sizeof(uint64_t)); }
+    for (uint64_t i = 0; i < handle_count; i++) {
+        auto taken = task->handles().take(unpack_handle(handle_values[i]));
+        if (taken.is_err()) { return errc_of(taken.unwrap_err()); }
+        auto moved = taken.unwrap();
+        // The channel handle itself is the one cycle cheap to refuse: escrowed on its own queue it
+        // could never be read again, and the escrow reference would keep the queue alive forever.
+        if (moved.object.get() == channel.get()) { return errc_of(ktl::errc::invalid_operation); }
+        auto escrowed = kernel::sched::kernel_task()->handles().insert(ktl::move(moved.object), moved.rights);
+        if (escrowed.is_err()) { return errc_of(escrowed.unwrap_err()); }
+        message.attach_handle(escrowed.unwrap());
+    }
+
+    auto sent = channel->write(ktl::move(message));
     return sent.is_ok() ? 0 : errc_of(sent.unwrap_err());
 }
 
@@ -169,32 +201,52 @@ uint64_t sys_object_wait(uint64_t handle, uint64_t mask) {
     return object->wait_signals(static_cast<uint32_t>(mask));
 }
 
-uint64_t sys_channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity) {
+uint64_t sys_channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity, uint64_t handles_offset,
+                          uint64_t handle_capacity) {
+    using namespace kernel::obj;
     auto self = kernel::sched::current();
     if (!self) { return errc_of(ktl::errc::invalid_operation); }
     const auto& buffer = self->ipc();
     if (!buffer.valid() || !buffer.contains(offset, capacity)) { return errc_of(ktl::errc::out_of_range); }
+    if (handle_capacity > MessageBuffer::MAX_HANDLES) { return errc_of(ktl::errc::out_of_range); }
+    if (handle_capacity != 0 && !buffer.contains(handles_offset, handle_capacity * sizeof(uint64_t))) {
+        return errc_of(ktl::errc::out_of_range);
+    }
 
     auto task     = calling_task(self);
-    auto verified = task->handles().verify(kernel::obj::unpack_handle(handle), kernel::obj::RIGHT_READ,
-                                           kernel::obj::type_ids::CHANNEL);
+    auto verified = task->handles().verify(unpack_handle(handle), RIGHT_READ, type_ids::CHANNEL);
     if (verified.is_err()) { return errc_of(verified.unwrap_err()); }
 
-    auto channel  = ktl::static_ref_cast<kernel::obj::Channel>(verified.unwrap().object);
-    auto received = channel->read(capacity);
+    auto channel  = ktl::static_ref_cast<Channel>(verified.unwrap().object);
+    auto received = channel->read(capacity, handle_capacity);
     if (received.is_err()) { return errc_of(received.unwrap_err()); }
     auto message = received.unwrap();
     if (message.size() != 0) { buffer_write(buffer, offset, message.data(), message.size()); }
-    return message.size();
+
+    // Move each handle out of escrow into the caller's table. An insert the receiver's table
+    // cannot make (OOM) closes that handle -- the message is already dequeued, so the returned
+    // count is how the caller learns what actually arrived.
+    HandleId escrowed[MessageBuffer::MAX_HANDLES];
+    size_t count = message.detach_handles(escrowed);
+    uint64_t handle_values[MessageBuffer::MAX_HANDLES];
+    uint64_t delivered = 0;
+    for (size_t i = 0; i < count; i++) {
+        auto taken = kernel::sched::kernel_task()->handles().take(escrowed[i]);
+        if (taken.is_err()) { continue; }
+        auto moved    = taken.unwrap();
+        auto inserted = task->handles().insert(ktl::move(moved.object), moved.rights);
+        if (inserted.is_err()) { continue; }
+        handle_values[delivered++] = pack_handle(inserted.unwrap());
+    }
+    if (delivered != 0) { buffer_write(buffer, handles_offset, handle_values, delivered * sizeof(uint64_t)); }
+    return (delivered << 32) | message.size();
 }
 
 }  // namespace
 
 extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                                      uint64_t a5) {
-    // a3..a5 are carried by the entry paths but no operation reads past a2 yet.
-    (void)a3;
-    (void)a4;
+    // a5 is carried by the entry paths but no operation reads past a4 yet.
     (void)a5;
     kernel::synchronization::syscall_enter();
     uint64_t ret = 0;
@@ -210,8 +262,8 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_HANDLE_DUPLICATE:
         case kernel::syscall::SYS_OBJ_INFO: ret = handle_syscall(nr, a0, a1); break;
         case kernel::syscall::SYS_CHANNEL_CREATE: ret = sys_channel_create(a0); break;
-        case kernel::syscall::SYS_CHANNEL_SEND: ret = sys_channel_send(a0, a1, a2); break;
-        case kernel::syscall::SYS_CHANNEL_RECV: ret = sys_channel_recv(a0, a1, a2); break;
+        case kernel::syscall::SYS_CHANNEL_SEND: ret = sys_channel_send(a0, a1, a2, a3, a4); break;
+        case kernel::syscall::SYS_CHANNEL_RECV: ret = sys_channel_recv(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_OBJECT_WAIT: ret = sys_object_wait(a0, a1); break;
         default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
     }

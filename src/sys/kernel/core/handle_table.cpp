@@ -124,15 +124,23 @@ ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask
 }
 
 ktl::result<void> HandleTable::close(HandleId id) {
-    // Declared before the guard so the reference drops after the unlock: the last reference
-    // may run an arbitrary destructor, and destructors may re-enter this table.
-    ktl::ref<Object> victim;
+    auto taken = take(id);
+    if (taken.is_err()) { return ktl::err(taken.unwrap_err()); }
+    // The taken reference drops here, after take() released the lock: the last reference may run
+    // an arbitrary destructor, and destructors may re-enter this table.
+    return ktl::result<void>::ok();
+}
+
+ktl::result<VerifiedHandle> HandleTable::take(HandleId id) {
     kernel::synchronization::lock_guard guard(m_lock);
 
     HandleEntry* entry = lookup_entry(id);
     if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
 
-    victim = ktl::move(entry->strong);
+    // An unowned (self-handle) entry holds no reference of its own; promote one so the caller
+    // always receives an owning reference regardless of the entry's kind.
+    ktl::ref<Object> moved = entry->strong ? ktl::move(entry->strong) : entry->object.promote();
+    Rights rights          = entry->rights;
     entry->object.reset();
     entry->rights = 0;
     m_count--;
@@ -142,14 +150,13 @@ ktl::result<void> HandleTable::close(HandleId id) {
     // instead of returning it to the free list.
     if (entry->generation == MAX_GENERATION) {
         entry->next_free = -1;
-        return ktl::result<void>::ok();
+    } else {
+        entry->generation++;
+        entry->next_free = m_free_head;
+        m_free_head      = static_cast<int32_t>(id.index);
     }
 
-    entry->generation++;
-    entry->next_free = m_free_head;
-    m_free_head      = static_cast<int32_t>(id.index);
-
-    return ktl::result<void>::ok();
+    return ktl::result<VerifiedHandle>::ok(VerifiedHandle{ktl::move(moved), rights});
 }
 
 ktl::result<VerifiedHandle> HandleTable::verify(HandleId id, Rights required_rights, TypeId expected_type) {
@@ -181,6 +188,22 @@ ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {
 size_t HandleTable::count() {
     kernel::synchronization::lock_guard guard(m_lock);
     return m_count;
+}
+
+bool HandleTable::snapshot(ktl::vector<HandleInfo>& out) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    if (!out.reserve(out.size() + m_count)) { return false; }
+    for (size_t i = 0; i < m_entries.size(); i++) {
+        auto& entry = m_entries[i];
+        if (!entry.object) { continue; }
+        HandleInfo info;
+        info.id        = HandleId{static_cast<uint32_t>(i), entry.generation};
+        info.rights    = entry.rights;
+        info.type_id   = entry.object->type_id();
+        info.object_id = entry.object->id();
+        if (!out.push_back(info)) { return false; }
+    }
+    return true;
 }
 
 bool HandleTable::is_valid(HandleId id) {

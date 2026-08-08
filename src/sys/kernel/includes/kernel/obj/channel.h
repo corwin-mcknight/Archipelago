@@ -1,6 +1,7 @@
 #pragma once
 
 #include <abi/syscall.h>
+#include <kernel/obj/handle_table.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
@@ -27,14 +28,23 @@ void channel_page_free(uintptr_t page);
 // actually meaningful. Move-only owner; the page returns to the PMM on destruction. A zero-length
 // message holds no page at all. The page is contiguous kernel memory, so filling it from a
 // non-contiguous source (the IPC buffer's page runs) is a memcpy per run into data() + offset.
+//
+// A message can also carry handles in transit. Each slot names an entry in the kernel's own
+// handle table -- the escrow that keeps the object alive between tables (docs/Design/IPC
+// Primitives.md). The message owns those entries: destruction with handles still attached (a
+// channel dying with messages queued, a failed send) closes them in the kernel table like any
+// other handle close.
 class MessageBuffer {
    public:
-    MessageBuffer() = default;
+    static constexpr size_t MAX_HANDLES = static_cast<size_t>(::abi::syscall::CHANNEL_MAX_MESSAGE_HANDLES);
+
+    MessageBuffer()                     = default;
     ~MessageBuffer() { reset(); }
 
     MessageBuffer(MessageBuffer&& other) noexcept : m_page(other.m_page), m_length(other.m_length) {
         other.m_page   = 0;
         other.m_length = 0;
+        adopt_handles(other);
     }
     MessageBuffer& operator=(MessageBuffer&& other) noexcept {
         if (this != &other) {
@@ -43,6 +53,7 @@ class MessageBuffer {
             m_length       = other.m_length;
             other.m_page   = 0;
             other.m_length = 0;
+            adopt_handles(other);
         }
         return *this;
     }
@@ -56,15 +67,41 @@ class MessageBuffer {
     const uint8_t* data() const { return reinterpret_cast<const uint8_t*>(m_page); }
     size_t size() const { return m_length; }
 
+    // Attach an escrowed kernel-table handle; false once every slot is occupied.
+    bool attach_handle(HandleId id) {
+        if (m_handle_count == MAX_HANDLES) { return false; }
+        m_handles[m_handle_count++] = id;
+        return true;
+    }
+    size_t handle_count() const { return m_handle_count; }
+    // Hand every escrowed handle to the caller, who becomes responsible for moving each out of
+    // the kernel table (or closing it there). Returns the count copied into `out`.
+    size_t detach_handles(HandleId (&out)[MAX_HANDLES]) {
+        size_t count = m_handle_count;
+        for (size_t i = 0; i < count; i++) { out[i] = m_handles[i]; }
+        m_handle_count = 0;
+        return count;
+    }
+
    private:
+    void adopt_handles(MessageBuffer& other) {
+        m_handle_count = other.m_handle_count;
+        for (size_t i = 0; i < m_handle_count; i++) { m_handles[i] = other.m_handles[i]; }
+        other.m_handle_count = 0;
+    }
+
     void reset() {
         if (m_page != 0) { channel_page_free(m_page); }
         m_page   = 0;
         m_length = 0;
+        release_handles();  // out of line: closing escrow needs the kernel task
     }
+    void release_handles();
 
     uintptr_t m_page = 0;
     size_t m_length  = 0;
+    HandleId m_handles[MAX_HANDLES];
+    size_t m_handle_count = 0;
 };
 
 // One endpoint of a bidirectional, point-to-point message channel (docs/Design/IPC Primitives.md).
@@ -89,7 +126,9 @@ class Channel : public Object {
     static constexpr size_t MAX_MESSAGE_BYTES    = 4096;
     static constexpr size_t QUEUE_DEPTH          = 8;
 
-    static constexpr Rights DEFAULT_RIGHTS       = RIGHT_READ | RIGHT_WRITE | RIGHT_WAIT;
+    // TRANSFER is the per-channel gate on carrying handles in messages, per the design doc; the
+    // handle being sent needs no right of its own until object types start registering TRANSFER.
+    static constexpr Rights DEFAULT_RIGHTS       = RIGHT_READ | RIGHT_WRITE | RIGHT_WAIT | RIGHT_TRANSFER;
 
     struct Pair {
         ktl::ref<Channel> first;
@@ -104,9 +143,10 @@ class Channel : public Object {
     // is enforced where the message is created, so an in-hand MessageBuffer always fits.
     ktl::result<void> write(MessageBuffer message);
 
-    // Dequeue this endpoint's front message. truncated if it exceeds max_bytes (the message stays
-    // queued), would_block if the queue is empty, peer_closed if it is empty and can never refill.
-    ktl::result<MessageBuffer> read(size_t max_bytes);
+    // Dequeue this endpoint's front message. truncated if it exceeds max_bytes or carries more
+    // handles than max_handles (the message stays queued), would_block if the queue is empty,
+    // peer_closed if it is empty and can never refill.
+    ktl::result<MessageBuffer> read(size_t max_bytes, size_t max_handles = MessageBuffer::MAX_HANDLES);
 
     // DUPLICATE is deliberately outside the valid mask: an endpoint handle is move-only. Two
     // handles to one endpoint would interleave competing reads and make PEER_CLOSED (which fires

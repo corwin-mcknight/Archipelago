@@ -41,6 +41,26 @@ KTEST_CASE(obj_handle_table_close_destroys_object) {
     KTEST_EXPECT_TRUE(destroyed);
 }
 
+// take() is close() that hands the entry's reference over instead of dropping it: the handle dies,
+// the object survives exactly as long as the returned reference, and the rights ride along
+// unchanged -- the move half of handle transfer.
+KTEST_CASE(obj_handle_table_take_moves_reference) {
+    bool destroyed = false;
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ | RIGHT_SIGNAL, &destroyed));
+
+    KTEST_UNWRAP(taken, table.take(id));
+    KTEST_EXPECT_ALL(!table.is_valid(id), table.count() == 0, !destroyed);
+    KTEST_EXPECT_ALL(taken.rights == (RIGHT_READ | RIGHT_SIGNAL), taken.object->type_id() == TEST_TYPE_A);
+
+    // The slot is recycled like a closed one, and re-taking the dead handle is refused.
+    auto again = table.take(id);
+    KTEST_EXPECT_ALL(again.is_err(), again.unwrap_err() == ktl::errc::handle_invalid);
+
+    taken.object.reset();
+    KTEST_EXPECT_TRUE(destroyed);
+}
+
 KTEST_CASE(obj_handle_table_generation_counter) {
     HandleTable table;
     KTEST_UNWRAP(id1, table.emplace<TestObjA>(RIGHTS_ALL));

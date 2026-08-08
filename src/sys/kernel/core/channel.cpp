@@ -1,4 +1,5 @@
 #include <kernel/obj/channel.h>
+#include <kernel/sched/task.h>
 #include <kernel/synchronization/guard.h>
 #include <kernel/synchronization/mutex.h>
 
@@ -29,6 +30,18 @@ ktl::result<MessageBuffer> MessageBuffer::create(size_t length) {
     }
     buffer.m_length = length;
     return ktl::result<MessageBuffer>::ok(ktl::move(buffer));
+}
+
+// Close handles still escrowed when the message dies -- the "channel destroyed with handles in
+// flight" path, where the kernel closes them like any other handle. Runs after the channel state
+// lock is released (the state's reference drops in ~Channel's member destruction), so a close that
+// destroys another channel endpoint cannot deadlock here. A handle to an endpoint of this same
+// pair queued on itself is the one shape this cannot reclaim: the escrow reference keeps the
+// endpoint alive, the endpoint keeps the queue alive, and the cycle leaks rather than crashes.
+void MessageBuffer::release_handles() {
+    auto& escrow = kernel::sched::kernel_task()->handles();
+    for (size_t i = 0; i < m_handle_count; i++) { (void)escrow.close(m_handles[i]); }
+    m_handle_count = 0;
 }
 
 Channel::Channel(ktl::ref<channel_state> state, uint32_t side)
@@ -73,7 +86,7 @@ ktl::result<void> Channel::write(MessageBuffer message) {
     return ktl::result<void>::ok();
 }
 
-ktl::result<MessageBuffer> Channel::read(size_t max_bytes) {
+ktl::result<MessageBuffer> Channel::read(size_t max_bytes, size_t max_handles) {
     kernel::synchronization::lock_guard guard(m_state->lock);
     auto& queue = m_state->inbound[m_side];
     if (queue.count == 0) {
@@ -82,7 +95,7 @@ ktl::result<MessageBuffer> Channel::read(size_t max_bytes) {
     }
 
     MessageBuffer& front = queue.slots[queue.head];
-    if (front.size() > max_bytes) { return ktl::err(ktl::errc::truncated); }
+    if (front.size() > max_bytes || front.handle_count() > max_handles) { return ktl::err(ktl::errc::truncated); }
 
     bool was_full         = queue.count == QUEUE_DEPTH;
     MessageBuffer message = ktl::move(front);
