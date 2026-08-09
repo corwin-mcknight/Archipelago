@@ -85,11 +85,11 @@ inline uint64_t channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity
 }
 
 // Nonzero mask blocks until any of those signal bits assert and returns the signals observed;
-// zero mask polls, returning the current signals immediately.
-inline uint64_t object_wait(uint64_t handle, uint64_t mask) {
-    return syscall2(abi::syscall::SYS_OBJECT_WAIT, handle, mask);
+// zero mask polls, returning the current signals immediately. timeout_ns of 0 waits forever;
+// nonzero bounds the wait and a lapse returns the timed_out error.
+inline uint64_t object_wait(uint64_t handle, uint64_t mask, uint64_t timeout_ns = 0) {
+    return syscall3(abi::syscall::SYS_OBJECT_WAIT, handle, mask, timeout_ns);
 }
-
 // This thread's IPC buffer, as handed over at entry. Every program stashes it before doing anything
 // else; there is no way to ask for it again.
 struct ipc_buffer {

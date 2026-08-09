@@ -2,6 +2,7 @@
 
 #include <kernel/obj/types.h>
 #include <kernel/sched/wait_queue.h>
+#include <kernel/time.h>
 
 #include <ktl/atomic>
 
@@ -30,6 +31,9 @@ class Object {
     /// Block the calling thread until any signal bit in mask is set; returns the signals
     /// observed. mask must be nonzero. Kernel-only (defined in core/sched/wait_queue.cpp).
     uint32_t wait_signals(uint32_t mask);
+    // Same, but gives up at `deadline` (a tick count). Returns the signals observed at return:
+    // a value not intersecting the mask means the deadline passed first.
+    uint32_t wait_signals_deadline(uint32_t mask, ktime_t deadline);
 
    private:
     ObjectId m_id;

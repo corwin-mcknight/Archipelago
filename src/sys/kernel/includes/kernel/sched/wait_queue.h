@@ -49,6 +49,15 @@ class wait_queue {
     void block_if(uint32_t mask, bool (*should_block)(void*), void* ctx);
     void block(uint32_t mask = 0) { block_if(mask, nullptr, nullptr); }
 
+    // Same, but parking on a node the caller owns, so a second waker -- the timed-wait scan --
+    // can find this exact waiter by pointer. The node must outlive the call.
+    void block_if(wait_node& node, uint32_t mask, bool (*should_block)(void*), void* ctx);
+
+    // Timed-wait side of a race with the ordinary wakers: unlink `node` and hand back its thread,
+    // or an empty ref if a signal waker (or nobody) parked there first. The node pointer must be
+    // one whose frame is known live -- the timed-wait registry guarantees that window.
+    ktl::ref<Thread> claim(wait_node* node);
+
     void wake_one();
     void wake_all();
     // Wake every waiter whose nonzero mask intersects signals. Returns the number woken.

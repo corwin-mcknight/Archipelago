@@ -187,7 +187,7 @@ uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uin
 // beside the channel syscalls rather than in the op table because it blocks, which the
 // scheduler-free dispatch pipeline must never do. The verified ref pins the object for the whole
 // wait, so a concurrent close of the handle cannot free it out from under the sleeping thread.
-uint64_t sys_object_wait(uint64_t handle, uint64_t mask) {
+uint64_t sys_object_wait(uint64_t handle, uint64_t mask, uint64_t timeout_ns) {
     auto self = kernel::sched::current();
     if (!self) { return errc_of(ktl::errc::invalid_operation); }
     if ((mask >> 32) != 0) { return errc_of(ktl::errc::out_of_range); }
@@ -198,7 +198,16 @@ uint64_t sys_object_wait(uint64_t handle, uint64_t mask) {
 
     auto object = verified.unwrap().object;
     if (mask == 0) { return object->signals(); }
-    return object->wait_signals(static_cast<uint32_t>(mask));
+    if (timeout_ns == 0) { return object->wait_signals(static_cast<uint32_t>(mask)); }
+
+    // The timeout rounds up to ticks and the deadline saturates: a huge value waits forever
+    // rather than wrapping to a deadline already in the past.
+    ktime_t now      = kernel::time::now();
+    ktime_t ticks    = kernel::time::ns_to_ticks_ceil(timeout_ns);
+    ktime_t deadline = (now + ticks < now) ? UINT64_MAX : now + ticks;
+    uint32_t got     = object->wait_signals_deadline(static_cast<uint32_t>(mask), deadline);
+    if ((got & mask) == 0) { return errc_of(ktl::errc::timed_out); }
+    return got;
 }
 
 uint64_t sys_channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity, uint64_t handles_offset,
@@ -264,7 +273,7 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_CHANNEL_CREATE: ret = sys_channel_create(a0); break;
         case kernel::syscall::SYS_CHANNEL_SEND: ret = sys_channel_send(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_CHANNEL_RECV: ret = sys_channel_recv(a0, a1, a2, a3, a4); break;
-        case kernel::syscall::SYS_OBJECT_WAIT: ret = sys_object_wait(a0, a1); break;
+        case kernel::syscall::SYS_OBJECT_WAIT: ret = sys_object_wait(a0, a1, a2); break;
         default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
     }
     kernel::synchronization::syscall_exit();

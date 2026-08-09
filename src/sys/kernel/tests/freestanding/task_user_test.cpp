@@ -4,11 +4,13 @@
 
 #include <kernel/boot.h>
 #include <kernel/elf.h>
+#include <kernel/log.h>
 #include <kernel/obj/channel.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/syscall.h>
+#include <kernel/time.h>
 #include <std/string.h>
 
 #include <ktl/vector>
@@ -66,6 +68,19 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
 
     for (int i = 0; i < 2000 && task->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
 
+    // On the failure path, say where init actually is before the assert kills the run: the
+    // thread's state plus the scheduler's queue depths separate a lost sleeper wake, a stuck
+    // reaper, and a thread that never exited.
+    if (task->state() != task_state::TERMINATED) {
+        auto s = stats_snapshot();
+        g_log.warn("utest stuck: task_state={0} threads={1} runq={2} sleepers={3} zombies={4} reaped={5}",
+                   static_cast<uint32_t>(task->state()), task->thread_count(), s.runq_depth, s.sleepers, s.zombies,
+                   s.reaped);
+        g_log.warn("utest stuck: thread id={0} state={1} wakes={2} sleeps={3} yields={4}", threads[0]->id(),
+                   static_cast<uint32_t>(threads[0]->state()), threads[0]->stats().wakes, threads[0]->stats().sleeps,
+                   threads[0]->stats().yields);
+    }
+
     KTEST_REQUIRE_TRUE(task->state() == task_state::TERMINATED);
     KTEST_EXPECT_EQUAL(task->thread_count(), 0u);
     KTEST_EXPECT_TRUE(task->aspace() == nullptr);
@@ -111,6 +126,48 @@ KTEST_CASE_INTEGRATION(object_wait_syscall) {
 
     KTEST_EXPECT_TRUE(table.close(first_id).is_ok());
     KTEST_EXPECT_TRUE(table.close(no_wait_id).is_ok());
+}
+
+// The timeout path of SYS_OBJECT_WAIT: an already-asserted signal returns immediately regardless
+// of timeout, a signal that never fires returns timed_out only after the deadline has genuinely
+// elapsed, and the timed-wait registry is empty again afterwards -- the parked node was reclaimed,
+// not leaked.
+KTEST_CASE_INTEGRATION(object_wait_timeout) {
+    using namespace kernel::obj;
+    namespace sys = kernel::syscall;
+
+    auto& table   = kernel::sched::kernel_task()->handles();
+    KTEST_UNWRAP(pair, Channel::create());
+    KTEST_UNWRAP(id, table.insert(pair.first, Channel::DEFAULT_RIGHTS));
+    uint64_t handle   = pack_handle(id);
+
+    // Already asserted: the wait returns the signals without consuming any of the timeout.
+    uint64_t observed = syscall_dispatch(sys::SYS_OBJECT_WAIT, handle, Channel::SIGNAL_WRITABLE, 1, 0, 0, 0);
+    KTEST_EXPECT_TRUE((observed & Channel::SIGNAL_WRITABLE) != 0);
+
+    // Never asserted: READABLE cannot fire with no writer. Three ticks of timeout must cost at
+    // least three ticks of time and come back timed_out.
+    ktime_t before   = kernel::time::now();
+    uint64_t ticks   = 3;
+    uint64_t timeout = static_cast<uint64_t>(kernel::time::ktime_to_ns(ticks));
+    uint64_t lapsed  = syscall_dispatch(sys::SYS_OBJECT_WAIT, handle, Channel::SIGNAL_READABLE, timeout, 0, 0, 0);
+    KTEST_EXPECT_TRUE(lapsed == static_cast<uint64_t>(ktl::errc::timed_out));
+    KTEST_EXPECT_TRUE(kernel::time::now() - before >= ticks);
+
+    // A signal arriving before the deadline wins the race against the expiry scan.
+    auto writer = kernel::sched::spawn(
+        "utest-writer",
+        [](void* arg) {
+            kernel::sched::sleep_ticks(2);
+            (void)static_cast<Channel*>(arg)->write(MessageBuffer{});
+        },
+        pair.second.get());
+    KTEST_REQUIRE_TRUE(writer.is_ok());
+    uint64_t long_timeout = static_cast<uint64_t>(kernel::time::ktime_to_ns(500));
+    uint64_t woken = syscall_dispatch(sys::SYS_OBJECT_WAIT, handle, Channel::SIGNAL_READABLE, long_timeout, 0, 0, 0);
+    KTEST_EXPECT_TRUE((woken & Channel::SIGNAL_READABLE) != 0);
+
+    KTEST_EXPECT_TRUE(table.close(id).is_ok());
 }
 
 namespace {

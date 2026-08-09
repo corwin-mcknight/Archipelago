@@ -162,10 +162,12 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         ipc.print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
     }
 
-    // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task.
+    // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task. Keep
+    // the sleep well under user_task_lifecycle's 2000-tick termination wait: the two race, and a
+    // sleep near that bound turns the test into a coin flip (as a temporary 2000 here proved).
     volatile char stack_probe[64];
     for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }
-    init::sleep(2000);
+    init::sleep(20);
 
     init::exit();
     __builtin_unreachable();

@@ -41,3 +41,8 @@ void kernel::time::use_timestamp_clock() {
     _timestamp_hz.store(hz, ktl::memory_order::release);
 }
 time_ns_t kernel::time::ktime_to_ns(ktime_t ktime) { return (time_ns_t)((uint64_t)ktime * (uint64_t)_ns_per_tick); }
+ktime_t kernel::time::ns_to_ticks_ceil(uint64_t ns) {
+    uint64_t per = (uint64_t)_ns_per_tick;
+    if (per == 0) { return ns; }  // tick period not configured (host tests): treat ns as ticks
+    return (ns + per - 1) / per;
+}

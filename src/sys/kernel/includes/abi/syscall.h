@@ -66,11 +66,12 @@ constexpr uint64_t SYS_CHANNEL_RECV            = 9;  // arg0 = handle (needs the
 // The most handles one message can carry.
 constexpr uint64_t CHANNEL_MAX_MESSAGE_HANDLES = 4;
 
-// arg0 = handle (needs the wait right), arg1 = signal mask. A nonzero mask blocks the calling
-// thread until any bit in it is asserted on the object and returns the signals observed at wake; a
-// zero mask is a poll, returning the current signals immediately (possibly zero). Signals are 32
-// bits; a mask with any higher bit set is rejected. No timeout exists yet -- a wait whose signal
-// never fires blocks forever.
+// arg0 = handle (needs the wait right), arg1 = signal mask, arg2 = timeout in nanoseconds. A
+// nonzero mask blocks the calling thread until any bit in it is asserted on the object and returns
+// the signals observed at wake; a zero mask is a poll, returning the current signals immediately
+// (possibly zero, timeout ignored). Signals are 32 bits; a mask with any higher bit set is
+// rejected. A timeout of 0 waits forever; a nonzero timeout is a floor, rounded up to the kernel's
+// tick granularity, after which the wait returns the timed_out error instead of signals.
 constexpr uint64_t SYS_OBJECT_WAIT             = 10;
 
 // Signal bits, as returned and waited on through SYS_OBJECT_WAIT. Meanings are per object type;

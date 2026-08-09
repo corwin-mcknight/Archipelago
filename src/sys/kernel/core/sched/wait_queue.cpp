@@ -4,6 +4,7 @@
 #include <kernel/log.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/semaphore.h>
+#include <kernel/sched/internal.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/thread.h>
 #include <kernel/sched/wait_queue.h>
@@ -13,13 +14,17 @@
 namespace kernel::sched {
 
 void wait_queue::block_if(uint32_t mask, bool (*should_block)(void*), void* ctx) {
-    assert(!current_is_idle(), "block_if: idle thread cannot block");
-    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     // The node lives in this frame, which survives exactly as long as the thread stays parked, so
     // parking allocates nothing and cannot fail -- there is no OOM path out of a blocking wait.
     // The waker unlinks the node and moves the ref out before make_ready, after which the node is
     // dead memory nobody references; this frame only unwinds once the thread runs again.
     wait_node node;
+    block_if(node, mask, should_block, ctx);
+}
+
+void wait_queue::block_if(wait_node& node, uint32_t mask, bool (*should_block)(void*), void* ctx) {
+    assert(!current_is_idle(), "block_if: idle thread cannot block");
+    if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     node.mask      = mask;
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     kernel::synchronization::preempt_disable();
@@ -65,6 +70,16 @@ namespace {
 // is spurious, never wrong.
 constexpr size_t WAKE_BATCH = 8;
 }  // namespace
+
+ktl::ref<Thread> wait_queue::claim(wait_node* node) {
+    kernel::synchronization::critical_irq_lock_guard guard(m_lock);
+    // An empty thread ref means the waiter either has not parked yet or was already taken by a
+    // signal waker; either way this claim loses the race and touches nothing.
+    if (!node->thread) { return ktl::ref<Thread>(); }
+    ktl::ref<Thread> woken = ktl::move(node->thread);
+    unlink(node);
+    return woken;
+}
 
 void wait_queue::wake_one() {
     ktl::ref<Thread> woken;
@@ -159,6 +174,37 @@ uint32_t Object::wait_signals(uint32_t mask) {
                 return (c->obj->signals() & c->mask) == 0;
             },
             &ctx);
+        cur = signals();
+    }
+    return cur;
+}
+
+uint32_t Object::wait_signals_deadline(uint32_t mask, ktime_t deadline) {
+    assert(mask != 0, "wait_signals_deadline: empty mask would never wake");
+    struct Ctx {
+        Object* obj;
+        uint32_t mask;
+        ktime_t deadline;
+    };
+    Ctx ctx{this, mask, deadline};
+    uint32_t cur = signals();
+    while ((cur & mask) == 0 && kernel::time::now() < deadline) {
+        // The node lives in this frame and the registry entry points at it; register before
+        // parking so the expiry scan can find the node, and unregister after every wake before
+        // the next iteration reuses the frame. The predicate re-checks the deadline under the
+        // queue lock: if the expiry scan already ran past a not-yet-parked node (claim finds no
+        // thread and leaves the entry), the predicate refuses the park instead of sleeping
+        // forever on a deadline nobody watches anymore.
+        kernel::sched::wait_node node;
+        kernel::sched::timed_wait_register(&m_waiters, &node, deadline);
+        m_waiters.block_if(
+            node, mask,
+            [](void* p) {
+                auto* c = static_cast<Ctx*>(p);
+                return (c->obj->signals() & c->mask) == 0 && kernel::time::now() < c->deadline;
+            },
+            &ctx);
+        kernel::sched::timed_wait_unregister(&node);
         cur = signals();
     }
     return cur;

@@ -2,6 +2,7 @@
 
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/thread.h>
+#include <kernel/time.h>
 
 #include <ktl/deque>
 #include <ktl/ref>
@@ -45,5 +46,16 @@ void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t t
 // called with interrupts disabled.
 void wake_due_sleepers();
 size_t sleeper_count();
+
+// Timed waits also live in sleep.cpp: waiters parked on an object's wait queue with a deadline.
+// The registry entry points at the wait node on the waiter's stack; register before parking,
+// unregister after waking (tolerant of the expiry scan having removed the entry first). The
+// expiry scan runs from the tick handler alongside wake_due_sleepers.
+struct wait_node;
+class wait_queue;
+void timed_wait_register(wait_queue* queue, wait_node* node, ktime_t wake_at);
+void timed_wait_unregister(wait_node* node);
+void wake_due_timed_waits();
+size_t timed_wait_count();
 
 }  // namespace kernel::sched

@@ -184,8 +184,10 @@ void yield() {
 void on_tick() {
     if (!g_started) { return; }
     auto& c = cur_cpu();
-    // Wake due sleepers first so a woken thread can be this tick's switch target.
+    // Wake due sleepers and expired timed waits first so a woken thread can be this tick's
+    // switch target.
     wake_due_sleepers();
+    wake_due_timed_waits();
     if (c.run_queue.size() == 0) { return; }
     bool idle_running = (c.current.get() == c.idle.get());
     if (!idle_running && c.current->decrement_slice() > 0) { return; }

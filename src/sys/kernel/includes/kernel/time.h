@@ -43,6 +43,14 @@ class time {
     static time_ns_t ktime_to_ns(ktime_t ktime);
 
     /**
+     * @brief Converts a nanosecond duration into ticks, rounding up.
+     *
+     * Rounding up keeps a timeout a floor -- a wait never expires early because the duration
+     * quantized down to fewer ticks. Returns at least 1 for any nonzero duration.
+     */
+    static ktime_t ns_to_ticks_ceil(uint64_t ns);
+
+    /**
      * @brief Advances the kernel tick counter by one and updates cached time bookkeeping.
      */
     static void tick();

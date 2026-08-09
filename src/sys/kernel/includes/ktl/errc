@@ -20,6 +20,7 @@ enum class errc : intptr_t {
     truncated          = -12,
     would_block        = -13,
     peer_closed        = -14,
+    timed_out          = -15,
 };
 
 }  // namespace ktl
