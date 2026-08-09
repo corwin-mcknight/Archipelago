@@ -4,7 +4,7 @@ Archipelago tasks are kernel objects that bind a handle table, a set of threads,
 ## Lifecycle
 A task begins in `NEW`, enters `RUNNING` when its first thread is queued, and becomes `TERMINATED` after the reaper removes its last thread. Task zero is created directly in `RUNNING`, owns no userspace address space, and never terminates.
 
-The creation path takes an ELF image as a byte span and loads it through the kernel's ELF loader: each loadable segment becomes an anonymous VMO mapped at its own address with its own protection, the entry point comes from the image, and a demand-paged `USER|READ|WRITE` stack is mapped at a fixed address the kernel chooses. It then installs kernel and self handles and queues the first thread. Where the image came from is the caller's business -- today the boot protocol's `init` module, later a filesystem.
+The creation path takes an ELF image as a byte span and loads it through the kernel's ELF loader: each loadable segment becomes an anonymous VMO mapped at its own address with its own protection, the entry point comes from the image, and a demand-paged `USER|READ|WRITE` stack is mapped at a fixed address the kernel chooses. It then wires the bootstrap channel, queues the bootstrap message, and queues the first thread. Where the image came from is the caller's business -- today the boot protocol's `init` module, later a filesystem.
 
 ## Loading a binary
 The loader accepts static `ET_EXEC` images for the running architecture and nothing else. It is split so that the part doing arithmetic over untrusted header fields is separable from the part that touches memory: parsing validates the header and collects loadable segments without allocating, touching global state, or knowing about the VMM, and mapping turns that result into VMOs and bindings.
@@ -34,7 +34,7 @@ Every handle syscall runs the same pipeline before any operation code executes: 
 
 A handle crossing the boundary is a uint64: table slot index in the low 32 bits, generation in the high 32. A closed slot's generation moves, so a stale handle fails the lookup rather than reaching whatever now occupies the slot.
 
-The initial thread's table is created with exactly two entries, promised by the ABI as first-generation slots 0 and 1: a handle to its own task (read and write rights) and a handle to its own thread (read and wait). Neither carries the duplicate right, which makes the rights-rejection path reachable from the first program.
+The initial thread's table is created with exactly one entry, promised by the ABI as first-generation slot 0: one end of its bootstrap channel. The other end belongs to the task's creator -- the kernel today, held as the task's mailbox for the task's whole life. The first message queued on the channel, before the thread can run, is the bootstrap message: an empty payload carrying a handle to the task itself (read and write rights), a handle to its initial thread (read and wait), and any further handles the creator endowed the task with. Everything after that first message is ordinary parent-to-task mail. Neither self-handle carries the duplicate right, which makes the rights-rejection path reachable from the first program.
 
 x86_64 enters through SYSCALL/SYSRET. riscv64 enters through `ecall` and returns through `sret`. Both call the shared dispatcher with interrupts disabled on the calling thread's kernel stack. Six argument registers are carried -- as many as either architecture's calling convention provides, so the entry assembly never needs widening again -- though no operation reads more than two yet.
 
@@ -51,7 +51,7 @@ A thread learns where its buffer is from two registers set at entry, rather than
 The reaper performs user-task teardown after removing the last dead thread:
 
 1. Mark the task `TERMINATED`.
-2. Clear its handle table, breaking self-handle reference cycles.
+2. Clear its handle table and drop its mailbox, destroying the bootstrap channel and closing any handles still escrowed on it -- including the task's own bootstrap self-reference.
 3. Switch to the kernel address space if necessary, then destroy the user address space.
 4. Remove the task from the global registry.
 5. Close task zero's owner handle.

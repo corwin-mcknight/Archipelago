@@ -78,13 +78,13 @@ KTEST_CASE(handle_dispatch_rejects_garbage) {
     KTEST_EXPECT_TRUE(dispatch_handle_op(table, 999, pack(id), 0) == as_ret(ktl::errc::invalid_operation));
 }
 
-// The ABI promises the first two handles created in a fresh table are first-generation slots 0 and
-// 1 -- that is what makes SELF_TASK_HANDLE and SELF_THREAD_HANDLE constants at all.
+// The ABI promises the first handle created in a fresh table is first-generation slot 0 -- that
+// is what makes BOOTSTRAP_HANDLE a constant at all. Allocation stays in ascending slot order.
 KTEST_CASE(handle_dispatch_fresh_table_allocates_slot_zero_first) {
     HandleTable table;
     KTEST_UNWRAP(first, table.emplace<TestObjA>(RIGHTS_ALL));
     KTEST_UNWRAP(second, table.emplace<TestObjB>(RIGHTS_ALL));
-    KTEST_EXPECT_ALL(pack(first) == sys::SELF_TASK_HANDLE, pack(second) == sys::SELF_THREAD_HANDLE);
+    KTEST_EXPECT_ALL(pack(first) == sys::BOOTSTRAP_HANDLE, pack(second) == 1);
 }
 
 #endif

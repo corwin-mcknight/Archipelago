@@ -103,10 +103,12 @@ constexpr uint64_t CHANNEL_SIGNAL_PEER_CLOSED  = 1 << 2;
 // Asserted while the port has pending packets.
 constexpr uint64_t PORT_SIGNAL_READABLE        = 1 << 0;
 
-// The initial thread's handle table is created with exactly two entries, in this order: a handle
-// to its own task, then a handle to its own thread. Both are first-generation, so their packed
-// values are the slot indices themselves.
-constexpr uint64_t SELF_TASK_HANDLE            = 0;
-constexpr uint64_t SELF_THREAD_HANDLE          = 1;
+// The initial thread's handle table is created with exactly one entry: a channel endpoint,
+// first-generation in slot 0, so its packed value is 0. The peer end belongs to whoever created
+// the task. The first message on it is the bootstrap message: an empty byte payload carrying, in
+// this order, a handle to the task itself, a handle to its initial thread, and then any further
+// handles the creator chose to endow it with. Everything after that first message is ordinary
+// parent-to-task mail, and the endpoint stays open for the task's life.
+constexpr uint64_t BOOTSTRAP_HANDLE            = 0;
 
 }  // namespace abi::syscall

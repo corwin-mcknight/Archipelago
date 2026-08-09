@@ -13,8 +13,8 @@ extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
-ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
-                                         size_t ipc_pages) {
+ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
+                                               size_t ipc_pages) {
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
     ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
@@ -64,6 +64,18 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
         return ktl::err(reserved.unwrap_err());
     }
 
+    return ktl::result<ktl::ref<Thread>>::ok(thread);
+}
+
+void thread_discard(ktl::ref<Thread> thread) {
+    auto task = ktl::static_ref_cast<Task>(thread->owner());
+    note_thread_reaped();
+    task->remove_thread(thread->id());
+    release_thread_ipc(*task, thread->ipc());
+    stack_pool_release(thread->kstack_phys());
+}
+
+ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     thread->set_ready_ts(kernel::arch::timestamp());
     g_stats.spawned += 1;
@@ -71,14 +83,21 @@ ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, 
     bool ok = cur_cpu().run_queue.push_back(thread);
     kernel::arch::restore_interrupts(flags);
     if (!ok) {
-        note_thread_reaped();
-        task->remove_thread(thread->id());
-        release_thread_ipc(*task, thread->ipc());
-        stack_pool_release(*phys);
+        thread_discard(thread);
         return ktl::err(ktl::errc::oom);
     }
-    if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", name, thread->id()); }
-    return ktl::result<ktl::ref<Thread>>::ok(thread);
+    if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", thread->name(), thread->id()); }
+    return ktl::result<void>::ok();
+}
+
+ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
+                                         size_t ipc_pages) {
+    auto created = thread_create_in(ktl::move(task), name, entry, arg, ipc_pages);
+    if (created.is_err()) { return created; }
+    auto thread = created.unwrap();
+    auto queued = thread_enqueue(thread);
+    if (queued.is_err()) { return ktl::err(queued.unwrap_err()); }
+    return ktl::result<ktl::ref<Thread>>::ok(ktl::move(thread));
 }
 
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {

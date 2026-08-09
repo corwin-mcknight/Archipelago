@@ -14,6 +14,64 @@
 
 namespace {
 
+// argv entries are string_views over the input line, not null-terminated -- parse by hand.
+ktl::maybe<uint64_t> parse_u64(ktl::string_view sv) {
+    if (sv.size() == 0) { return ktl::maybe<uint64_t>{}; }
+    uint64_t value = 0;
+    for (size_t i = 0; i < sv.size(); ++i) {
+        if (sv[i] < '0' || sv[i] > '9') { return ktl::maybe<uint64_t>{}; }
+        value = value * 10 + static_cast<uint64_t>(sv[i] - '0');
+    }
+    return ktl::maybe<uint64_t>{value};
+}
+
+// Queue the words after the id on a task's mailbox -- the parent's end of its bootstrap channel.
+// This is the parent speaking: the message lands on the task's slot-0 endpoint like any other
+// channel mail. The task decides whether it ever reads it; an undrained message dies with the task.
+void task_msg(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
+    using namespace kernel::sched;
+    auto id = parse_u64(argv[2]);
+    if (!id.has_value()) {
+        output.print("task: bad id\n");
+        return;
+    }
+
+    ktl::vector<ktl::ref<Task>> tasks;
+    if (!snapshot_tasks(tasks)) {
+        output.print("task: snapshot failed\n");
+        return;
+    }
+    ktl::ref<Task> target;
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        if (tasks[i]->id() == *id) { target = tasks[i]; }
+    }
+    if (!target || !target->mailbox()) {
+        output.print("task: no task {0} with a mailbox\n", *id);
+        return;
+    }
+
+    size_t length = 0;
+    for (int i = 3; i < argc; ++i) { length += argv[i].size() + (i > 3 ? 1 : 0); }
+    auto created = kernel::obj::MessageBuffer::create(length);
+    if (created.is_err()) {
+        output.print("task: message too large or no memory\n");
+        return;
+    }
+    auto message = created.unwrap();
+    size_t at    = 0;
+    for (int i = 3; i < argc; ++i) {
+        if (i > 3) { message.data()[at++] = ' '; }
+        for (size_t j = 0; j < argv[i].size(); ++j) { message.data()[at++] = static_cast<uint8_t>(argv[i][j]); }
+    }
+
+    auto sent = target->mailbox()->write(ktl::move(message));
+    if (sent.is_err()) {
+        output.print("task: mailbox full or closed\n");
+        return;
+    }
+    output.print("task: queued {0} bytes for task {1}\n", length, *id);
+}
+
 const char* state_name(kernel::sched::task_state state) {
     switch (state) {
         case kernel::sched::task_state::NEW: return "new";
@@ -41,8 +99,12 @@ void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellO
         output.print("task: launched id={0}\n", created.unwrap()->id());
         return;
     }
+    if (argc >= 4 && argv[1] == "msg") {
+        task_msg(argc, argv, output);
+        return;
+    }
     if (argc >= 2 && argv[1] != "list") {
-        output.print("usage: task list|demo\n");
+        output.print("usage: task list|demo|msg <id> <text>\n");
         return;
     }
 
@@ -67,6 +129,6 @@ void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellO
 
 }  // namespace
 
-KSHELL_COMMAND(task, "task", "Task debug view: list tasks, launch demo payload", task_handler);
+KSHELL_COMMAND(task, "task", "Task debug view: list tasks, launch demo payload, mail a task", task_handler);
 
 #endif  // CONFIG_KERNEL_SHELL

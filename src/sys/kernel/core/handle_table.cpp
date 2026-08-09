@@ -17,8 +17,8 @@ ktl::result<void> HandleTable::grow() {
         if (!m_entries.push_back(ktl::move(entry))) { return ktl::err(ktl::errc::oom); }
     }
     // Chain the new slots so allocation walks them in ascending index order. The order is
-    // load-bearing for a fresh table: the ABI promises the initial thread's self-handles occupy
-    // slots 0 and 1 (abi::syscall::SELF_TASK_HANDLE / SELF_THREAD_HANDLE).
+    // load-bearing for a fresh table: the ABI promises the initial thread's bootstrap channel
+    // endpoint occupies slot 0 (abi::syscall::BOOTSTRAP_HANDLE).
     for (size_t i = old_size + GROW_BATCH; i-- > old_size;) {
         m_entries[i].next_free = m_free_head;
         m_free_head            = static_cast<int32_t>(i);
@@ -34,7 +34,7 @@ HandleTable::HandleEntry* HandleTable::lookup_entry(HandleId id) {
     return &entry;
 }
 
-ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights, bool owning) {
+ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights rights) {
     if (!object) { return ktl::err(ktl::errc::null_argument); }
 
     // Requested rights must stay within the contract registered for this object's type.
@@ -50,12 +50,12 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
         if (grown.is_err()) { return ktl::err(grown.unwrap_err()); }
     }
 
-    int32_t slot = m_free_head;
-    auto& entry  = m_entries[static_cast<size_t>(slot)];
-    m_free_head  = entry.next_free;
+    int32_t slot    = m_free_head;
+    auto& entry     = m_entries[static_cast<size_t>(slot)];
+    m_free_head     = entry.next_free;
 
-    entry.object = ktl::unowned_ref<Object>(object);
-    if (owning) { entry.strong = ktl::move(object); }
+    entry.object    = ktl::unowned_ref<Object>(object);
+    entry.strong    = ktl::move(object);
     entry.rights    = rights;
     entry.next_free = -1;
     m_count++;
@@ -65,11 +65,7 @@ ktl::result<HandleId> HandleTable::create_handle(ktl::ref<Object> object, Rights
 }
 
 ktl::result<HandleId> HandleTable::insert(ktl::ref<Object> object, Rights rights) {
-    return create_handle(ktl::move(object), rights, true);
-}
-
-ktl::result<HandleId> HandleTable::insert_unowned(const ktl::ref<Object>& object, Rights rights) {
-    return create_handle(object, rights, false);
+    return create_handle(ktl::move(object), rights);
 }
 
 void HandleTable::clear() {
@@ -119,8 +115,7 @@ ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask
         obj_copy   = src->object.promote();
     }
 
-    // Duplicates always own, including duplicates of unowned self-handle entries.
-    return create_handle(ktl::move(obj_copy), new_rights, true);
+    return create_handle(ktl::move(obj_copy), new_rights);
 }
 
 ktl::result<void> HandleTable::close(HandleId id) {
@@ -137,9 +132,7 @@ ktl::result<VerifiedHandle> HandleTable::take(HandleId id) {
     HandleEntry* entry = lookup_entry(id);
     if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
 
-    // An unowned (self-handle) entry holds no reference of its own; promote one so the caller
-    // always receives an owning reference regardless of the entry's kind.
-    ktl::ref<Object> moved = entry->strong ? ktl::move(entry->strong) : entry->object.promote();
+    ktl::ref<Object> moved = ktl::move(entry->strong);
     Rights rights          = entry->rights;
     entry->object.reset();
     entry->rights = 0;

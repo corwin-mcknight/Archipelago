@@ -87,8 +87,6 @@
 - VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
 - Post-Milestone-1 review findings, scheduler and synchronization:
     - `lockdep` mutates the per-CPU held-lock stack non-atomically with interrupts enabled for mutex guards; an ISR taking any tracked spinlock would corrupt it. Latent until the planned UART RX interrupt path lands.
-    - The self-handle window in `create_user_task` relies on an unenforced invariant: `spawn_into` enqueues the payload before the handles are inserted, and anything that blocks in between lets the thread run without ABI slots 0 and 1. Split spawn into create + enqueue so the handles land first.
-    - Self-handle insert failure is only a warning and the task still starts; if the first insert fails and the second succeeds, a Thread occupies slot 0 and the documented ABI becomes type confusion. Route it through the existing `fail()` path.
     - `switch_to` publishes `g_kstack_floor` and the TSS stack while still running on the outgoing stack, so a fault in that window is checked against the incoming thread's floor. Publish from `sched_finish_switch`, which already runs first on the incoming stack.
     - `switch_to` republishes the syscall kernel stack only when `kstack_top() != 0`, leaving the previous thread's value live for stackless threads; publish unconditionally with a poison value so a stray syscall faults.
     - `spawn` counts and traces a spawn before the run-queue push whose failure unwinds it, so failed spawns are recorded as real.
@@ -102,8 +100,6 @@
 - Handle dispatch follow-ups (the pipeline itself landed with Milestone 1: verify-then-execute over a declarative op table, `close`/`duplicate`/`obj_info` as first operations):
     - Rights bits and type ids are kernel constants, not installed ABI; `obj_info` returns them raw, so a user program can compare but not name them. Move them into `abi/` when a program first needs to request a specific right.
     - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
-    - The self-handle ABI (first-generation slots 0 and 1) leans on fresh-table allocation order; a bootstrap-message scheme should replace it if the IPC milestone reshapes startup anyway.
-    - Self-handles are unowned (`HandleTable::insert_unowned`), and the slot-1 thread entry stays safe only because reap of the initial thread tears down the whole task; a thread-spawn syscall must close the self-thread entry when its thread is reaped, or the entry dangles.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
@@ -148,6 +144,7 @@
 - Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
 - Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
+- The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end only as today's sole creator, as `Task::mailbox()`). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
 - Define service discovery, registration, and policy enforcement for core daemons.
 - Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.
 

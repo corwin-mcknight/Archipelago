@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/obj/channel.h>
 #include <kernel/obj/handle_table.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
@@ -43,6 +44,13 @@ class Task : public kernel::obj::Object {
     kernel::obj::HandleId owner_handle() const { return m_owner_handle; }
     void set_owner_handle(kernel::obj::HandleId id) { m_owner_handle = id; }
 
+    // The parent's end of this task's bootstrap channel (<abi/syscall.h>). The kernel is every
+    // task's parent today, so the end lives here rather than in a handle table; writing to it
+    // queues mail on the task's slot-0 endpoint. Held for the task's life -- dropping it is what
+    // tells the task its parent is gone -- and released in teardown_user_task.
+    const ktl::ref<kernel::obj::Channel>& mailbox() const { return m_mailbox; }
+    void set_mailbox(ktl::ref<kernel::obj::Channel> end) { m_mailbox = ktl::move(end); }
+
     // IPC-buffer slots in this task's address space. Threads need distinct buffer addresses and
     // the VMM has no first-fit search, so slots are handed out from a bitmap and returned when the
     // thread goes away -- a monotonic counter would leak the address space of a task that spawns
@@ -65,8 +73,9 @@ class Task : public kernel::obj::Object {
     kernel::mm::vm_aspace* m_aspace      = nullptr;
     task_state m_state                   = task_state::NEW;
     kernel::obj::HandleId m_owner_handle = kernel::obj::HandleId::invalid();
+    ktl::ref<kernel::obj::Channel> m_mailbox;
     // One bit per slot; see IPC_BUFFER_MAX_SLOTS.
-    uint64_t m_ipc_slots                 = 0;
+    uint64_t m_ipc_slots = 0;
 };
 
 // Task zero. Lazy-created on first use: kernel boot reaches it from obj_init(), host tests

@@ -143,8 +143,8 @@ template <typename T, typename U> ref<T> static_ref_cast(const ref<U>& other) {
 
 // A non-owning view of a ref-counted object. It carries no weak count and keeps neither the
 // object nor its control block alive: the holder must guarantee the pointee stays strongly
-// referenced elsewhere for the view's whole lifetime. The handle table's self-handles satisfy
-// this by living inside the object they point at.
+// referenced elsewhere for the view's whole lifetime. The handle table satisfies this by
+// storing each entry's view beside the strong reference it mirrors.
 // ponytail: no weak count, so promote() on a dead object is use-after-free; grow this into a
 // real weak_ref if a view can ever outlive its liveness guarantee (SMP teardown races).
 template <typename T> class unowned_ref {

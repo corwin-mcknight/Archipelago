@@ -32,15 +32,4 @@ KTEST_CASE(handle_insert_existing_object_and_clear) {
     KTEST_EXPECT_TRUE(!table.is_valid(a));
 }
 
-// A self-handle is unowned, so a task whose own table points back at it holds no reference
-// cycle: the task dies with its last external reference, live self-entry and all.
-KTEST_CASE(handle_insert_unowned_self_handle_no_cycle) {
-    auto task = ktl::make_ref<kernel::sched::Task>();
-    KTEST_REQUIRE_TRUE(static_cast<bool>(task));
-    KTEST_UNWRAP(self, task->handles().insert_unowned(task, RIGHT_READ));
-    KTEST_EXPECT_TRUE(task.ref_count() == 1);
-    KTEST_UNWRAP(got, task->handles().get<kernel::sched::Task>(self, RIGHT_READ));
-    KTEST_EXPECT_TRUE(got.get() == task.get());
-}
-
 #endif

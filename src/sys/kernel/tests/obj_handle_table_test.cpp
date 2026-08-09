@@ -227,34 +227,4 @@ KTEST_CASE(obj_handle_table_clear_reentrant_destructor) {
     KTEST_EXPECT_ALL(table.count() == 0, !table.is_valid(victim));
 }
 
-// Unowned entries hold no strong reference: the object's lifetime belongs to its external
-// owner, and closing the entry destroys nothing.
-KTEST_CASE(obj_handle_table_unowned_entry_does_not_own) {
-    bool destroyed = false;
-    HandleTable table;
-    auto obj = ktl::make_ref<TestObjA>(&destroyed);
-    KTEST_REQUIRE_TRUE(static_cast<bool>(obj));
-    KTEST_UNWRAP(id, table.insert_unowned(obj, RIGHT_READ));
-    KTEST_EXPECT_TRUE(obj.ref_count() == 1);
-    KTEST_UNWRAP(got, table.get<TestObjA>(id, RIGHT_READ));
-    KTEST_EXPECT_TRUE(got.get() == obj.get());
-    got.reset();
-    KTEST_EXPECT_TRUE(table.close(id).is_ok());
-    KTEST_EXPECT_FALSE(destroyed);
-}
-
-// Duplicating an unowned entry mints an ordinary owning handle.
-KTEST_CASE(obj_handle_table_unowned_duplicate_owns) {
-    bool destroyed = false;
-    HandleTable table;
-    auto obj = ktl::make_ref<TestObjA>(&destroyed);
-    KTEST_UNWRAP(self, table.insert_unowned(obj, RIGHT_READ | RIGHT_DUPLICATE));
-    KTEST_UNWRAP(dup, table.duplicate(self, RIGHT_READ));
-    KTEST_EXPECT_TRUE(table.close(self).is_ok());
-    obj.reset();
-    KTEST_EXPECT_FALSE(destroyed);
-    KTEST_EXPECT_TRUE(table.close(dup).is_ok());
-    KTEST_EXPECT_TRUE(destroyed);
-}
-
 #endif

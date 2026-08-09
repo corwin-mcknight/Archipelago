@@ -36,15 +36,24 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     KTEST_REQUIRE_TRUE(task->snapshot_threads(threads));
     KTEST_REQUIRE_EQUAL(threads.size(), 1u);
 
-    // The self-handle ABI: a fresh table whose first-generation slots 0 and 1 hold the task and
-    // thread, in that order, exactly as SELF_TASK_HANDLE / SELF_THREAD_HANDLE promise. The window
-    // is safe: init sleeps before exiting, so the table cannot have been torn down yet.
+    // The bootstrap ABI: a fresh table whose first-generation slot 0 holds a channel endpoint,
+    // exactly as BOOTSTRAP_HANDLE promises, and the kernel holds the parent's end as the task's
+    // mailbox. The window is safe: init sleeps before exiting, so the table cannot have been torn
+    // down yet. init itself asserts the message's contents from the other side ("bootstrap ok").
     {
         using namespace kernel::obj;
-        KTEST_REQUIRE_VALUE(self_task, task->handles().info(HandleId{0, 0}));
-        KTEST_REQUIRE_VALUE(self_thread, task->handles().info(HandleId{1, 0}));
-        KTEST_EXPECT_ALL(self_task.type_id == type_ids::TASK, self_task.rights == (RIGHT_READ | RIGHT_WRITE));
-        KTEST_EXPECT_ALL(self_thread.type_id == type_ids::THREAD, self_thread.rights == (RIGHT_READ | RIGHT_WAIT));
+        KTEST_REQUIRE_VALUE(bootstrap, task->handles().info(HandleId{0, 0}));
+        KTEST_EXPECT_ALL(bootstrap.type_id == type_ids::CHANNEL, bootstrap.rights == Channel::DEFAULT_RIGHTS);
+        KTEST_REQUIRE_TRUE(task->mailbox());
+
+        // Parent-to-task mail rides the same channel: a message queued here is readable on the
+        // task's slot-0 endpoint. init never reads it, which is also worth exercising -- an
+        // undrained message must die with the task, not outlive it.
+        auto message = MessageBuffer::create(5);
+        KTEST_REQUIRE_TRUE(message.is_ok());
+        auto mail = message.unwrap();
+        __builtin_memcpy(mail.data(), "hello", 5);
+        KTEST_EXPECT_TRUE(task->mailbox()->write(ktl::move(mail)).is_ok());
     }
 
     // Drive the dispatch pipeline through the real syscall entry from kernel context: this thread

@@ -51,17 +51,36 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
     ipc.write(0, first);
     ipc.write(first, second);
 
-    // The self-handles the kernel installed at creation, exercised through the dispatch pipeline.
-    // Structural checks only -- type ids and rights bits are not part of the installed ABI yet, so
-    // assert what the contract does promise: both self-handles resolve, they name objects of
-    // different types, and an operation needing a right they lack (duplicate) is refused.
-    uint64_t task_info   = init::obj_info(abi::syscall::SELF_TASK_HANDLE);
-    uint64_t thread_info = init::obj_info(abi::syscall::SELF_THREAD_HANDLE);
-    bool infos_ok        = !init::is_error(task_info) && !init::is_error(thread_info) &&
-                    (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
-    ipc.print(infos_ok ? "init: self handles ok\n" : "init: SELF HANDLES BROKEN\n");
+    // The bootstrap contract: slot 0 is a channel endpoint whose first message carries our
+    // self-handles -- task, then thread, then whatever else the creator endowed us with. Recv it
+    // through the ordinary transfer path, then make the structural checks the contract promises:
+    // an empty payload, at least the two self-handles, naming objects of different types, and an
+    // operation needing a right they lack (duplicate) refused.
+    uint64_t self_task   = 0;
+    uint64_t self_thread = 0;
+    {
+        constexpr size_t ARRIVED_AT = 512;   // where recv lands the endowed handles
+        uint64_t got = init::channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
+        bool ok      = !init::is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
+        for (size_t i = 0; i < sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(&self_task)[i]   = ipc.base[ARRIVED_AT + i];
+            reinterpret_cast<char*>(&self_thread)[i] = ipc.base[ARRIVED_AT + sizeof(uint64_t) + i];
+        }
 
-    uint64_t dup = init::handle_duplicate(abi::syscall::SELF_TASK_HANDLE, ~0ull);
+        uint64_t task_info   = init::obj_info(self_task);
+        uint64_t thread_info = init::obj_info(self_thread);
+        ok = ok && !init::is_error(task_info) && !init::is_error(thread_info) &&
+             (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
+
+        // The endpoint must not report hangup after the drain: the parent keeps its end open for
+        // the task's whole life. No claim about READABLE -- the parent may have mailed more already.
+        uint64_t sig = init::object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0);
+        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) == 0;
+
+        ipc.print(ok ? "init: bootstrap ok\n" : "init: BOOTSTRAP BROKEN\n");
+    }
+
+    uint64_t dup = init::handle_duplicate(self_task, ~0ull);
     ipc.print(init::is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
 
     // A channel pair, exercised whole: create hands back two handles through the buffer (the first

@@ -26,6 +26,14 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
 // address space to map one into. Capped at IPC_BUFFER_MAX_PAGES.
 ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
                                          size_t ipc_pages = IPC_BUFFER_DEFAULT_PAGES);
+// The two halves of spawn_into, for callers that must act between a thread existing and it
+// becoming runnable -- task creation queues the bootstrap message (which carries a handle to the
+// thread) in that window, so the payload can never observe an unprovisioned table. A created
+// thread must go to exactly one of thread_enqueue or thread_discard.
+ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
+                                               size_t ipc_pages = IPC_BUFFER_DEFAULT_PAGES);
+ktl::result<void> thread_enqueue(ktl::ref<Thread> thread);
+void thread_discard(ktl::ref<Thread> thread);
 
 void yield();
 // Block the current thread until at least `ticks` kernel ticks have elapsed. The idle thread

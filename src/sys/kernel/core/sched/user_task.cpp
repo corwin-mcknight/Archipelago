@@ -36,11 +36,28 @@ constexpr uintptr_t USER_STACK_TOP  = USER_STACK_BASE + USER_STACK_PAGES * KERNE
     kernel::arch::enter_user(reinterpret_cast<uintptr_t>(entry), USER_STACK_TOP, kstack_top, ipc_base, ipc_size);
 }
 
+// Escrow `object` into the kernel table and attach it to `message`, the same escrow a user-to-user
+// handle transfer rides. False leaves the message unchanged; handles already attached stay owned
+// by the message, whose destruction closes them.
+bool escrow_into(kernel::obj::MessageBuffer& message, ktl::ref<kernel::obj::Object> object,
+                 kernel::obj::Rights rights) {
+    auto escrowed = kernel_task()->handles().insert(ktl::move(object), rights);
+    if (escrowed.is_err()) { return false; }
+    if (!message.attach_handle(escrowed.unwrap())) {
+        (void)kernel_task()->handles().close(escrowed.unwrap());
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
-ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size) {
+ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size,
+                                             ktl::span<const bootstrap_extra> extras) {
     using namespace kernel::mm;
     using namespace kernel::obj;
+
+    if (extras.size() > MessageBuffer::MAX_HANDLES - 2) { return ktl::err(ktl::errc::out_of_range); }
 
     auto parsed = kernel::elf::parse_image(elf, elf_size);
     if (parsed.is_err()) {
@@ -80,34 +97,58 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     if (owner.is_err()) { return fail(owner.unwrap_err()); }
     task->set_owner_handle(owner.unwrap());
 
-    register_task(task);
-    task->set_state(task_state::RUNNING);
-    // Interrupts stay off from spawn through self-handle insertion so the payload cannot
-    // run, exit, and be torn down before its handles exist -- a late insert would leave
-    // entries behind in a table nothing will clear again.
-    // ponytail: single-core interrupts-off; SMP needs a creation lock or a paused-spawn API.
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    auto thread    = spawn_into(task, name, user_thread_entry, reinterpret_cast<void*>(img.entry));
-    if (thread.is_err()) {
-        kernel::arch::restore_interrupts(flags);
+    // Everything below unwinds through here. Dropping the mailbox and clearing the table is what
+    // releases the bootstrap escrow: the child endpoint dies with the table, the parent end with
+    // the mailbox, and the pair's destruction closes the kernel-table entries the message carried
+    // -- including the reference that would otherwise pin the task itself.
+    auto fail_wired = [&](ktl::errc error) -> ktl::result<ktl::ref<Task>> {
+        task->set_mailbox({});
+        task->handles().clear();
         unregister_task(task->id());
         (void)kernel_task()->handles().close(task->owner_handle());
-        return fail(thread.unwrap_err());
+        return fail(error);
+    };
+
+    // The single insert into the fresh table IS the ABI: a first-generation slot 0 is what
+    // abi::syscall::BOOTSTRAP_HANDLE promises the initial thread.
+    auto pair_created = Channel::create();
+    if (pair_created.is_err()) { return fail_wired(pair_created.unwrap_err()); }
+    auto pair      = pair_created.unwrap();
+    auto child_end = task->handles().insert(pair.second, Channel::DEFAULT_RIGHTS);
+    if (child_end.is_err()) { return fail_wired(child_end.unwrap_err()); }
+    assert(pack_handle(child_end.unwrap()) == ::abi::syscall::BOOTSTRAP_HANDLE, "bootstrap endpoint not at slot 0");
+    task->set_mailbox(pair.first);
+
+    register_task(task);
+    task->set_state(task_state::RUNNING);
+
+    auto created = thread_create_in(task, name, user_thread_entry, reinterpret_cast<void*>(img.entry));
+    if (created.is_err()) { return fail_wired(created.unwrap_err()); }
+    auto thread  = created.unwrap();
+
+    // The bootstrap message is queued while the thread cannot yet run, so the payload can never
+    // observe missing self-handles -- the ordering the old slots-0-and-1 scheme kept safe by
+    // holding interrupts off across spawn. The handles ride as owned escrow entries; the cycle
+    // (task table -> endpoint -> queued message -> task) is broken by teardown_user_task, which
+    // clears the table and drops the mailbox explicitly rather than waiting on refcounts.
+    auto message = MessageBuffer::create(0);
+    bool endowed = message.is_ok();
+    if (endowed) {
+        auto boot = message.unwrap();
+        endowed =
+            escrow_into(boot, task, RIGHT_READ | RIGHT_WRITE) && escrow_into(boot, thread, RIGHT_READ | RIGHT_WAIT);
+        for (size_t i = 0; endowed && i < extras.size(); i++) {
+            endowed = escrow_into(boot, extras[i].object, extras[i].rights);
+        }
+        if (endowed) { endowed = task->mailbox()->write(ktl::move(boot)).is_ok(); }
+    }
+    if (!endowed) {
+        thread_discard(thread);
+        return fail_wired(ktl::errc::oom);
     }
 
-    // These two inserts into the fresh table ARE the ABI: first-generation slots 0 and 1, which is
-    // what abi::syscall::SELF_TASK_HANDLE and SELF_THREAD_HANDLE promise the initial thread.
-    // Both are unowned: a task's handles to itself and its initial thread must not pin the task.
-    // The thread entry cannot dangle because reap() holds the thread's last reference across
-    // teardown_user_task(), which clears this table first.
-    // ponytail: unowned slot 1 assumes single-threaded tasks (the initial thread's reap tears the
-    // whole task down); a thread-spawn syscall must close the self-thread entry at thread reap.
-    auto self_task   = task->handles().insert_unowned(task, RIGHT_READ | RIGHT_WRITE);
-    auto self_thread = task->handles().insert_unowned(thread.unwrap(), RIGHT_READ | RIGHT_WAIT);
-    kernel::arch::restore_interrupts(flags);
-    if (self_task.is_err() || self_thread.is_err()) {
-        g_log.warn("task: '{0}' created without full self-handles", name);
-    }
+    auto queued = thread_enqueue(thread);
+    if (queued.is_err()) { return fail_wired(queued.unwrap_err()); }
 
     if (lifecycle_log_enabled()) { g_log.debug("task: created '{0}' id={1}", name, task->id()); }
     return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
@@ -115,6 +156,10 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
 
 void teardown_user_task(ktl::ref<Task> task) {
     task->handles().clear();
+    // Dropping the parent's end after the table means both endpoints are now gone, which frees
+    // the pair's state and closes any handles still escrowed on its queues -- an undrained
+    // bootstrap message is what releases the task's self-reference here.
+    task->set_mailbox({});
     auto* aspace = task->aspace();
     if (aspace != nullptr) {
         if (kernel::mm::vm_aspace::active() == aspace) { kernel::mm::kernel_aspace().activate(); }
