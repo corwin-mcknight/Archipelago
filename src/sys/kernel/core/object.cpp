@@ -2,6 +2,7 @@
 #include <kernel/obj/counter.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
+#include <kernel/obj/port.h>
 #include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/task.h>
@@ -16,6 +17,7 @@ void obj_init() {
     Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
     Semaphore::register_type(g_type_registry).expect("obj_init: Semaphore type registration failed");
     Channel::register_type(g_type_registry).expect("obj_init: Channel type registration failed");
+    Port::register_type(g_type_registry).expect("obj_init: Port type registration failed");
     kernel::sched::Thread::register_type(g_type_registry).expect("obj_init: Thread type registration failed");
     kernel::sched::Task::register_type(g_type_registry).expect("obj_init: Task type registration failed");
     kernel::sched::kernel_task();  // task zero exists before anything can need a handle
@@ -31,8 +33,9 @@ ObjectId Object::allocate_id() { return g_next_object_id.fetch_add(1, ktl::memor
 Object::~Object() { g_type_registry.on_object_destroyed(m_type_id); }
 uint32_t Object::signals() const { return m_signals.load(ktl::memory_order::acquire); }
 void Object::signal_set(uint32_t bits) {
-    m_signals.fetch_or(bits, ktl::memory_order::seq_cst);
+    uint32_t previous = m_signals.fetch_or(bits, ktl::memory_order::seq_cst);
     object_signal_wake(this);
+    if (m_bindings != nullptr) { port_notify(this, previous, previous | bits); }
 }
 void Object::signal_clear(uint32_t bits) { m_signals.fetch_and(~bits, ktl::memory_order::seq_cst); }
 

@@ -1,7 +1,7 @@
 # IPC Primitives
 
 > [!info] Design
-> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals) along with signal wait and poll on any handle (no timeout yet) and handle transfer through kernel-table escrow, gated by the transfer right on the channel handle; ports, server dispatch, and the message metadata/header regions are not.
+> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals), along with signal wait and poll on any handle with a nanosecond timeout, handle transfer through kernel-table escrow gated by the transfer right on the channel handle, and ports with signal bindings and packet delivery; server dispatch and the message metadata/header regions are not.
 
 The kernel provides several IPC primitives for communication between processes and between processes and servers.
 All are [[Object Model|kernel objects]] accessed through capability handles, and all operations go through the [[Object Model#Three-Path Dispatch|three-path dispatch model]].
@@ -62,13 +62,14 @@ A port is a multi-producer, single-consumer message queue.
 Unlike channels (which are point-to-point), ports aggregate events from multiple sources into a single waitable queue.
 
 ### Signal binding
-Processes can bind an object's signals to a port.
-When a bound object's signal state transitions to match the registered mask, the kernel queues a **packet** on the port.
+Processes can bind an object's signals to a port, supplying a caller-chosen 64-bit **binding key**.
+When a bound object's signal state transitions to match the registered mask (or already matches it at bind time), the kernel queues a **packet** on the port.
 Each packet contains:
-- The source object's handle ID
-- The signal bits that triggered the packet
+- The binding key -- the kernel never interprets it, so a server typically uses the address or index of its own per-source state, making dispatch a lookup-free step
+- The signal bits that triggered the packet, with repeats before the dequeue coalesced in
 - Optional server-defined payload
 
+A binding holds a reference to its object, so a bound object stays alive until it is unbound.
 The port becomes `READABLE` when it has pending packets.
 The process waits on the port handle rather than individual objects.
 
@@ -77,6 +78,7 @@ Ports are the server-side multiplexing point.
 A server that owns many objects binds their signals to a single port and runs an event loop reading packets.
 This replaces the `select()`/`poll()` pattern -- rather than a syscall that takes a list of handles, the kernel delivers events through the object model.
 Packets are delivered in arrival order.
+The binding itself is the packet's storage, allocated once at bind time, so signal delivery never allocates and a port cannot be flooded into memory exhaustion by a noisy source -- repeats coalesce instead of queueing.
 
 ## Signal/Wait
 Every [[Object Model|kernel object]] carries a set of signal bits -- a bitmask where multiple signals can be active simultaneously.

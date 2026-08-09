@@ -1,6 +1,7 @@
 #include <kernel/log.h>
 #include <kernel/obj/channel.h>
 #include <kernel/obj/handle_dispatch.h>
+#include <kernel/obj/port.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
@@ -251,6 +252,80 @@ uint64_t sys_channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity, u
     return (delivered << 32) | message.size();
 }
 
+// Ports follow the channel syscalls' shape: hand-rolled dispatch, the same verify pipeline, and
+// the IPC buffer as the only memory crossing the boundary.
+
+uint64_t sys_port_create() {
+    auto self = kernel::sched::current();
+    if (!self) { return errc_of(ktl::errc::invalid_operation); }
+    auto task    = calling_task(self);
+    auto created = task->handles().emplace<kernel::obj::Port>(kernel::obj::Port::DEFAULT_RIGHTS);
+    if (created.is_err()) { return errc_of(created.unwrap_err()); }
+    return kernel::obj::pack_handle(created.unwrap());
+}
+
+uint64_t sys_port_bind(uint64_t port_handle, uint64_t object_handle, uint64_t key, uint64_t mask) {
+    using namespace kernel::obj;
+    auto self = kernel::sched::current();
+    if (!self) { return errc_of(ktl::errc::invalid_operation); }
+    if (mask == 0 || (mask >> 32) != 0) { return errc_of(ktl::errc::out_of_range); }
+
+    auto task = calling_task(self);
+    auto port = task->handles().get<Port>(unpack_handle(port_handle), RIGHT_WRITE);
+    if (port.is_err()) { return errc_of(port.unwrap_err()); }
+    // The wait right on the object gates the subscription, same as a direct wait would need.
+    auto object = task->handles().verify(unpack_handle(object_handle), RIGHT_WAIT);
+    if (object.is_err()) { return errc_of(object.unwrap_err()); }
+
+    auto bound = port.unwrap()->bind(ktl::move(object.unwrap().object), key, static_cast<uint32_t>(mask));
+    return bound.is_ok() ? 0 : errc_of(bound.unwrap_err());
+}
+
+uint64_t sys_port_unbind(uint64_t port_handle, uint64_t key) {
+    using namespace kernel::obj;
+    auto self = kernel::sched::current();
+    if (!self) { return errc_of(ktl::errc::invalid_operation); }
+    auto task = calling_task(self);
+    auto port = task->handles().get<Port>(unpack_handle(port_handle), RIGHT_WRITE);
+    if (port.is_err()) { return errc_of(port.unwrap_err()); }
+    return port.unwrap()->unbind(key);
+}
+
+uint64_t sys_port_wait(uint64_t port_handle, uint64_t offset, uint64_t timeout_ns) {
+    using namespace kernel::obj;
+    auto self = kernel::sched::current();
+    if (!self) { return errc_of(ktl::errc::invalid_operation); }
+    const auto& buffer = self->ipc();
+    if (!buffer.valid() || !buffer.contains(offset, 2 * sizeof(uint64_t))) { return errc_of(ktl::errc::out_of_range); }
+
+    auto task    = calling_task(self);
+    auto claimed = task->handles().get<Port>(unpack_handle(port_handle), RIGHT_READ | RIGHT_WAIT);
+    if (claimed.is_err()) { return errc_of(claimed.unwrap_err()); }
+    auto port        = claimed.unwrap();
+
+    ktime_t deadline = 0;
+    if (timeout_ns != 0) {
+        ktime_t now   = kernel::time::now();
+        ktime_t ticks = kernel::time::ns_to_ticks_ceil(timeout_ns);
+        deadline      = (now + ticks < now) ? UINT64_MAX : now + ticks;
+    }
+
+    // Dequeue-then-wait loop: READABLE can flicker high on a drained queue (see Port::dequeue),
+    // so an empty dequeue after a wake just waits again with the same deadline.
+    Port::Packet packet;
+    while (!port->dequeue(packet)) {
+        if (timeout_ns == 0) {
+            (void)port->wait_signals(Port::SIGNAL_READABLE);
+            continue;
+        }
+        uint32_t got = port->wait_signals_deadline(Port::SIGNAL_READABLE, deadline);
+        if ((got & Port::SIGNAL_READABLE) == 0) { return errc_of(ktl::errc::timed_out); }
+    }
+    uint64_t out[2] = {packet.key, packet.signals};
+    buffer_write(buffer, offset, out, sizeof(out));
+    return 0;
+}
+
 }  // namespace
 
 extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
@@ -274,6 +349,10 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_CHANNEL_SEND: ret = sys_channel_send(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_CHANNEL_RECV: ret = sys_channel_recv(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_OBJECT_WAIT: ret = sys_object_wait(a0, a1, a2); break;
+        case kernel::syscall::SYS_PORT_CREATE: ret = sys_port_create(); break;
+        case kernel::syscall::SYS_PORT_BIND: ret = sys_port_bind(a0, a1, a2, a3); break;
+        case kernel::syscall::SYS_PORT_UNBIND: ret = sys_port_unbind(a0, a1); break;
+        case kernel::syscall::SYS_PORT_WAIT: ret = sys_port_wait(a0, a1, a2); break;
         default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
     }
     kernel::synchronization::syscall_exit();

@@ -18,6 +18,7 @@ constexpr TypeId THREAD    = 5;
 constexpr TypeId TASK      = 6;
 constexpr TypeId SEMAPHORE = 7;
 constexpr TypeId CHANNEL   = 8;
+constexpr TypeId PORT      = 9;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;

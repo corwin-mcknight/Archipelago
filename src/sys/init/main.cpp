@@ -162,6 +162,44 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         ipc.print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
     }
 
+    // A port: the wait on an empty port times out rather than wedging, a message on a bound
+    // channel becomes a packet carrying the binder's key, and unbind leaves the port empty.
+    {
+        constexpr size_t ENDS_AT   = 512;
+        constexpr size_t PACKET_AT = 640;
+        constexpr uint64_t KEY     = 0xC0FFEE;
+
+        bool ok = !init::is_error(init::channel_create(ENDS_AT));
+        uint64_t ends[2];
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(ends)[i] = ipc.base[ENDS_AT + i];
+        }
+
+        uint64_t port = init::port_create();
+        ok            = ok && !init::is_error(port);
+        ok = ok && !init::is_error(init::port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
+
+        // Nothing queued yet: a bounded wait lapses instead of blocking forever. -15 is the
+        // kernel's timed_out code; error values are not installed ABI yet (see todo.md), so this
+        // is the one place init spells one.
+        ok = ok && init::port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(-15);
+
+        size_t note_len = ipc.stage(0, "wake the event loop");
+        ok              = ok && !init::is_error(init::channel_send(ends[0], 0, note_len));
+        ok              = ok && !init::is_error(init::port_wait(port, PACKET_AT, 0));
+
+        uint64_t packet[2];
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
+            reinterpret_cast<char*>(packet)[i] = ipc.base[PACKET_AT + i];
+        }
+        ok = ok && packet[0] == KEY && (packet[1] & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
+
+        ok = ok && init::port_unbind(port, KEY) == 1;
+        ok = ok && !init::is_error(init::handle_close(port));
+        ok = ok && !init::is_error(init::handle_close(ends[0])) && !init::is_error(init::handle_close(ends[1]));
+        ipc.print(ok ? "init: port ok\n" : "init: PORT BROKEN\n");
+    }
+
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task. Keep
     // the sleep well under user_task_lifecycle's 2000-tick termination wait: the two race, and a
     // sleep near that bound turns the test into a coin flip (as a temporary 2000 here proved).

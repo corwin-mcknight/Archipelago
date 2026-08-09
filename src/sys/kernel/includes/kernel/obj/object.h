@@ -36,11 +36,18 @@ class Object {
     uint32_t wait_signals_deadline(uint32_t mask, ktime_t deadline);
 
    private:
+    friend class Port;
+    friend void port_notify(Object* object, uint32_t previous, uint32_t current);
+
     ObjectId m_id;
     TypeId m_type_id;
     const char* m_name = nullptr;
     ktl::atomic<uint32_t> m_signals{0};
     kernel::sched::wait_queue m_waiters;
+    // Port bindings watching this object's signals (core/port.cpp), guarded by the port
+    // subsystem's lock. Each binding holds a strong reference to this object, so a non-empty
+    // list means the object cannot be mid-destruction.
+    struct port_binding* m_bindings = nullptr;
 
     static ObjectId allocate_id();
 };
@@ -50,5 +57,10 @@ void obj_init();
 /// Wake waiters whose mask matches the object's current signals. Implemented by the scheduler
 /// layer in kernel builds and stubbed by the host runner (hosted tests see signal bits only).
 void object_signal_wake(Object* obj);
+
+/// Deliver a signal transition to the port bindings watching `object` (core/port.cpp). Called by
+/// signal_set only when the binding list is (racily) non-empty; bind's asserted-at-bind check
+/// covers the transition a racing bind could miss.
+void port_notify(Object* object, uint32_t previous, uint32_t current);
 
 }  // namespace kernel::obj

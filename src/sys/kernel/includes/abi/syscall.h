@@ -74,6 +74,24 @@ constexpr uint64_t CHANNEL_MAX_MESSAGE_HANDLES = 4;
 // tick granularity, after which the wait returns the timed_out error instead of signals.
 constexpr uint64_t SYS_OBJECT_WAIT             = 10;
 
+// Ports: a multi-producer, single-consumer packet queue aggregating signal transitions from many
+// objects into one waitable point. Bind subscribes an object's signals under a mask together with
+// a caller-chosen 64-bit key; when the object's signal state transitions into the mask (or is
+// already in it at bind), a packet queues on the port. Repeats before the packet is dequeued
+// coalesce into it. A binding holds the object alive until unbound; unbinding a key drops its
+// bindings and any pending packets. A dequeued packet is 16 bytes in the IPC buffer: the binding's
+// key, then the accumulated signal bits, each as a uint64.
+constexpr uint64_t SYS_PORT_CREATE             = 11;  // Returns the new port handle.
+constexpr uint64_t SYS_PORT_BIND               = 12;  // arg0 = port handle (needs the write right),
+                                                      // arg1 = object handle (needs the wait right),
+                                                      // arg2 = key, arg3 = signal mask. Returns 0.
+constexpr uint64_t SYS_PORT_UNBIND             = 13;  // arg0 = port handle (needs the write right),
+                                                      // arg1 = key. Returns how many bindings dropped.
+constexpr uint64_t SYS_PORT_WAIT               = 14;  // arg0 = port handle (needs read + wait rights),
+                                                      // arg1 = IPC-buffer offset for the packet,
+                                                      // arg2 = timeout ns (0 = forever). Returns 0, or
+                                                      // timed_out.
+
 // Signal bits, as returned and waited on through SYS_OBJECT_WAIT. Meanings are per object type;
 // the channel bits are the first installed as ABI. The kernel manages all three: READABLE while
 // the endpoint has queued messages, WRITABLE while the peer has queue room, PEER_CLOSED once the
@@ -81,6 +99,9 @@ constexpr uint64_t SYS_OBJECT_WAIT             = 10;
 constexpr uint64_t CHANNEL_SIGNAL_READABLE     = 1 << 0;
 constexpr uint64_t CHANNEL_SIGNAL_WRITABLE     = 1 << 1;
 constexpr uint64_t CHANNEL_SIGNAL_PEER_CLOSED  = 1 << 2;
+
+// Asserted while the port has pending packets.
+constexpr uint64_t PORT_SIGNAL_READABLE        = 1 << 0;
 
 // The initial thread's handle table is created with exactly two entries, in this order: a handle
 // to its own task, then a handle to its own thread. Both are first-generation, so their packed

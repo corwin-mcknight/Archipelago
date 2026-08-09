@@ -90,6 +90,18 @@ inline uint64_t channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity
 inline uint64_t object_wait(uint64_t handle, uint64_t mask, uint64_t timeout_ns = 0) {
     return syscall3(abi::syscall::SYS_OBJECT_WAIT, handle, mask, timeout_ns);
 }
+
+// Ports aggregate signal transitions from bound objects into packets; wait lands a 16-byte
+// packet (key, then signals) at `offset` in the IPC buffer. See <abi/syscall.h>.
+inline uint64_t port_create() { return syscall1(abi::syscall::SYS_PORT_CREATE, 0); }
+inline uint64_t port_bind(uint64_t port, uint64_t object, uint64_t key, uint64_t mask) {
+    return syscall6(abi::syscall::SYS_PORT_BIND, port, object, key, mask, 0, 0);
+}
+inline uint64_t port_unbind(uint64_t port, uint64_t key) { return syscall2(abi::syscall::SYS_PORT_UNBIND, port, key); }
+inline uint64_t port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns = 0) {
+    return syscall3(abi::syscall::SYS_PORT_WAIT, port, offset, timeout_ns);
+}
+
 // This thread's IPC buffer, as handed over at entry. Every program stashes it before doing anything
 // else; there is no way to ask for it again.
 struct ipc_buffer {
