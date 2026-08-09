@@ -123,7 +123,7 @@
 
 ## Task & Thread Lifecycle
 - Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
-- Extract the userspace runtime once a second user program exists. `src/sys/init/` currently owns `_start` (per arch), the syscall wrappers, the linker script, and its freestanding compile flags; each exists once, so factoring now would build a library with one caller. The second program is the trigger, and the thing to extract is a C runtime -- `_start`, syscall stubs, linker script -- as a package installing headers and a static archive next to `sys/kernel-headers`, not a libc. Nothing needs malloc, stdio, string, or locale, and naming it `libc` invites someone to supply them. Initrd will likely reshape userspace anyway, so committing late is cheaper than committing now.
+- `SYS_EXIT` carries no status argument, so `lib/crt`'s `_start` discards main's return value. When the exit syscall grows a status, `__crt_start` forwards it and observers need somewhere to read it (task object info, or the parent's mailbox).
 - ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):
     - No `ET_DYN`/PIE support, which is the prerequisite for user-space ASLR; relocation processing is a milestone of its own.
     - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.

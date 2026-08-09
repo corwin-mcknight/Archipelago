@@ -6,7 +6,7 @@
 .type _start, @function
 _start:
     // The kernel hands us our IPC buffer in a0 (base) and a1 (size) -- the same registers a call
-    // would use, so they pass straight through as init_main's arguments.
-    call init_main
+    // would use, so they pass straight through as __crt_start's arguments.
+    call __crt_start
     unimp
 .size _start, . - _start

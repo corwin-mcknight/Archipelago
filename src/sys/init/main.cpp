@@ -1,6 +1,7 @@
+#include <abi/syscall.h>
 #include <stddef.h>
-
-#include "syscall.h"
+#include <stdint.h>
+#include <sys.h>
 
 // The first user program. It exists to exercise the path a real program takes -- ELF load, private
 // address space, privilege transition, syscalls, exit -- so it deliberately touches memory in each
@@ -30,26 +31,28 @@ bool bss_is_zero() {
 
 }  // namespace
 
-extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
-    const init::ipc_buffer ipc{ipc_base, ipc_size};
+// Freestanding C++ gives main no special treatment, so the C linkage the runtime links against
+// must be spelled out.
+extern "C" int main() {
+    char* const ipc = sys_ipc_base();
 
     // Yield twice first: the scheduler has to bring us back before anything else is meaningful.
-    init::yield();
-    init::yield();
+    sys_yield();
+    sys_yield();
 
-    ipc.print(GREETING);
-    ipc.print(bss_is_zero() ? "init: bss zeroed\n" : "init: BSS NOT ZEROED\n");
+    sys_print(GREETING);
+    sys_print(bss_is_zero() ? "init: bss zeroed\n" : "init: BSS NOT ZEROED\n");
 
     // Prove the data segment is writable, then read it back out through the same pointer.
     g_marker[0] = 'I';
-    ipc.print(g_marker);
+    sys_print(g_marker);
 
     // Two writes out of one staging pass, using the offset argument: the second names a slice the
     // first already staged, with no data movement in between.
-    size_t first  = ipc.stage(0, "init: first half\n");
-    size_t second = ipc.stage(first, "init: second half\n");
-    ipc.write(0, first);
-    ipc.write(first, second);
+    size_t first  = sys_stage(0, "init: first half\n");
+    size_t second = sys_stage(first, "init: second half\n");
+    sys_write(0, first);
+    sys_write(first, second);
 
     // The bootstrap contract: slot 0 is a channel endpoint whose first message carries our
     // self-handles -- task, then thread, then whatever else the creator endowed us with. Recv it
@@ -60,28 +63,28 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
     uint64_t self_thread = 0;
     {
         constexpr size_t ARRIVED_AT = 512;   // where recv lands the endowed handles
-        uint64_t got = init::channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
-        bool ok      = !init::is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
+        uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
+        bool ok      = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
         for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(&self_task)[i]   = ipc.base[ARRIVED_AT + i];
-            reinterpret_cast<char*>(&self_thread)[i] = ipc.base[ARRIVED_AT + sizeof(uint64_t) + i];
+            reinterpret_cast<char*>(&self_task)[i]   = ipc[ARRIVED_AT + i];
+            reinterpret_cast<char*>(&self_thread)[i] = ipc[ARRIVED_AT + sizeof(uint64_t) + i];
         }
 
-        uint64_t task_info   = init::obj_info(self_task);
-        uint64_t thread_info = init::obj_info(self_thread);
-        ok = ok && !init::is_error(task_info) && !init::is_error(thread_info) &&
+        uint64_t task_info   = sys_obj_info(self_task);
+        uint64_t thread_info = sys_obj_info(self_thread);
+        ok                   = ok && !sys_is_error(task_info) && !sys_is_error(thread_info) &&
              (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
 
         // The endpoint must not report hangup after the drain: the parent keeps its end open for
         // the task's whole life. No claim about READABLE -- the parent may have mailed more already.
-        uint64_t sig = init::object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0);
+        uint64_t sig = sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0, 0);
         ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) == 0;
 
-        ipc.print(ok ? "init: bootstrap ok\n" : "init: BOOTSTRAP BROKEN\n");
+        sys_print(ok ? "init: bootstrap ok\n" : "init: BOOTSTRAP BROKEN\n");
     }
 
-    uint64_t dup = init::handle_duplicate(self_task, ~0ull);
-    ipc.print(init::is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
+    uint64_t dup = sys_handle_duplicate(self_task, ~0ull);
+    sys_print(sys_is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
 
     // A channel pair, exercised whole: create hands back two handles through the buffer (the first
     // kernel-to-user copy-out), a message sent on one end comes back byte-identical on the other,
@@ -91,47 +94,45 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         constexpr size_t REPLY_AT   = 768;   // where recv lands the message
         const char* ping            = "ping across the pair";
 
-        bool ok = !init::is_error(init::channel_create(HANDLES_AT));
+        bool ok = !sys_is_error(sys_channel_create(HANDLES_AT));
         uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(ends)[i] = ipc.base[HANDLES_AT + i];
-        }
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[HANDLES_AT + i]; }
 
         // Poll (zero mask): a fresh endpoint is writable and has nothing to read.
-        uint64_t sig = init::object_wait(ends[0], 0);
+        uint64_t sig = sys_object_wait(ends[0], 0, 0);
         ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_WRITABLE) != 0 &&
              (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0;
 
-        size_t ping_len = ipc.stage(0, ping);
-        ok              = ok && !init::is_error(init::channel_send(ends[0], 0, ping_len));
+        size_t ping_len = sys_stage(0, ping);
+        ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, ping_len, 0, 0));
 
         // Wait for READABLE on the receiving end. The message is already queued, so this returns
         // immediately -- what it proves is the wait path itself observing the asserted signal.
         // Gated on ok: after an earlier failure the signal may never assert, and an unconditional
         // wait would hang forever instead of reporting CHANNEL BROKEN.
         if (ok) {
-            sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE);
+            sig = sys_object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE, 0);
             ok  = (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
         }
 
-        uint64_t got = init::channel_recv(ends[1], REPLY_AT, 128);
+        uint64_t got = sys_channel_recv(ends[1], REPLY_AT, 128, 0, 0);
         ok           = ok && got == ping_len;
-        for (size_t i = 0; ok && i < ping_len; i++) { ok = ipc.base[REPLY_AT + i] == ping[i]; }
+        for (size_t i = 0; ok && i < ping_len; i++) { ok = ipc[REPLY_AT + i] == ping[i]; }
 
         // Drained queue: the error comes back immediately, the kernel never blocks for us.
-        ok = ok && init::is_error(init::channel_recv(ends[1], REPLY_AT, 128));
+        ok = ok && sys_is_error(sys_channel_recv(ends[1], REPLY_AT, 128, 0, 0));
 
         // Closing one end hangs up the other: PEER_CLOSED is already asserted by the time the
         // close returns, so this wait also cannot block (and is skipped after any failure, like
         // the READABLE wait above).
-        ok = ok && !init::is_error(init::handle_close(ends[0]));
+        ok = ok && !sys_is_error(sys_handle_close(ends[0]));
         if (ok) {
-            sig = init::object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
+            sig = sys_object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED, 0);
             ok  = (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) != 0;
         }
 
-        ok = ok && !init::is_error(init::handle_close(ends[1]));
-        ipc.print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");
+        ok = ok && !sys_is_error(sys_handle_close(ends[1]));
+        sys_print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");
     }
 
     // Handle transfer: an endpoint of a second pair rides a message across a first pair. The
@@ -145,40 +146,38 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         constexpr size_t REPLY_AT   = 768;
         const char* note            = "one endpoint enclosed";
 
-        bool ok = !init::is_error(init::channel_create(CARRIER_AT)) && !init::is_error(init::channel_create(CARGO_AT));
+        bool ok = !sys_is_error(sys_channel_create(CARRIER_AT)) && !sys_is_error(sys_channel_create(CARGO_AT));
         uint64_t carrier[2];
         uint64_t cargo[2];
         for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(carrier)[i] = ipc.base[CARRIER_AT + i];
-            reinterpret_cast<char*>(cargo)[i]   = ipc.base[CARGO_AT + i];
+            reinterpret_cast<char*>(carrier)[i] = ipc[CARRIER_AT + i];
+            reinterpret_cast<char*>(cargo)[i]   = ipc[CARGO_AT + i];
         }
 
-        size_t note_len = ipc.stage(0, note);
+        size_t note_len = sys_stage(0, note);
         for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            ipc.base[SENT_AT + i] = reinterpret_cast<const char*>(&cargo[0])[i];
+            ipc[SENT_AT + i] = reinterpret_cast<const char*>(&cargo[0])[i];
         }
-        ok = ok && !init::is_error(init::channel_send(carrier[0], 0, note_len, SENT_AT, 1));
+        ok = ok && !sys_is_error(sys_channel_send(carrier[0], 0, note_len, SENT_AT, 1));
 
         // Consumed by the send: the old handle value must no longer resolve in our table.
-        ok = ok && init::is_error(init::obj_info(cargo[0]));
+        ok = ok && sys_is_error(sys_obj_info(cargo[0]));
 
-        uint64_t got = init::channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
-        ok           = ok && !init::is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
+        uint64_t got = sys_channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
+        ok           = ok && !sys_is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
 
         uint64_t arrived = 0;
-        for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(&arrived)[i] = ipc.base[ARRIVED_AT + i];
-        }
+        for (size_t i = 0; i < sizeof(uint64_t); i++) { reinterpret_cast<char*>(&arrived)[i] = ipc[ARRIVED_AT + i]; }
 
         // The arrived handle is a working channel endpoint: ping its peer through it.
-        ok              = ok && !init::is_error(init::obj_info(arrived));
-        size_t ping_len = ipc.stage(0, "via transferred end");
-        ok              = ok && !init::is_error(init::channel_send(arrived, 0, ping_len));
-        ok              = ok && init::channel_recv(cargo[1], REPLY_AT, 128) == ping_len;
+        ok              = ok && !sys_is_error(sys_obj_info(arrived));
+        size_t ping_len = sys_stage(0, "via transferred end");
+        ok              = ok && !sys_is_error(sys_channel_send(arrived, 0, ping_len, 0, 0));
+        ok              = ok && sys_channel_recv(cargo[1], REPLY_AT, 128, 0, 0) == ping_len;
 
-        ok = ok && !init::is_error(init::handle_close(carrier[0])) && !init::is_error(init::handle_close(carrier[1]));
-        ok = ok && !init::is_error(init::handle_close(arrived)) && !init::is_error(init::handle_close(cargo[1]));
-        ipc.print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
+        ok = ok && !sys_is_error(sys_handle_close(carrier[0])) && !sys_is_error(sys_handle_close(carrier[1]));
+        ok = ok && !sys_is_error(sys_handle_close(arrived)) && !sys_is_error(sys_handle_close(cargo[1]));
+        sys_print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
     }
 
     // A port: the wait on an empty port times out rather than wedging, a message on a bound
@@ -188,35 +187,31 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
         constexpr size_t PACKET_AT = 640;
         constexpr uint64_t KEY     = 0xC0FFEE;
 
-        bool ok = !init::is_error(init::channel_create(ENDS_AT));
+        bool ok = !sys_is_error(sys_channel_create(ENDS_AT));
         uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(ends)[i] = ipc.base[ENDS_AT + i];
-        }
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[ENDS_AT + i]; }
 
-        uint64_t port = init::port_create();
-        ok            = ok && !init::is_error(port);
-        ok = ok && !init::is_error(init::port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
+        uint64_t port = sys_port_create();
+        ok            = ok && !sys_is_error(port);
+        ok = ok && !sys_is_error(sys_port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
 
         // Nothing queued yet: a bounded wait lapses instead of blocking forever. -15 is the
         // kernel's timed_out code; error values are not installed ABI yet (see todo.md), so this
         // is the one place init spells one.
-        ok = ok && init::port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(-15);
+        ok = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(-15);
 
-        size_t note_len = ipc.stage(0, "wake the event loop");
-        ok              = ok && !init::is_error(init::channel_send(ends[0], 0, note_len));
-        ok              = ok && !init::is_error(init::port_wait(port, PACKET_AT, 0));
+        size_t note_len = sys_stage(0, "wake the event loop");
+        ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, note_len, 0, 0));
+        ok              = ok && !sys_is_error(sys_port_wait(port, PACKET_AT, 0));
 
         uint64_t packet[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(packet)[i] = ipc.base[PACKET_AT + i];
-        }
+        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(packet)[i] = ipc[PACKET_AT + i]; }
         ok = ok && packet[0] == KEY && (packet[1] & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
 
-        ok = ok && init::port_unbind(port, KEY) == 1;
-        ok = ok && !init::is_error(init::handle_close(port));
-        ok = ok && !init::is_error(init::handle_close(ends[0])) && !init::is_error(init::handle_close(ends[1]));
-        ipc.print(ok ? "init: port ok\n" : "init: PORT BROKEN\n");
+        ok = ok && sys_port_unbind(port, KEY) == 1;
+        ok = ok && !sys_is_error(sys_handle_close(port));
+        ok = ok && !sys_is_error(sys_handle_close(ends[0])) && !sys_is_error(sys_handle_close(ends[1]));
+        sys_print(ok ? "init: port ok\n" : "init: PORT BROKEN\n");
     }
 
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task. Keep
@@ -224,8 +219,7 @@ extern "C" [[noreturn]] void init_main(char* ipc_base, size_t ipc_size) {
     // sleep near that bound turns the test into a coin flip (as a temporary 2000 here proved).
     volatile char stack_probe[64];
     for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }
-    init::sleep(20);
+    sys_sleep(20);
 
-    init::exit();
-    __builtin_unreachable();
+    return 0;
 }

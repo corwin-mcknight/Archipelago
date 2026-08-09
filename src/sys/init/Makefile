@@ -24,8 +24,10 @@ else
 $(error unsupported ARCH '$(ARCH)')
 endif
 
-# Unlike the kernel, init has no board facts compiled in -- it builds once per architecture.
-SRCS := $(wildcard $(SRC_DIRS)/*.cpp) $(wildcard $(SRC_DIRS)/$(ARCH)/*.S)
+# Unlike the kernel, init has no board facts compiled in -- it builds once per architecture. The
+# runtime -- _start, syscall stubs, the linker script -- comes from the installed lib/crt package,
+# the same way any other user program would get it.
+SRCS := $(wildcard $(SRC_DIRS)/*.cpp)
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 DEPS := $(filter %.cpp.d,$(OBJS:.o=.d))
 
@@ -55,16 +57,11 @@ LDFLAGS := -nostdlib \
 	-m $(LD_EMULATION) \
 	-z max-page-size=0x1000 \
 	-z noexecstack \
-	-T linker.ld
+	-T $(SYSROOT)/usr/lib/user.ld
 
 $(OBJ_DIR)/$(TARGET_EXEC): $(OBJS)
 	@echo "Linking $(TARGET_EXEC)..."
-	@$(LD) $(OBJS) $(LDFLAGS) -o $@
-
-$(OBJ_DIR)/%.S.o: %.S
-	@echo -n "A"
-	@$(MKDIR_P) $(dir $@)
-	@$(CC) $(ARCH_CXXFLAGS) -g -c $< -o $@
+	@$(LD) $(OBJS) $(SYSROOT)/usr/lib/libcrt.a $(LDFLAGS) -o $@
 
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@echo -n "+"
