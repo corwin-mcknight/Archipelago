@@ -1,7 +1,9 @@
+#include <kernel/mm/object_arena.h>
 #include <kernel/obj/channel.h>
 #include <kernel/sched/task.h>
 #include <kernel/synchronization/guard.h>
 #include <kernel/synchronization/mutex.h>
+#include <std/new.h>
 
 namespace kernel::obj {
 
@@ -10,6 +12,12 @@ namespace kernel::obj {
 // queues indexed by the side that reads them. Refcounted separately from the endpoints so neither
 // endpoint keeps the other alive -- only this state outlives the first close.
 struct channel_state {
+    // Channel state allocates from its AUMI arena: exact-size zeroed slots instead of the
+    // general heap's next power-of-two class. Operators defined below the arena, which needs
+    // the complete type's size.
+    static void* operator new(size_t size, const std::nothrow_t&) noexcept;
+    static void operator delete(void* ptr);
+
     kernel::synchronization::mutex lock;
     Channel* ends[2] = {nullptr, nullptr};
 
@@ -20,6 +28,13 @@ struct channel_state {
     };
     message_queue inbound[2];
 };
+
+kernel::mm::object_arena g_channel_state_arena("channel-state", sizeof(channel_state), alignof(channel_state));
+
+void* channel_state::operator new(size_t size, const std::nothrow_t&) noexcept {
+    return size <= sizeof(channel_state) ? g_channel_state_arena.alloc() : nullptr;
+}
+void channel_state::operator delete(void* ptr) { g_channel_state_arena.free(ptr); }
 
 ktl::result<MessageBuffer> MessageBuffer::create(size_t length) {
     if (length > Channel::MAX_MESSAGE_BYTES) { return ktl::err(ktl::errc::out_of_range); }

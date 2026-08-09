@@ -130,4 +130,7 @@ Suitable for performance-critical shared memory coordination where syscall overh
 
 ### Unified Memory Interface
 The size-class layer described above is the first phase of the planned Unified Memory Interface (UMI).
-The remaining phases layer per-type arenas over it: named object caches with zero-on-free semantics, allocation hardening (poisoning, redzones, a guard-page debug mode), and per-CPU magazines once SMP scheduling lands.
+The per-type arena phase is implemented: named object caches of exact-size slots over the same page seam, one per client type, listed by the shell's `mem` command.
+An arena's slots are always zero -- free scrubs the slot immediately, fresh slabs arrive zeroed -- so allocation and deallocation reduce to bitmap operations with no freelist threaded through the memory, and freed objects' contents never linger.
+Arenas enforce the same rules as the heap (no interrupt-context allocation, leaf locking, deterministic panics on bad frees) and currently serve Thread, channel state, and port bindings.
+The remaining phases are allocation hardening (poisoning, redzones, a guard-page debug mode) and per-CPU magazines once SMP scheduling lands.

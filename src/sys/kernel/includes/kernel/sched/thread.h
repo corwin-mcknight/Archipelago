@@ -6,6 +6,7 @@
 #include <kernel/obj/types.h>
 #include <kernel/sched/ipc_buffer.h>
 #include <kernel/synchronization/execution_context.h>
+#include <std/new.h>
 
 #include <ktl/ref>
 #include <ktl/result>
@@ -37,6 +38,12 @@ class Thread : public kernel::obj::Object {
 
     // Bare thread: no name, no owner, no stack. Kernel code uses one of the two constructors
     // below; this exists for tests exercising Thread/Task bookkeeping in isolation.
+    // Threads allocate from their AUMI arena (exact-size zeroed slots) rather than the general
+    // heap. Defined in mm/object_arena.cpp beside the arena so hosted builds link them without
+    // building this class's kernel-only translation units.
+    static void* operator new(size_t size, const std::nothrow_t&) noexcept;
+    static void operator delete(void* ptr);
+
     Thread() : Object(TYPE_ID) {}
 
     // Adopting constructor: wraps an already-running context (the boot/idle thread). It owns no

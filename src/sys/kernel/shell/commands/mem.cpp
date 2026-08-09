@@ -4,6 +4,7 @@
 
 #include <kernel/config.h>
 #include <kernel/mm/early_heap.h>
+#include <kernel/mm/object_arena.h>
 #include <kernel/mm/page_descriptor.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/slab_heap.h>
@@ -80,6 +81,12 @@ void mem_handler(int, const ktl::string_view[], ShellOutput& output) {
             output.print("  {0}B: {1} slabs, {2} live, {3} free slots\n", cls.object_size, cls.slabs, cls.live_objects,
                          cls.free_slots);
         }
+    }
+
+    for (auto* arena = object_arena::first_arena(); arena != nullptr; arena = arena->next_arena()) {
+        auto a = arena->stats();
+        output.print("arena {0}: {1}B slots, {2} slabs, {3}/{4} live, {5} allocs, {6} frees, {7} failures\n", a.name,
+                     a.slot_size, a.slabs, a.live, a.capacity, a.alloc_calls, a.free_calls, a.failures);
     }
 
     vm_aspace& aspace = kernel_aspace();
