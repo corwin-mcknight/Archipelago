@@ -1,7 +1,7 @@
 # TODO
 
 ## Next Up
-- AUMI per-type arena phase: named object caches with zero-on-free layered over the slab heap. First clients: Thread, channel_state, and handle-table entry batches; Umbra-style exact-size chains are the shape to steal.
+- Server dispatch / capability-aware routing: the next IPC design piece now that channels, handle transfer, ports, and wait timeouts all exist (see `docs/Design/IPC Primitives.md` and `docs/Design/Object Model.md`).
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
@@ -72,9 +72,10 @@
     - `create_device_vmo` marks its range WIRED before the vmo exists and nothing ever un-marks it, so a failed construction or a destroyed device VMO leaves the range permanently WIRED.
     - Both arch `flush_tlb_page` implementations duplicate the same active-root guard and its comment; only the invalidate instruction differs.
     - `page_descriptor.h`'s `coverage_end()` hardcodes `0x1000` instead of `KERNEL_MINIMUM_PAGE_SIZE`.
-- [x] Size-class slab heap over physmap PMM pages (`mm/slab_heap.cpp`): operator new switches from the early heap at `heap_activate()`, allocation failure is a nullptr/`errc::oom` value instead of a panic, interrupt context is forbidden from allocating (hard check), and the heap lock is a leaf -- pages are acquired and released outside it. Large allocations carry no in-page header: the run length lives in the first frame's page descriptor, so they are naturally page-aligned, a page-sized request costs exactly one page, and `operator new` honors alignment up to a full page. Stress review hardened the whole stack: per-slab live-slot bitmaps make double frees and never-carved frees deterministic panics, adversarial sizes (page-rounding wrap, >32-bit page counts) fail as clean exhaustion, large-run authentication runs under the heap lock, and slab headers are placement-new'd. The no-allocation-in-interrupt rule forced two structural fixes elsewhere: the scheduler pre-reserves run-queue/sleeper capacity per live thread (`ensure_tick_capacity`, with `ktl::deque::reserve` provisioning a spare block and rotating storage during compaction), and the PMM's free-page pools became intrusive lists threaded through the free frames themselves -- the PMM sits below the heap and must never re-enter it (the vector-backed pools deadlocked inside the PMM lock on the first pool growth after `heap_activate`). Wait-queue wakes drain through fixed stack batches for the same reason. Remaining known gap: the host page-source stub caps live large runs at 4096 entries. Remaining AUMI work: per-type arenas with zero-on-free, hardening (poisoning, redzones, a guard-page debug mode), and per-CPU magazines when SMP scheduling lands.
 - Heap large-path ceiling: multi-page allocations use `alloc_contiguous`, which only carves untouched region tails, and freed runs return as single pages -- heavy multi-page churn slowly consumes contiguous capacity. A PMM that tracks free runs (buddy or equivalent) lifts this.
-- Add guard pages, allocation poisoning, and deterministic scrubbing for debugging hardening.
+- The host page-source stub caps live large runs at 4096 entries.
+- Remaining AUMI phases over the arenas (`mm/object_arena.cpp`): allocation hardening (poisoning, redzones, a guard-page debug mode) and per-CPU magazines when SMP scheduling lands.
+- Arena client deferred: handle-table entries. The table is a contiguous `ktl::vector`, so feeding it from an arena means converting it to chunked entry batches -- a standalone refactor of the verification path.
 
 ## Scheduler & Concurrency
 - Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs LAPIC timer ticks on the APs (the LAPIC timer driver landed, but only the BSP's fires), wake IPIs, and a reaper switch-completed handshake.
@@ -103,7 +104,6 @@
     - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
     - The self-handle ABI (first-generation slots 0 and 1) leans on fresh-table allocation order; a bootstrap-message scheme should replace it if the IPC milestone reshapes startup anyway.
     - Self-handles are unowned (`HandleTable::insert_unowned`), and the slot-1 thread entry stays safe only because reap of the initial thread tears down the whole task; a thread-spawn syscall must close the self-thread entry when its thread is reaped, or the entry dangles.
-- [x] Implement handle transfer between tables for cross-process capability passing (`HandleTable::take` plus channel-message escrow; see IPC & Services).
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
@@ -126,7 +126,6 @@
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
 ## Task & Thread Lifecycle
-- [x] Terminate only the faulting user task for unresolved user-mode faults; the fault path logs a structured report, leaves fault context, and lets the reaper publish TERMINATED after teardown.
 - Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
 - Extract the userspace runtime once a second user program exists. `src/sys/init/` currently owns `_start` (per arch), the syscall wrappers, the linker script, and its freestanding compile flags; each exists once, so factoring now would build a library with one caller. The second program is the trigger, and the thing to extract is a C runtime -- `_start`, syscall stubs, linker script -- as a package installing headers and a static archive next to `sys/kernel-headers`, not a libc. Nothing needs malloc, stdio, string, or locale, and naming it `libc` invites someone to supply them. Initrd will likely reshape userspace anyway, so committing late is cheaper than committing now.
 - ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):
@@ -145,10 +144,9 @@
 - Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
 
 ## IPC & Services
-- [x] First minimal channel pair: `obj::Channel` endpoint objects with per-direction bounded FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals, and the create/send/recv syscalls moving data through the IPC buffer (create's handle delivery is the first kernel-to-user copy-out).
-- [x] Handle transfer through channel messages (kernel-table escrow per `docs/Design/IPC Primitives.md`): send moves each handle from the sender's table into task zero's, dequeue moves it into the receiver's, and a channel dying with messages queued closes escrowed handles normally. Gated by the transfer right on the channel handle.
 - Handle-transfer gaps: no per-handle transfer right yet (no object type registers TRANSFER; the channel-handle gate is the only check), a receiver-table insert failure on dequeue closes the arrived handle rather than failing the recv (the message is already dequeued), and an endpoint escrowed on its own pair's queue is an unreclaimable reference cycle (the exact self-channel case is refused; the peer-through-itself shape is not detectable cheaply).
-- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: a timeout for `SYS_OBJECT_WAIT` (a wait whose signal never fires currently blocks forever; needs deadline support in the wait path), ports for multiplexed waiting, server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
+- Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
+- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - Define service discovery, registration, and policy enforcement for core daemons.
 - Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.
@@ -172,7 +170,7 @@
 - Add watchdog firing (the crash trigger enum slot is already reserved) and structured fault isolation reporting; assertion escalation policy already exists.
 
 ## Testing & QA
-- Continue growing driver/core unit and stress coverage where gaps remain; hosted channel-object suites exist (`tests/obj_channel_test.cpp`), and syscall-level channel coverage rides in the init program -- add dedicated IPC stress/fuzz suites as the subsystem grows (ports, handle transfer).
+- Continue growing driver/core unit and stress coverage where gaps remain; hosted suites cover channels, ports, arenas, and handle tables, and syscall-level coverage rides in the init program -- add dedicated IPC stress/fuzz suites as the subsystem grows (multi-threaded port producers, transfer under pressure).
 - VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands) and OOM paths in the fault/commit paths (needs PMM fault injection).
 - Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
 - Extend the fuzz harness to memory-subsystem interfaces now; add scheduler fuzz targets (run-queue rotation, wait-queue bookkeeping, signal-mask matching) now that the scheduler exists, and syscall fuzz targets once syscalls exist.
