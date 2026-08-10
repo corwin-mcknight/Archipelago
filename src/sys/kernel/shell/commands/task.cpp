@@ -81,8 +81,49 @@ const char* state_name(kernel::sched::task_state state) {
     }
 }
 
+// Launch the echo server and init wired together: one channel pair, one end in each program's
+// bootstrap message. The pairing is pure composition at this call site -- the kernel spawn path
+// knows nothing about pairs. Spawn order does not matter (bootstrap messages queue), and a failed
+// second spawn needs no rollback: the survivor's endpoint just reports PEER_CLOSED, the hangup a
+// server must handle anyway.
+void task_pair(kernel::shell::ShellOutput& output) {
+    using namespace kernel::sched;
+    const auto* init_mod = kernel::boot::find_module("init");
+    const auto* echo_mod = kernel::boot::find_module("echo");
+    if (init_mod == nullptr || echo_mod == nullptr) {
+        output.print("task: boot image lacks 'init' or 'echo' module\n");
+        return;
+    }
+
+    auto pair = kernel::obj::Channel::create();
+    if (pair.is_err()) {
+        output.print("task: channel create failed\n");
+        return;
+    }
+    auto ends                    = pair.unwrap();
+
+    bootstrap_extra echo_extra[] = {{ends.first, kernel::obj::Channel::DEFAULT_RIGHTS}};
+    auto server                  = create_user_task("echo", echo_mod->data, echo_mod->size, echo_extra);
+    if (server.is_err()) {
+        output.print("task: echo create failed\n");
+        return;
+    }
+
+    bootstrap_extra init_extra[] = {{ends.second, kernel::obj::Channel::DEFAULT_RIGHTS}};
+    auto client                  = create_user_task("init", init_mod->data, init_mod->size, init_extra);
+    if (client.is_err()) {
+        output.print("task: init create failed (echo id={0} will see hangup)\n", server.unwrap()->id());
+        return;
+    }
+    output.print("task: launched echo id={0}, init id={1}\n", server.unwrap()->id(), client.unwrap()->id());
+}
+
 void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     using namespace kernel::sched;
+    if (argc >= 2 && argv[1] == "pair") {
+        task_pair(output);
+        return;
+    }
     if (argc >= 2 && argv[1] == "demo") {
         // Missing module and unloadable image are distinct failures: one means the boot image is
         // wrong, the other means the binary is. The loader logs which rejection it was.
@@ -104,7 +145,7 @@ void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellO
         return;
     }
     if (argc >= 2 && argv[1] != "list") {
-        output.print("usage: task list|demo|msg <id> <text>\n");
+        output.print("usage: task list|demo|pair|msg <id> <text>\n");
         return;
     }
 

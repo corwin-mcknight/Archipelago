@@ -101,6 +101,46 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     for (size_t i = 0; i < tasks.size(); ++i) { KTEST_EXPECT_TRUE(tasks[i]->id() != task->id()); }
 }
 
+// Server dispatch end to end: echo and init spawned wired together by one channel pair, an end in
+// each bootstrap message -- the same composition the shell's `task pair` performs. init pings
+// through its endowed handle and hangs up after verifying the echoes; echo's event loop observes
+// the hangup and exits. Both terminations are the proof the dispatch happened: echo blocks in
+// port_wait forever unless a client reaches it, and init prints ECHO ROUNDTRIP BROKEN into the
+// console log if the bytes lie.
+KTEST_CASE_INTEGRATION(user_task_pair_dispatch) {
+    using namespace kernel::obj;
+    const auto* init_mod = kernel::boot::find_module("init");
+    const auto* echo_mod = kernel::boot::find_module("echo");
+    KTEST_REQUIRE_TRUE(init_mod != nullptr);
+    KTEST_REQUIRE_TRUE(echo_mod != nullptr);
+
+    KTEST_UNWRAP(ends, Channel::create());
+    bootstrap_extra echo_extra[] = {{ends.first, Channel::DEFAULT_RIGHTS}};
+    bootstrap_extra init_extra[] = {{ends.second, Channel::DEFAULT_RIGHTS}};
+
+    auto server                  = create_user_task("echo-t", echo_mod->data, echo_mod->size, echo_extra);
+    KTEST_REQUIRE_TRUE(server.is_ok());
+    auto client = create_user_task("init-t", init_mod->data, init_mod->size, init_extra);
+    KTEST_REQUIRE_TRUE(client.is_ok());
+
+    // The escrow holds its own references now; drop every one this test still holds, so the two
+    // programs are the endpoints' only owners and hangup propagates from init's close alone --
+    // a ref leaked here would keep echo's peer alive and wedge its event loop forever.
+    echo_extra[0].object.reset();
+    init_extra[0].object.reset();
+    ends.first.reset();
+    ends.second.reset();
+
+    ktl::ref<Task> tasks[2] = {server.unwrap(), client.unwrap()};
+    for (int i = 0;
+         i < 2000 && (tasks[0]->state() != task_state::TERMINATED || tasks[1]->state() != task_state::TERMINATED);
+         ++i) {
+        sleep_ticks(1);
+    }
+    KTEST_EXPECT_TRUE(tasks[1]->state() == task_state::TERMINATED);
+    KTEST_REQUIRE_TRUE(tasks[0]->state() == task_state::TERMINATED);
+}
+
 // SYS_OBJECT_WAIT through the real dispatch path from kernel context, on a channel pair in task
 // zero's table. Every wait here targets a signal that is already asserted, so nothing can block;
 // the genuinely-blocking wake path is sched_test's territory (wait_signals with a signaling

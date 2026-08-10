@@ -1,7 +1,7 @@
 # TODO
 
 ## Next Up
-- Server dispatch / capability-aware routing: the next IPC design piece now that channels, handle transfer, ports, and wait timeouts all exist (see `docs/Design/IPC Primitives.md` and `docs/Design/Object Model.md`).
+- Capability-aware routing and the service protocol: the first cross-task server exists (`srv/echo`, port event loop, wired to init by a creator-composed channel pair), so dispatch is demonstrated; the open design piece is message schemas, how a program obtains a channel to a *named* service rather than an endowed one, and policy (see `docs/Design/IPC Primitives.md` and `docs/Design/Object Model.md`).
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).

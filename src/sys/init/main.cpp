@@ -61,13 +61,17 @@ extern "C" int main() {
     // operation needing a right they lack (duplicate) refused.
     uint64_t self_task   = 0;
     uint64_t self_thread = 0;
+    uint64_t peer        = 0;
+    bool have_peer       = false;
     {
         constexpr size_t ARRIVED_AT = 512;   // where recv lands the endowed handles
         uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
         bool ok      = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
+        have_peer    = ok && (got >> 32) >= 3;
         for (size_t i = 0; i < sizeof(uint64_t); i++) {
             reinterpret_cast<char*>(&self_task)[i]   = ipc[ARRIVED_AT + i];
             reinterpret_cast<char*>(&self_thread)[i] = ipc[ARRIVED_AT + sizeof(uint64_t) + i];
+            reinterpret_cast<char*>(&peer)[i]        = ipc[ARRIVED_AT + 2 * sizeof(uint64_t) + i];
         }
 
         uint64_t task_info   = sys_obj_info(self_task);
@@ -212,6 +216,28 @@ extern "C" int main() {
         ok = ok && !sys_is_error(sys_handle_close(port));
         ok = ok && !sys_is_error(sys_handle_close(ends[0])) && !sys_is_error(sys_handle_close(ends[1]));
         sys_print(ok ? "init: port ok\n" : "init: PORT BROKEN\n");
+    }
+
+    // If the creator endowed us with a peer -- a channel to the echo server -- exercise server
+    // dispatch end to end: pings come back byte-identical, from another task's event loop rather
+    // than from a second handle in our own table. Bounded waits, so a broken server reports
+    // BROKEN instead of wedging this program (and with it the lifecycle tests).
+    if (have_peer) {
+        constexpr size_t REPLY_AT      = 768;
+        constexpr uint64_t WAIT_NS     = 1'000'000'000;
+        const char* pings[2]           = {"ping across tasks", "second opinion"};
+
+        bool ok = true;
+        for (size_t p = 0; ok && p < 2; p++) {
+            size_t len   = sys_stage(0, pings[p]);
+            ok           = !sys_is_error(sys_channel_send(peer, 0, len, 0, 0));
+            uint64_t sig = ok ? sys_object_wait(peer, abi::syscall::CHANNEL_SIGNAL_READABLE, WAIT_NS) : 0;
+            ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
+            ok           = ok && sys_channel_recv(peer, REPLY_AT, 128, 0, 0) == len;
+            for (size_t i = 0; ok && i < len; i++) { ok = ipc[REPLY_AT + i] == pings[p][i]; }
+        }
+        ok = ok && !sys_is_error(sys_handle_close(peer));
+        sys_print(ok ? "init: echo roundtrip ok\n" : "init: ECHO ROUNDTRIP BROKEN\n");
     }
 
     // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task. Keep
