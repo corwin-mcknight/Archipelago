@@ -23,7 +23,8 @@ void shell_main();
 // interactive loop and tests share this path.
 void run_line(const char* line, ShellOutput& output);
 ShellOutput& shell_output();
-void request_boot_continue();
+// End the interactive loop after the current command; the shell thread then exits.
+void request_exit();
 
 }  // namespace kernel::shell
 

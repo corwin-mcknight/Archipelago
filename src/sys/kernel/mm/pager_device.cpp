@@ -21,4 +21,14 @@ ktl::ref<vmo> create_device_vmo(vm_paddr_t base, size_t pages, vm_cache_mode mod
     return ktl::make_ref<vmo>(pages, pgr);
 }
 
+ktl::ref<vmo> create_wired_vmo(vm_paddr_t base, size_t pages) {
+    // Same translation-only pager as a device window, but over ordinary cached RAM the boot
+    // classification already wired (boot module bytes today). No descriptor marking: the frames'
+    // KERNEL state is what keeps them pinned, and marking here would be the un-unmarkable kind
+    // create_device_vmo is known for (todo.md).
+    auto pgr = ktl::make_ref<device_pager>(base, vm_cache_mode::CACHED);
+    if (pgr.get() == nullptr) { return {}; }
+    return ktl::make_ref<vmo>(pages, pgr);
+}
+
 }  // namespace kernel::mm

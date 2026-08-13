@@ -21,6 +21,7 @@ enum class task_state : uint32_t { NEW = 0, RUNNING, TERMINATED };
 class Task : public kernel::obj::Object {
    public:
     DECLARE_OBJECT_TYPE(Task, kernel::obj::type_ids::TASK)
+    static constexpr uint32_t SIGNAL_TERMINATED = 1u << 0;
 
     Task() : Object(TYPE_ID) {}
 
@@ -37,6 +38,19 @@ class Task : public kernel::obj::Object {
 
     task_state state();
     void set_state(task_state state);
+
+    // How the task died, recorded at the moment the cause is known: SYS_EXIT records EXITED with
+    // its status word, kill records KILLED before it forces the threads out, a fatal fault records
+    // FAULTED. First record wins -- a kill that loses the race to a normal exit terminated nothing.
+    // Plain fields: recorded from thread context on the single scheduling core, read after
+    // TERMINATED. exit_code() packs the SYS_TASK_STATUS return (<abi/syscall.h>).
+    void record_exit(uint32_t cause, uint32_t status) {
+        if (m_exit_recorded) { return; }
+        m_exit_recorded = true;
+        m_exit_cause    = cause;
+        m_exit_status   = status;
+    }
+    uint64_t exit_code() const { return (static_cast<uint64_t>(m_exit_cause) << 32) | m_exit_status; }
 
     kernel::mm::vm_aspace* aspace() const { return m_aspace; }
     void set_aspace(kernel::mm::vm_aspace* aspace) { m_aspace = aspace; }
@@ -63,7 +77,8 @@ class Task : public kernel::obj::Object {
 
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
-        return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE, RIGHT_READ);
+        return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT,
+                                      RIGHT_READ);
     }
 
    private:
@@ -73,6 +88,9 @@ class Task : public kernel::obj::Object {
     kernel::mm::vm_aspace* m_aspace      = nullptr;
     task_state m_state                   = task_state::NEW;
     kernel::obj::HandleId m_owner_handle = kernel::obj::HandleId::invalid();
+    bool m_exit_recorded                 = false;
+    uint32_t m_exit_cause                = 0;
+    uint32_t m_exit_status               = 0;
     ktl::ref<kernel::obj::Channel> m_mailbox;
     // One bit per slot; see IPC_BUFFER_MAX_SLOTS.
     uint64_t m_ipc_slots = 0;

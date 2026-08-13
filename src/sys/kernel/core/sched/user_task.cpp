@@ -1,13 +1,22 @@
+#include <abi/message.h>
+#include <abi/syscall.h>
 #include <kernel/arch.h>
 #include <kernel/assert.h>
+#include <kernel/boot.h>
 #include <kernel/config.h>
 #include <kernel/elf_loader.h>
 #include <kernel/log.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
+#include <kernel/sched/internal.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/user_task.h>
 #include <std/new.h>
+#include <std/string.h>
+
+// The physmap offset, published by kernel::boot::resolve_hhdm(); how module virtual addresses
+// translate back to the physical range a wired VMO wraps.
+extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
@@ -53,7 +62,8 @@ bool escrow_into(kernel::obj::MessageBuffer& message, ktl::ref<kernel::obj::Obje
 }  // namespace
 
 ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size,
-                                             ktl::span<const bootstrap_extra> extras) {
+                                             ktl::span<const bootstrap_extra> extras,
+                                             ktl::ref<kernel::obj::Channel>* parent_end_out) {
     using namespace kernel::mm;
     using namespace kernel::obj;
 
@@ -93,7 +103,7 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     if (stack_mapped.is_err()) { return fail(stack_mapped.unwrap_err()); }
 
     ktl::ref<kernel::obj::Object> task_object = task;
-    auto owner = kernel_task()->handles().insert(task_object, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE);
+    auto owner = kernel_task()->handles().insert(task_object, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT);
     if (owner.is_err()) { return fail(owner.unwrap_err()); }
     task->set_owner_handle(owner.unwrap());
 
@@ -117,7 +127,9 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     auto child_end = task->handles().insert(pair.second, Channel::DEFAULT_RIGHTS);
     if (child_end.is_err()) { return fail_wired(child_end.unwrap_err()); }
     assert(pack_handle(child_end.unwrap()) == ::abi::syscall::BOOTSTRAP_HANDLE, "bootstrap endpoint not at slot 0");
-    task->set_mailbox(pair.first);
+    // The parent end stays local until the task is irreversibly launched; who keeps it is decided
+    // at the end, once nothing can still unwind. fail_wired paths drop it with this frame, which
+    // closes the pair exactly as before.
 
     register_task(task);
     task->set_state(task_state::RUNNING);
@@ -140,11 +152,22 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
         for (size_t i = 0; endowed && i < extras.size(); i++) {
             endowed = escrow_into(boot, extras[i].object, extras[i].rights);
         }
-        if (endowed) { endowed = task->mailbox()->write(ktl::move(boot)).is_ok(); }
+        if (endowed) { endowed = pair.first->write(ktl::move(boot)).is_ok(); }
     }
     if (!endowed) {
         thread_discard(thread);
         return fail_wired(ktl::errc::oom);
+    }
+
+    // Ownership of the parent end settles before the thread can run: once the child is on the
+    // queue it may run to completion (and teardown) at any preemption, and nothing may touch the
+    // pair after that. An enqueue failure below unwinds either owner the same way -- the kernel
+    // path through fail_wired's set_mailbox({}), the out-param path when the caller drops the ref
+    // its failed spawn returned with.
+    if (parent_end_out != nullptr) {
+        *parent_end_out = ktl::move(pair.first);
+    } else {
+        task->set_mailbox(ktl::move(pair.first));
     }
 
     auto queued = thread_enqueue(thread);
@@ -152,6 +175,143 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
 
     if (lifecycle_log_enabled()) { g_log.debug("task: created '{0}' id={1}", name, task->id()); }
     return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
+}
+
+ktl::result<spawn_handles> task_spawn(Task& caller, ktl::ref<kernel::mm::vmo> image) {
+    using namespace kernel::obj;
+    if (!image || image->size_pages() == 0) { return ktl::err(ktl::errc::invalid_operation); }
+
+    // The ELF loader wants one contiguous byte span. Commit the image and require its frames
+    // physically contiguous -- true of every wired module VMO, and the restriction dies with the
+    // in-kernel loader itself (the userspace loader will read page-wise).
+    size_t pages   = image->size_pages();
+    auto committed = image->commit(0, pages);
+    if (committed.is_err()) { return ktl::err(committed.unwrap_err()); }
+    auto base = image->resident_frame(0);
+    if (!base.has_value()) { return ktl::err(ktl::errc::invalid_operation); }
+    for (size_t i = 1; i < pages; i++) {
+        auto frame = image->resident_frame(i);
+        if (!frame.has_value() || *frame != *base + i * KERNEL_MINIMUM_PAGE_SIZE) {
+            return ktl::err(ktl::errc::invalid_operation);
+        }
+    }
+
+    // The VMO's debug name names the task -- for a boot module that is its role, and the string
+    // outlives any task (module roles are boot-protocol memory). Page-rounded size is a safe
+    // parse bound: the ELF's own extents are validated against it. The caller is the parent, so
+    // the bootstrap channel's parent end comes back here instead of settling in Task::mailbox --
+    // the child's orphan signal (PEER_CLOSED) tracks the caller's handle from birth.
+    const char* name = image->name() != nullptr ? image->name() : "task";
+    const void* elf  = reinterpret_cast<const void*>(*base + g_hhdm_offset);
+    ktl::ref<Channel> parent_end;
+    auto created = create_user_task(name, elf, pages * KERNEL_MINIMUM_PAGE_SIZE, {}, &parent_end);
+    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
+    auto task          = created.unwrap();
+
+    // The child is already running by now, so a failed insert cannot just unwind -- kill what was
+    // started. Dropping parent_end delivers the orphan signal for whatever the child ran first.
+    auto task_inserted = caller.handles().insert(task, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT);
+    if (task_inserted.is_err()) {
+        (void)task_kill(task);
+        return ktl::err(task_inserted.unwrap_err());
+    }
+    auto mailbox_inserted = caller.handles().insert(ktl::move(parent_end), Channel::DEFAULT_RIGHTS);
+    if (mailbox_inserted.is_err()) {
+        (void)caller.handles().close(task_inserted.unwrap());
+        (void)task_kill(task);
+        return ktl::err(mailbox_inserted.unwrap_err());
+    }
+    return ktl::result<spawn_handles>::ok({task_inserted.unwrap(), mailbox_inserted.unwrap()});
+}
+
+ktl::result<ktl::ref<Task>> launch_coordinator() {
+    const auto* module = kernel::boot::find_module("init");
+    if (module == nullptr) {
+        g_log.warn("task: no 'init' module; coordinator not launched");
+        return ktl::err(ktl::errc::invalid_operation);
+    }
+    auto created = create_user_task("init", module->data, module->size);
+    if (created.is_err()) { return created; }
+    auto task    = created.unwrap();
+    auto endowed = endow_boot_modules(task);
+    if (endowed.is_err()) { g_log.warn("task: coordinator endowment incomplete"); }
+    return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
+}
+
+ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
+    using namespace kernel::obj;
+    const auto& info = kernel::boot::collect();
+    for (size_t i = 0; i < info.module_count; i++) {
+        const auto& module = info.modules[i];
+        uintptr_t phys     = reinterpret_cast<uintptr_t>(module.data) - g_hhdm_offset;
+        if ((phys & (KERNEL_MINIMUM_PAGE_SIZE - 1)) != 0 || module.size == 0) {
+            g_log.warn("task: module '{0}' unaligned or empty; not endowed", module.role);
+            continue;
+        }
+        size_t pages = (module.size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
+        auto image   = kernel::mm::create_wired_vmo(phys, pages);
+        if (!image) { return ktl::err(ktl::errc::oom); }
+        image->set_name(module.role);
+
+        size_t name_len = strlen(module.role);
+        auto created    = MessageBuffer::create(sizeof(abi_message_header) + sizeof(abi_image_payload) + name_len);
+        if (created.is_err()) { return ktl::err(created.unwrap_err()); }
+        auto mail = created.unwrap();
+
+        abi_message_header header{::abi::message::COORD_OP_IMAGE, 0, 0};
+        abi_image_payload payload{module.size};
+        __builtin_memcpy(mail.data(), &header, sizeof(header));
+        __builtin_memcpy(mail.data() + sizeof(header), &payload, sizeof(payload));
+        __builtin_memcpy(mail.data() + sizeof(header) + sizeof(payload), module.role, name_len);
+
+        if (!escrow_into(mail, image, RIGHT_READ)) { return ktl::err(ktl::errc::oom); }
+        auto sent = task->mailbox()->write(ktl::move(mail));
+        if (sent.is_err()) { return ktl::err(sent.unwrap_err()); }
+    }
+    return ktl::result<void>::ok();
+}
+
+ktl::result<void> task_kill(const ktl::ref<Task>& task) {
+    if (!task || task.get() == kernel_task().get()) { return ktl::err(ktl::errc::invalid_operation); }
+    if (task->state() == task_state::TERMINATED) { return ktl::result<void>::ok(); }
+
+    // Snapshot outside the interrupts-off window: snapshot_threads takes the task mutex, which may
+    // block. No thread can be added to a running user task today, so the snapshot cannot go stale
+    // in the way that matters (a missed new thread); a thread that dies in between is skipped by
+    // the DEAD check below.
+    ktl::vector<ktl::ref<Thread>> threads;
+    if (!task->snapshot_threads(threads)) { return ktl::err(ktl::errc::oom); }
+
+    // A task whose every thread is already dead is mid-reap: it terminated on its own, and marking
+    // it killed now would misreport how it died.
+    bool any_live = false;
+    for (size_t i = 0; i < threads.size(); i++) { any_live = any_live || threads[i]->state() != thread_state::DEAD; }
+    if (!any_live) { return ktl::result<void>::ok(); }
+
+    task->record_exit(::abi::syscall::TASK_EXIT_KILLED, 0);
+
+    // Interrupts off: thread states are stable on the single scheduling core, and no marked thread
+    // can run (and possibly park somewhere new) until the scan is complete.
+    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    for (size_t i = 0; i < threads.size(); i++) {
+        Thread* thread = threads[i].get();
+        if (thread->state() == thread_state::DEAD) { continue; }
+        thread->set_killed();
+        if (thread->state() != thread_state::BLOCKED) { continue; }
+        // Parked on a wait queue: claim resolves the race against ordinary wakers under the
+        // queue's own lock, exactly as the timed-wait expiry scan does. Not parked and not
+        // sleeping means the thread is between a wake and its next run; it will observe the mark.
+        if (auto* queue = thread->parked_queue()) {
+            ktl::ref<Thread> woken = queue->claim(thread->parked_node());
+            if (woken) { make_ready(ktl::move(woken)); }
+        } else {
+            (void)wake_sleeper(thread);
+        }
+    }
+    kernel::arch::restore_interrupts(flags);
+
+    if (lifecycle_log_enabled()) { g_log.debug("task: killed id={0}", task->id()); }
+    return ktl::result<void>::ok();
 }
 
 void teardown_user_task(ktl::ref<Task> task) {
@@ -172,6 +332,7 @@ void teardown_user_task(ktl::ref<Task> task) {
     // TERMINATED is the completion signal observers poll for, so it must be the last
     // teardown step; publishing it earlier exposes a half-torn-down task.
     task->set_state(task_state::TERMINATED);
+    task->signal_set(Task::SIGNAL_TERMINATED);
     if (lifecycle_log_enabled()) { g_log.debug("task: torn down id={0}", task->id()); }
 }
 
@@ -185,6 +346,7 @@ void teardown_user_task(ktl::ref<Task> task) {
     // crash dumper or touching faultable user memory.
     g_log.error("task_fault task={0} thread={1} cause={2} detail=0x{3:x} pc=0x{4:p} action=terminate", task->id(),
                 thread->id(), cause, detail, pc);
+    task->record_exit(::abi::syscall::TASK_EXIT_FAULTED, static_cast<uint32_t>(cause));
 
     // exit_current() queues the thread and switches stacks. It may not run while fault_depth is
     // nonzero, so callers must fault_exit() before this handoff.

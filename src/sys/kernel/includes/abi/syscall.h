@@ -11,7 +11,7 @@
 // two forms cannot diverge.
 
 // The syscall number names the operation; a handle argument names the object it acts on.
-#define ABI_SYS_EXIT 0ull
+#define ABI_SYS_EXIT 0ull /* arg0 = exit status; the low 32 bits are recorded on the task */
 #define ABI_SYS_YIELD 1ull
 #define ABI_SYS_SLEEP 2ull /* arg0 = kernel ticks */
 // arg0 = offset into this thread's IPC buffer, arg1 = byte count. Returns bytes written, or a
@@ -101,6 +101,40 @@
              arg1 = IPC-buffer offset for the packet,       \
              arg2 = timeout ns (0 = forever). Returns 0, or timed_out. */
 
+// Task lifecycle: the first type-specific handle operations -- both verify the handle names a task.
+//
+// Kill is asynchronous and unrefusable: it marks every thread of the task, forces blocked ones
+// awake, and each exits at its next kernel boundary; the task never executes another user
+// instruction after the mark is observed. Kill on an already-terminated task is a no-op.
+//
+// Status is readable once the task has fully terminated (TASK_SIGNAL_TERMINATED asserted); before
+// that it returns the would_block error. The value packs the exit cause in the high 32 bits and,
+// for a normal exit, the status word SYS_EXIT carried in the low 32.
+#define ABI_SYS_TASK_KILL 15ull /* arg0 = task handle (needs the write right). Returns 0. */
+#define ABI_SYS_TASK_STATUS                             \
+    16ull /* arg0 = task handle (needs the read right). \
+             Returns (cause << 32) | status. */
+
+// Exit causes, as returned in the high 32 bits of SYS_TASK_STATUS.
+#define ABI_TASK_EXIT_EXITED 0ull
+#define ABI_TASK_EXIT_KILLED 1ull
+#define ABI_TASK_EXIT_FAULTED 2ull
+
+// Spawn a task from an executable image. Holding the image VMO is the whole authority -- there is
+// no ambient spawn privilege and no kernel-side list of programs; images arrive as IMAGE messages
+// (<abi/message.h>) or wherever else a VMO handle travels. The kernel parses the image (static
+// ELF today; the loader is destined for userspace, see docs/Design/Service Coordination.md),
+// builds the task, and queues its first thread. The caller becomes the parent: it receives the
+// new task's handle and the parent end of its bootstrap channel, and everything the child ever
+// learns beyond its self-handles arrives through that channel. Closing the channel end is how the
+// child observes parent death (PEER_CLOSED). The image must be physically contiguous, which every
+// kernel-minted image VMO is.
+#define ABI_SYS_TASK_SPAWN                                        \
+    17ull /* arg0 = image VMO handle (needs the read right),      \
+             arg1 = IPC-buffer offset where the kernel writes the \
+             new task handle then the bootstrap channel handle,   \
+             two uint64s. Returns 0. */
+
 // Signal bits, as returned and waited on through SYS_OBJECT_WAIT. Meanings are per object type;
 // the channel bits are the first installed as ABI. The kernel manages all three: READABLE while
 // the endpoint has queued messages, WRITABLE while the peer has queue room, PEER_CLOSED once the
@@ -111,6 +145,10 @@
 
 // Asserted while the port has pending packets.
 #define ABI_PORT_SIGNAL_READABLE (1ull << 0)
+
+// Asserted on a task object once teardown is complete: threads dead, handles closed, address
+// space gone. Waitable and port-bindable like any signal; SYS_TASK_STATUS is valid from then on.
+#define ABI_TASK_SIGNAL_TERMINATED (1ull << 0)
 
 // The initial thread's handle table is created with exactly one entry: a channel endpoint,
 // first-generation in slot 0, so its packed value is 0. The peer end belongs to whoever created
@@ -139,6 +177,13 @@ constexpr uint64_t SYS_PORT_CREATE             = ABI_SYS_PORT_CREATE;
 constexpr uint64_t SYS_PORT_BIND               = ABI_SYS_PORT_BIND;
 constexpr uint64_t SYS_PORT_UNBIND             = ABI_SYS_PORT_UNBIND;
 constexpr uint64_t SYS_PORT_WAIT               = ABI_SYS_PORT_WAIT;
+constexpr uint64_t SYS_TASK_KILL               = ABI_SYS_TASK_KILL;
+constexpr uint64_t SYS_TASK_STATUS             = ABI_SYS_TASK_STATUS;
+constexpr uint64_t SYS_TASK_SPAWN              = ABI_SYS_TASK_SPAWN;
+constexpr uint64_t TASK_EXIT_EXITED            = ABI_TASK_EXIT_EXITED;
+constexpr uint64_t TASK_EXIT_KILLED            = ABI_TASK_EXIT_KILLED;
+constexpr uint64_t TASK_EXIT_FAULTED           = ABI_TASK_EXIT_FAULTED;
+constexpr uint64_t TASK_SIGNAL_TERMINATED      = ABI_TASK_SIGNAL_TERMINATED;
 constexpr uint64_t CHANNEL_SIGNAL_READABLE     = ABI_CHANNEL_SIGNAL_READABLE;
 constexpr uint64_t CHANNEL_SIGNAL_WRITABLE     = ABI_CHANNEL_SIGNAL_WRITABLE;
 constexpr uint64_t CHANNEL_SIGNAL_PEER_CLOSED  = ABI_CHANNEL_SIGNAL_PEER_CLOSED;

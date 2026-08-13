@@ -53,6 +53,14 @@ sys/init-0.0.1:
     - "sys/kernel-headers-0.0.1"
     - "lib/crt-0.0.1"
 
+sys/selftest-0.0.1:
+  description: "The user-mode self-check payload"
+  supports_live_sources: true
+  live_source_path: "sys/selftest"
+  dependencies:
+    - "sys/kernel-headers-0.0.1"
+    - "lib/crt-0.0.1"
+
 srv/echo-0.0.1:
   description: "The echo server, first userspace service"
   supports_live_sources: true

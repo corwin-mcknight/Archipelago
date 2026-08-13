@@ -46,6 +46,9 @@ void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t t
 // called with interrupts disabled.
 void wake_due_sleepers();
 size_t sleeper_count();
+// Pull `thread` out of the sleeper list before its deadline and make it ready; false if it is not
+// sleeping. Task kill's path for waking a killed sleeper early; interrupts must be disabled.
+bool wake_sleeper(Thread* thread);
 
 // Timed waits also live in sleep.cpp: waiters parked on an object's wait queue with a deadline.
 // The registry entry points at the wait node on the waiter's stack; register before parking,

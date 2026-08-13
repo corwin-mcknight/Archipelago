@@ -1,10 +1,12 @@
 #include <kernel/log.h>
+#include <kernel/mm/vmo.h>
 #include <kernel/obj/channel.h>
 #include <kernel/obj/handle_dispatch.h>
 #include <kernel/obj/port.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
+#include <kernel/sched/user_task.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/syscall.h>
 
@@ -311,9 +313,12 @@ uint64_t sys_port_wait(uint64_t port_handle, uint64_t offset, uint64_t timeout_n
     }
 
     // Dequeue-then-wait loop: READABLE can flicker high on a drained queue (see Port::dequeue),
-    // so an empty dequeue after a wake just waits again with the same deadline.
+    // so an empty dequeue after a wake just waits again with the same deadline. A killed thread
+    // must leave the loop -- its waits return immediately without the signal, and the dispatcher's
+    // boundary check exits it as soon as this returns.
     Port::Packet packet;
     while (!port->dequeue(packet)) {
+        if (self->killed()) { return errc_of(ktl::errc::timed_out); }
         if (timeout_ns == 0) {
             (void)port->wait_signals(Port::SIGNAL_READABLE);
             continue;
@@ -326,6 +331,29 @@ uint64_t sys_port_wait(uint64_t port_handle, uint64_t offset, uint64_t timeout_n
     return 0;
 }
 
+// Spawn rides beside the channel syscalls for the same reason they do: it returns two handles
+// through the IPC buffer, which the declarative op table is kept free of. task_spawn is the
+// buffer-free core; this wrapper is only verification and copy-out.
+uint64_t sys_task_spawn(uint64_t handle, uint64_t offset) {
+    using namespace kernel::obj;
+    auto self = kernel::sched::current();
+    if (!self) { return errc_of(ktl::errc::invalid_operation); }
+    const auto& buffer = self->ipc();
+    if (!buffer.valid() || !buffer.contains(offset, 2 * sizeof(uint64_t))) { return errc_of(ktl::errc::out_of_range); }
+
+    auto task     = calling_task(self);
+    auto verified = task->handles().verify(unpack_handle(handle), RIGHT_READ, type_ids::VMO);
+    if (verified.is_err()) { return errc_of(verified.unwrap_err()); }
+    auto image   = ktl::static_ref_cast<kernel::mm::vmo>(verified.unwrap().object);
+
+    auto spawned = kernel::sched::task_spawn(*task, ktl::move(image));
+    if (spawned.is_err()) { return errc_of(spawned.unwrap_err()); }
+
+    uint64_t handles[2] = {pack_handle(spawned.unwrap().task), pack_handle(spawned.unwrap().mailbox)};
+    buffer_write(buffer, offset, handles, sizeof(handles));
+    return 0;
+}
+
 }  // namespace
 
 extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
@@ -335,16 +363,28 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
     kernel::synchronization::syscall_enter();
     uint64_t ret = 0;
     switch (nr) {
-        case kernel::syscall::SYS_EXIT:
+        case kernel::syscall::SYS_EXIT: {
+            // Record the status before the thread is unreachable. Task zero records nothing: a
+            // kernel-context test driving SYS_EXIT is exiting a thread, not ending the kernel.
+            auto self = kernel::sched::current();
+            if (self) {
+                auto task = calling_task(self);
+                if (task.get() != kernel::sched::kernel_task().get()) {
+                    task->record_exit(kernel::syscall::TASK_EXIT_EXITED, static_cast<uint32_t>(a0));
+                }
+            }
             kernel::synchronization::syscall_exit();
             kernel::sched::exit_current();
             break;
+        }
         case kernel::syscall::SYS_YIELD: kernel::sched::yield(); break;
         case kernel::syscall::SYS_SLEEP: kernel::sched::sleep_ticks(a0); break;
         case kernel::syscall::SYS_WRITE: ret = sys_write(a0, a1); break;
         case kernel::syscall::SYS_HANDLE_CLOSE:
         case kernel::syscall::SYS_HANDLE_DUPLICATE:
-        case kernel::syscall::SYS_OBJ_INFO: ret = handle_syscall(nr, a0, a1); break;
+        case kernel::syscall::SYS_OBJ_INFO:
+        case kernel::syscall::SYS_TASK_KILL:
+        case kernel::syscall::SYS_TASK_STATUS: ret = handle_syscall(nr, a0, a1); break;
         case kernel::syscall::SYS_CHANNEL_CREATE: ret = sys_channel_create(a0); break;
         case kernel::syscall::SYS_CHANNEL_SEND: ret = sys_channel_send(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_CHANNEL_RECV: ret = sys_channel_recv(a0, a1, a2, a3, a4); break;
@@ -353,7 +393,18 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_PORT_BIND: ret = sys_port_bind(a0, a1, a2, a3); break;
         case kernel::syscall::SYS_PORT_UNBIND: ret = sys_port_unbind(a0, a1); break;
         case kernel::syscall::SYS_PORT_WAIT: ret = sys_port_wait(a0, a1, a2); break;
+        case kernel::syscall::SYS_TASK_SPAWN: ret = sys_task_spawn(a0, a1); break;
         default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
+    }
+    // The kill boundary: a thread marked while it was in (or entering) this syscall exits here
+    // instead of returning to user code. Every kernel lock is released by now, which is what makes
+    // this the one safe place to exit a thread that was interrupted mid-operation.
+    {
+        auto self = kernel::sched::current();
+        if (self && self->killed()) {
+            kernel::synchronization::syscall_exit();
+            kernel::sched::exit_current();
+        }
     }
     kernel::synchronization::syscall_exit();
     return ret;

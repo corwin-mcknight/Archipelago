@@ -92,8 +92,14 @@ void snapshot_symbols();
 // Feed the boot memory map to the PMM and bring up the VMM.
 void init_memory();
 
-// Object system, scheduler bring-up, boot-mode resolution (cmdline "shell"/"noshell"),
-// then the kernel shell thread or a normal boot; never returns (falls into the idle loop).
+// Object system, scheduler bring-up, boot-mode resolution (cmdline "shell" or "shell+boot";
+// no token means plain boot), then the kernel shell thread and/or the rest of the boot
+// sequence; never returns (falls into the idle loop).
 [[noreturn]] void late_boot(uint32_t boot_core_index);
+
+// Continue the boot sequence past a shell hold: launch the coordinator, which spawns everything
+// else. Idempotent -- every boot mode and the shell's `boot continue` funnel through here, and
+// only the first call launches. Returns false when boot had already continued.
+bool continue_boot();
 
 }  // namespace kernel::boot

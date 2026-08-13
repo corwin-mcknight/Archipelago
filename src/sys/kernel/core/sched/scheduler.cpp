@@ -202,6 +202,15 @@ void service_pending_preemption() {
     // masked interrupt_exit/fault_exit callers.
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto& c        = cur_cpu();
+    // A killed thread that never syscalls would otherwise run user code forever between ticks.
+    // Only when no syscall is in flight: mid-syscall the thread may hold kernel locks it must
+    // release on its way out, and the dispatcher's own boundary check exits it lock-free. With
+    // syscall depth zero and this hook eligible to run, the interrupted context is user code,
+    // which holds nothing.
+    if (c.current->killed() && c.current.get() != c.idle.get() &&
+        kernel::synchronization::current_execution_context().syscall_depth == 0) {
+        exit_current();
+    }
     if (c.run_queue.size() == 0) {
         kernel::arch::restore_interrupts(flags);
         return;

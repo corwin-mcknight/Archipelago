@@ -6,7 +6,7 @@ It provides diagnostics, testing, memory inspection, and boot flow control from 
 ## Overview
 After hardware initialization, the kernel enters the shell and displays a `% ` prompt.
 The developer can run commands, inspect kernel state, and execute tests interactively.
-The `boot continue` command resumes the normal boot sequence.
+The `boot continue` command resumes the normal boot sequence and exits the shell; `boot shell` resumes it with the prompt kept live alongside.
 
 For CI and automated testing, the `harness enable` command switches the shell into protocol mode.
 In protocol mode, output is emitted as machine-readable JSON events instead of human-readable text.
@@ -49,9 +49,16 @@ The `KSHELL_COMMAND` macro places a descriptor in the `.kshell_cmds` section.
 The shell discovers all registered commands at runtime by walking the section boundaries.
 
 ## Boot Integration
-The shell is gated by `CONFIG_KERNEL_SHELL`.
-When enabled, the kernel enters the shell after hardware initialization completes.
-The shell runs until `boot continue` is issued, at which point it returns and the boot sequence proceeds.
+The shell is gated by `CONFIG_KERNEL_SHELL`, and the kernel command line selects one of three boot modes:
+
+| Token | Mode |
+|-------|------|
+| `shell` | Shell only -- the boot sequence holds until a `boot` command resumes it |
+| `shell+boot` | Shell and boot -- the boot sequence proceeds with the prompt live alongside it |
+| (none) | Boot only -- no shell |
+
+A plain boot is the absence of a request, not a token; a shell request the build cannot honor degrades to a plain boot with a warning.
+Continuing the boot sequence means launching the coordinator, and it happens exactly once no matter which path requests it: `boot continue` exits the shell as it does so, `boot shell` keeps the prompt, and either after the first is answered with "already continued".
 
 Testing requires the shell -- `CONFIG_KERNEL_TESTING` cannot be enabled without `CONFIG_KERNEL_SHELL`.
 

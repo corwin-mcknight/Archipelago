@@ -69,6 +69,24 @@ class Thread : public kernel::obj::Object {
     thread_state state() const { return m_state; }
     void set_state(thread_state s) { m_state = s; }
 
+    // Set once by task kill, never cleared. A killed thread is forced onto the exit path at its
+    // next kernel boundary: the syscall dispatcher and the preemption service check it, blocked
+    // threads are woken by the killer, and the wait primitives refuse to park it on a wait whose
+    // wake might never come (see wait_queue.cpp).
+    bool killed() const { return m_killed; }
+    void set_killed() { m_killed = true; }
+
+    // Where this thread is parked while BLOCKED on a wait queue, recorded under that queue's lock
+    // by block_if and cleared when the thread resumes. This is what lets task kill find and claim
+    // a blocked thread without a reverse index; sleepers are found through the sleeper list
+    // instead and have no entry here.
+    wait_queue* parked_queue() const { return m_parked_queue; }
+    wait_node* parked_node() const { return m_parked_node; }
+    void set_parked(wait_queue* queue, wait_node* node) {
+        m_parked_queue = queue;
+        m_parked_node  = node;
+    }
+
     uintptr_t kstack_phys() const { return m_kstack_phys; }
     uintptr_t kstack_floor() const { return m_kstack_floor; }
     uintptr_t kstack_top() const { return m_kstack_top; }
@@ -112,11 +130,14 @@ class Thread : public kernel::obj::Object {
 
    private:
     // Mutated only with interrupts disabled on the scheduling core; no atomics until SMP scheduling.
-    thread_state m_state     = thread_state::READY;
-    uintptr_t m_kstack_phys  = 0;
-    uintptr_t m_kstack_floor = 0;
-    uintptr_t m_kstack_top   = 0;
-    uintptr_t m_saved_sp     = 0;
+    thread_state m_state       = thread_state::READY;
+    bool m_killed              = false;
+    wait_queue* m_parked_queue = nullptr;
+    wait_node* m_parked_node   = nullptr;
+    uintptr_t m_kstack_phys    = 0;
+    uintptr_t m_kstack_floor   = 0;
+    uintptr_t m_kstack_top     = 0;
+    uintptr_t m_saved_sp       = 0;
     ktl::ref<kernel::obj::Object> m_owner;
     uint32_t m_slice = CONFIG_SCHED_TIMESLICE_TICKS;
     thread_stats m_stats;

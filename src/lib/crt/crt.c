@@ -52,18 +52,17 @@ char* sys_ipc_base(void) { return g_ipc_base; }
 size_t sys_ipc_size(void) { return g_ipc_size; }
 
 // Entry glue: _start lands here with the registers the kernel set at thread entry. Stash the IPC
-// buffer before anything can want it, run the program, and exit the thread when it returns --
-// main's status is discarded until SYS_EXIT carries a status argument.
+// buffer before anything can want it, run the program, and exit with main's status when it
+// returns -- widened as an unsigned int, so -1 reads back as 0xFFFFFFFF, not a kernel error.
 extern int main(void);
 void __crt_start(char* ipc_base, size_t ipc_size);
 void __crt_start(char* ipc_base, size_t ipc_size) {
     g_ipc_base = ipc_base;
     g_ipc_size = ipc_size;
-    (void)main();
-    sys_exit();
+    sys_exit((unsigned int)main());
 }
 
-void sys_exit(void) { syscall1(ABI_SYS_EXIT, 0); }
+void sys_exit(uint64_t status) { syscall1(ABI_SYS_EXIT, status); }
 void sys_yield(void) { syscall1(ABI_SYS_YIELD, 0); }
 void sys_sleep(uint64_t ticks) { syscall1(ABI_SYS_SLEEP, ticks); }
 
@@ -109,3 +108,7 @@ uint64_t sys_port_unbind(uint64_t port, uint64_t key) { return syscall2(ABI_SYS_
 uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns) {
     return syscall3(ABI_SYS_PORT_WAIT, port, offset, timeout_ns);
 }
+
+uint64_t sys_task_kill(uint64_t task) { return syscall1(ABI_SYS_TASK_KILL, task); }
+uint64_t sys_task_status(uint64_t task) { return syscall1(ABI_SYS_TASK_STATUS, task); }
+uint64_t sys_task_spawn(uint64_t image, uint64_t offset) { return syscall2(ABI_SYS_TASK_SPAWN, image, offset); }

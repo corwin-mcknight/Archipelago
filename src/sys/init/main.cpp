@@ -1,251 +1,329 @@
+#include <abi/message.h>
 #include <abi/syscall.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys.h>
 
-// The first user program. It exists to exercise the path a real program takes -- ELF load, private
-// address space, privilege transition, syscalls, exit -- so it deliberately touches memory in each
-// kind of segment the loader has to get right, and writes through the IPC buffer the kernel handed
-// it rather than through any pointer of its own.
+// The coordinator: the one task the kernel launches, and both process manager and service broker
+// for everything else (docs/Design/Service Coordination.md). The kernel mails it one IMAGE
+// message per boot module; it spawns each non-init image, becomes every child's parent, and
+// serves the coordinator protocol on their mailboxes: REGISTER claims a name, CONNECT asks for
+// one and receives an end of a freshly minted channel pair, the registrant receiving the other
+// end as a CONNECTION message. Connects for absent names park until the name appears. Policy is
+// open -- any child may claim any free name, every request is logged -- and the enforcement
+// point, not the rules, is what this program establishes: every request arrives on a mailbox
+// whose owner the coordinator spawned itself.
 
 namespace {
 
-// .rodata: read-only, no execute.
-const char* const GREETING = "hello from userspace\n";
+// IPC buffer layout. Staging for sends at 0; the rest stay clear of it and each other.
+constexpr size_t HANDLE_AT = 256;  // handle value given to send
+constexpr size_t PAIR_AT   = 320;  // channel_create's two minted ends
+constexpr size_t SPAWN_AT  = 384;  // task_spawn's task + mailbox handles
+constexpr size_t PACKET_AT = 640;  // port packets
+constexpr size_t ARRIVE_AT = 704;  // arrived handles from recv
+constexpr size_t MSG_AT    = 1024; // recv payload landing
+constexpr size_t MSG_CAP   = 2048;
 
-// .data: initialised and writable, so a wrong permission or a missed copy shows up as a fault or as
-// the wrong output rather than as silence.
-char g_marker[] = "init: data segment intact\n";
+constexpr uint64_t KEY_SELF        = 1;
+constexpr uint64_t KEY_CHILD_BASE  = 0x100;
+constexpr size_t MAX_CHILDREN      = 8;
+constexpr size_t MAX_REGISTRATIONS = 8;
+constexpr size_t MAX_PENDING       = 8;
+constexpr size_t NAME_CAP          = 31;
 
-// .bss: zero-filled by the loader through the anonymous VMO rather than copied from the image.
-// volatile is load-bearing -- without it the compiler proves the array is all zeroes, folds the
-// check below to `true`, and drops the array entirely, leaving the image with no .bss to test.
-volatile char g_scratch[256];
+struct child_slot {
+    bool used;
+    uint64_t task;
+    uint64_t mailbox;
+    char name[NAME_CAP];
+    size_t name_len;
+};
+struct registration {
+    bool used;
+    size_t child;
+    char name[NAME_CAP];
+    size_t name_len;
+};
+struct pending_connect {
+    bool used;
+    size_t child;
+    uint64_t txid;
+    char name[NAME_CAP];
+    size_t name_len;
+};
 
-bool bss_is_zero() {
-    for (size_t i = 0; i < sizeof(g_scratch) / sizeof(g_scratch[0]); i++) {
-        if (g_scratch[i] != '\0') { return false; }
+child_slot g_children[MAX_CHILDREN];
+registration g_names[MAX_REGISTRATIONS];
+pending_connect g_pending[MAX_PENDING];
+uint64_t g_port;
+
+void copy_in(void* to, size_t offset, size_t length) {
+    char* ipc = sys_ipc_base();
+    for (size_t i = 0; i < length; i++) { static_cast<char*>(to)[i] = ipc[offset + i]; }
+}
+
+void copy_out(size_t offset, const void* from, size_t length) {
+    char* ipc = sys_ipc_base();
+    for (size_t i = 0; i < length; i++) { ipc[offset + i] = static_cast<const char*>(from)[i]; }
+}
+
+bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
+    if (a_len != b_len) { return false; }
+    for (size_t i = 0; i < a_len; i++) {
+        if (a[i] != b[i]) { return false; }
     }
     return true;
 }
 
+// One log line built from a prefix and a length-delimited name: "coord: spawned echo\n".
+void log_name(const char* prefix, const char* name, size_t name_len) {
+    size_t at = sys_stage(0, prefix);
+    copy_out(at, name, name_len);
+    sys_ipc_base()[at + name_len] = '\n';
+    sys_write(0, at + name_len + 1);
+}
+
+// Send an envelope, an optional name payload, and an optional handle on `channel`. The staged
+// message starts at offset 0, so callers must be done with any staging of their own.
+uint64_t send_message(uint64_t channel, uint32_t opcode, uint32_t status, uint64_t txid, const char* name,
+                      size_t name_len, const uint64_t* handle) {
+    abi_message_header header{opcode, status, txid};
+    copy_out(0, &header, sizeof(header));
+    if (name_len != 0) { copy_out(sizeof(header), name, name_len); }
+    if (handle != nullptr) { copy_out(HANDLE_AT, handle, sizeof(*handle)); }
+    return sys_channel_send(channel, 0, sizeof(header) + name_len, HANDLE_AT, handle != nullptr ? 1 : 0);
+}
+
+// Mint a pair and deliver both ends: CONNECTION (with the name) to the registrant's mailbox,
+// then the reply (with the request's txid) to the requester. A failure to reach the server turns
+// into an error reply; a failure to reach the requester is the requester's own death, and the
+// minted ends die with this function either way -- send consumes them on success, close covers
+// the rest.
+void serve_connect(size_t requester, uint64_t txid, const char* name, size_t name_len, size_t server) {
+    uint64_t ends[2];
+    if (sys_is_error(sys_channel_create(PAIR_AT))) {
+        (void)send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, static_cast<uint32_t>(-4), txid,
+                           nullptr, 0, nullptr);
+        return;
+    }
+    copy_in(ends, PAIR_AT, sizeof(ends));
+
+    if (sys_is_error(send_message(g_children[server].mailbox, ABI_COORD_OP_CONNECTION, 0, 0, name, name_len,
+                                  &ends[0]))) {
+        (void)sys_handle_close(ends[0]);
+        (void)sys_handle_close(ends[1]);
+        (void)send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, static_cast<uint32_t>(-1), txid,
+                           nullptr, 0, nullptr);
+        return;
+    }
+    if (sys_is_error(send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, 0, txid, nullptr, 0,
+                                  &ends[1]))) {
+        (void)sys_handle_close(ends[1]);
+    }
+    log_name("coord: connected ", name, name_len);
+}
+
+// A name just appeared: serve every parked connect that was waiting for it.
+void serve_pending(const char* name, size_t name_len, size_t server) {
+    for (size_t i = 0; i < MAX_PENDING; i++) {
+        if (!g_pending[i].used || !name_equal(g_pending[i].name, g_pending[i].name_len, name, name_len)) {
+            continue;
+        }
+        g_pending[i].used = false;
+        serve_connect(g_pending[i].child, g_pending[i].txid, name, name_len, server);
+    }
+}
+
+// An IMAGE message from the kernel: spawn every image except our own. The VMO handle is consumed
+// either way -- spawn only borrows it, and with no respawn story yet there is nothing to keep it
+// for.
+void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
+    char name[NAME_CAP];
+    if (name_len > NAME_CAP) { name_len = NAME_CAP; }
+    copy_in(name, name_at, name_len);
+
+    if (name_equal(name, name_len, "init", 4)) {
+        (void)sys_handle_close(vmo);
+        return;
+    }
+
+    size_t slot = MAX_CHILDREN;
+    for (size_t i = 0; i < MAX_CHILDREN; i++) {
+        if (!g_children[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == MAX_CHILDREN || sys_is_error(sys_task_spawn(vmo, SPAWN_AT))) {
+        log_name("coord: SPAWN FAILED ", name, name_len);
+        (void)sys_handle_close(vmo);
+        return;
+    }
+    (void)sys_handle_close(vmo);
+
+    uint64_t handles[2];
+    copy_in(handles, SPAWN_AT, sizeof(handles));
+    g_children[slot].used     = true;
+    g_children[slot].task     = handles[0];
+    g_children[slot].mailbox  = handles[1];
+    g_children[slot].name_len = name_len;
+    for (size_t i = 0; i < name_len; i++) { g_children[slot].name[i] = name[i]; }
+
+    if (sys_is_error(sys_port_bind(g_port, g_children[slot].mailbox, KEY_CHILD_BASE + slot,
+                                   ABI_CHANNEL_SIGNAL_READABLE | ABI_CHANNEL_SIGNAL_PEER_CLOSED))) {
+        log_name("coord: BIND FAILED ", name, name_len);
+        return;
+    }
+    log_name("coord: spawned ", name, name_len);
+}
+
+void handle_child_message(size_t slot, uint64_t recv_result) {
+    size_t size = recv_result & 0xFFFFFFFF;
+    if (size < sizeof(abi_message_header)) { return; }
+    abi_message_header header;
+    copy_in(&header, MSG_AT, sizeof(header));
+    size_t name_len = size - sizeof(header);
+    if (name_len > NAME_CAP) { return; }
+    char name[NAME_CAP];
+    copy_in(name, MSG_AT + sizeof(header), name_len);
+
+    if (header.opcode == ABI_COORD_OP_REGISTER) {
+        for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+            if (g_names[i].used && name_equal(g_names[i].name, g_names[i].name_len, name, name_len)) {
+                log_name("coord: register refused (taken) ", name, name_len);
+                (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-7),
+                                   header.txid, nullptr, 0, nullptr);
+                return;
+            }
+        }
+        size_t entry = MAX_REGISTRATIONS;
+        for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+            if (!g_names[i].used) {
+                entry = i;
+                break;
+            }
+        }
+        if (entry == MAX_REGISTRATIONS || name_len == 0) {
+            (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-10),
+                               header.txid, nullptr, 0, nullptr);
+            return;
+        }
+        g_names[entry].used     = true;
+        g_names[entry].child    = slot;
+        g_names[entry].name_len = name_len;
+        for (size_t i = 0; i < name_len; i++) { g_names[entry].name[i] = name[i]; }
+        (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, 0, header.txid, nullptr, 0, nullptr);
+        log_name("coord: registered ", name, name_len);
+        serve_pending(name, name_len, slot);
+        return;
+    }
+
+    if (header.opcode == ABI_COORD_OP_CONNECT) {
+        log_name("coord: connect ", name, name_len);
+        for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+            if (g_names[i].used && name_equal(g_names[i].name, g_names[i].name_len, name, name_len)) {
+                serve_connect(slot, header.txid, name, name_len, g_names[i].child);
+                return;
+            }
+        }
+        for (size_t i = 0; i < MAX_PENDING; i++) {
+            if (g_pending[i].used) { continue; }
+            g_pending[i].used     = true;
+            g_pending[i].child    = slot;
+            g_pending[i].txid     = header.txid;
+            g_pending[i].name_len = name_len;
+            for (size_t j = 0; j < name_len; j++) { g_pending[i].name[j] = name[j]; }
+            log_name("coord: parked connect ", name, name_len);
+            return;
+        }
+        (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_CONNECT, static_cast<uint32_t>(-10), header.txid,
+                           nullptr, 0, nullptr);
+        return;
+    }
+    // Unknown opcodes are ignored: append-only evolution means an old coordinator may see new
+    // requests, and dropping them beats guessing.
+}
+
+// A child's mailbox hung up: its registrations and parked connects die with it, and both handles
+// close so the task object can too. Exit, crash, and kill all look identical here, by design.
+void child_gone(size_t slot) {
+    log_name("coord: child gone ", g_children[slot].name, g_children[slot].name_len);
+    for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+        if (g_names[i].used && g_names[i].child == slot) { g_names[i].used = false; }
+    }
+    for (size_t i = 0; i < MAX_PENDING; i++) {
+        if (g_pending[i].used && g_pending[i].child == slot) { g_pending[i].used = false; }
+    }
+    (void)sys_port_unbind(g_port, KEY_CHILD_BASE + slot);
+    (void)sys_handle_close(g_children[slot].task);
+    (void)sys_handle_close(g_children[slot].mailbox);
+    g_children[slot].used = false;
+}
+
+// Drain a channel to exhaustion through `consume`; afterwards, report whether it is gone for good
+// (hung up with nothing left to read).
+template <typename F>
+bool drain(uint64_t channel, F consume) {
+    for (;;) {
+        uint64_t got = sys_channel_recv(channel, MSG_AT, MSG_CAP, ARRIVE_AT, 4);
+        if (sys_is_error(got)) { break; }
+        consume(got);
+    }
+    uint64_t sig = sys_object_wait(channel, 0, 0);
+    return (sig & ABI_CHANNEL_SIGNAL_PEER_CLOSED) != 0 && (sig & ABI_CHANNEL_SIGNAL_READABLE) == 0;
+}
+
 }  // namespace
 
-// Freestanding C++ gives main no special treatment, so the C linkage the runtime links against
-// must be spelled out.
 extern "C" int main() {
-    char* const ipc = sys_ipc_base();
-
-    // Yield twice first: the scheduler has to bring us back before anything else is meaningful.
-    sys_yield();
-    sys_yield();
-
-    sys_print(GREETING);
-    sys_print(bss_is_zero() ? "init: bss zeroed\n" : "init: BSS NOT ZEROED\n");
-
-    // Prove the data segment is writable, then read it back out through the same pointer.
-    g_marker[0] = 'I';
-    sys_print(g_marker);
-
-    // Two writes out of one staging pass, using the offset argument: the second names a slice the
-    // first already staged, with no data movement in between.
-    size_t first  = sys_stage(0, "init: first half\n");
-    size_t second = sys_stage(first, "init: second half\n");
-    sys_write(0, first);
-    sys_write(first, second);
-
-    // The bootstrap contract: slot 0 is a channel endpoint whose first message carries our
-    // self-handles -- task, then thread, then whatever else the creator endowed us with. Recv it
-    // through the ordinary transfer path, then make the structural checks the contract promises:
-    // an empty payload, at least the two self-handles, naming objects of different types, and an
-    // operation needing a right they lack (duplicate) refused.
-    uint64_t self_task   = 0;
-    uint64_t self_thread = 0;
-    uint64_t peer        = 0;
-    bool have_peer       = false;
-    {
-        constexpr size_t ARRIVED_AT = 512;   // where recv lands the endowed handles
-        uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
-        bool ok      = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
-        have_peer    = ok && (got >> 32) >= 3;
-        for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(&self_task)[i]   = ipc[ARRIVED_AT + i];
-            reinterpret_cast<char*>(&self_thread)[i] = ipc[ARRIVED_AT + sizeof(uint64_t) + i];
-            reinterpret_cast<char*>(&peer)[i]        = ipc[ARRIVED_AT + 2 * sizeof(uint64_t) + i];
-        }
-
-        uint64_t task_info   = sys_obj_info(self_task);
-        uint64_t thread_info = sys_obj_info(self_thread);
-        ok                   = ok && !sys_is_error(task_info) && !sys_is_error(thread_info) &&
-             (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
-
-        // The endpoint must not report hangup after the drain: the parent keeps its end open for
-        // the task's whole life. No claim about READABLE -- the parent may have mailed more already.
-        uint64_t sig = sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0, 0);
-        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) == 0;
-
-        sys_print(ok ? "init: bootstrap ok\n" : "init: BOOTSTRAP BROKEN\n");
+    // Bootstrap: the self-handles. Nothing here needs them, but draining the first message is
+    // what moves the mailbox to protocol traffic.
+    uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVE_AT, 4);
+    if (sys_is_error(got) || (got >> 32) < 2) {
+        sys_print("coord: BOOTSTRAP BROKEN\n");
+        return 1;
     }
 
-    uint64_t dup = sys_handle_duplicate(self_task, ~0ull);
-    sys_print(sys_is_error(dup) ? "init: rights check ok\n" : "init: RIGHTS CHECK MISSED\n");
-
-    // A channel pair, exercised whole: create hands back two handles through the buffer (the first
-    // kernel-to-user copy-out), a message sent on one end comes back byte-identical on the other,
-    // a second recv correctly reports the queue empty, and both ends close.
-    {
-        constexpr size_t HANDLES_AT = 512;   // where create lands the two handles
-        constexpr size_t REPLY_AT   = 768;   // where recv lands the message
-        const char* ping            = "ping across the pair";
-
-        bool ok = !sys_is_error(sys_channel_create(HANDLES_AT));
-        uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[HANDLES_AT + i]; }
-
-        // Poll (zero mask): a fresh endpoint is writable and has nothing to read.
-        uint64_t sig = sys_object_wait(ends[0], 0, 0);
-        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_WRITABLE) != 0 &&
-             (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0;
-
-        size_t ping_len = sys_stage(0, ping);
-        ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, ping_len, 0, 0));
-
-        // Wait for READABLE on the receiving end. The message is already queued, so this returns
-        // immediately -- what it proves is the wait path itself observing the asserted signal.
-        // Gated on ok: after an earlier failure the signal may never assert, and an unconditional
-        // wait would hang forever instead of reporting CHANNEL BROKEN.
-        if (ok) {
-            sig = sys_object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_READABLE, 0);
-            ok  = (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
-        }
-
-        uint64_t got = sys_channel_recv(ends[1], REPLY_AT, 128, 0, 0);
-        ok           = ok && got == ping_len;
-        for (size_t i = 0; ok && i < ping_len; i++) { ok = ipc[REPLY_AT + i] == ping[i]; }
-
-        // Drained queue: the error comes back immediately, the kernel never blocks for us.
-        ok = ok && sys_is_error(sys_channel_recv(ends[1], REPLY_AT, 128, 0, 0));
-
-        // Closing one end hangs up the other: PEER_CLOSED is already asserted by the time the
-        // close returns, so this wait also cannot block (and is skipped after any failure, like
-        // the READABLE wait above).
-        ok = ok && !sys_is_error(sys_handle_close(ends[0]));
-        if (ok) {
-            sig = sys_object_wait(ends[1], abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED, 0);
-            ok  = (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) != 0;
-        }
-
-        ok = ok && !sys_is_error(sys_handle_close(ends[1]));
-        sys_print(ok ? "init: channel ok\n" : "init: CHANNEL BROKEN\n");
+    g_port = sys_port_create();
+    if (sys_is_error(g_port) ||
+        sys_is_error(sys_port_bind(g_port, abi::syscall::BOOTSTRAP_HANDLE, KEY_SELF,
+                                   ABI_CHANNEL_SIGNAL_READABLE | ABI_CHANNEL_SIGNAL_PEER_CLOSED))) {
+        sys_print("coord: PORT SETUP BROKEN\n");
+        return 1;
     }
+    sys_print("coord: serving\n");
 
-    // Handle transfer: an endpoint of a second pair rides a message across a first pair. The
-    // sender's handle value dies with the send, the arrived value is new, and the transferred
-    // endpoint still works -- a message sent through it lands on its peer.
-    {
-        constexpr size_t CARRIER_AT = 512;   // the pair the transfer travels over
-        constexpr size_t CARGO_AT   = 528;   // the pair whose endpoint is transferred
-        constexpr size_t SENT_AT    = 544;   // the handle value given to send
-        constexpr size_t ARRIVED_AT = 552;   // where recv lands the transferred handle
-        constexpr size_t REPLY_AT   = 768;
-        const char* note            = "one endpoint enclosed";
-
-        bool ok = !sys_is_error(sys_channel_create(CARRIER_AT)) && !sys_is_error(sys_channel_create(CARGO_AT));
-        uint64_t carrier[2];
-        uint64_t cargo[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(carrier)[i] = ipc[CARRIER_AT + i];
-            reinterpret_cast<char*>(cargo)[i]   = ipc[CARGO_AT + i];
+    for (;;) {
+        if (sys_is_error(sys_port_wait(g_port, PACKET_AT, 0))) {
+            sys_print("coord: WAIT BROKEN\n");
+            return 1;
         }
+        uint64_t key;
+        copy_in(&key, PACKET_AT, sizeof(key));
 
-        size_t note_len = sys_stage(0, note);
-        for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            ipc[SENT_AT + i] = reinterpret_cast<const char*>(&cargo[0])[i];
+        if (key == KEY_SELF) {
+            // Our own mailbox: IMAGE messages from the kernel. A hangup here would mean the
+            // kernel dropped our parent end, which it never does; keep serving regardless.
+            (void)drain(abi::syscall::BOOTSTRAP_HANDLE, [](uint64_t result) {
+                size_t size = result & 0xFFFFFFFF;
+                if ((result >> 32) != 1 || size < sizeof(abi_message_header) + sizeof(abi_image_payload)) {
+                    return;
+                }
+                abi_message_header header;
+                copy_in(&header, MSG_AT, sizeof(header));
+                if (header.opcode != ABI_COORD_OP_IMAGE) { return; }
+                uint64_t vmo;
+                copy_in(&vmo, ARRIVE_AT, sizeof(vmo));
+                size_t fixed = sizeof(abi_message_header) + sizeof(abi_image_payload);
+                handle_image(vmo, MSG_AT + fixed, size - fixed);
+            });
+        } else if (key >= KEY_CHILD_BASE && key < KEY_CHILD_BASE + MAX_CHILDREN) {
+            size_t slot = static_cast<size_t>(key - KEY_CHILD_BASE);
+            if (!g_children[slot].used) { continue; }
+            bool gone = drain(g_children[slot].mailbox,
+                              [slot](uint64_t result) { handle_child_message(slot, result); });
+            if (gone) { child_gone(slot); }
         }
-        ok = ok && !sys_is_error(sys_channel_send(carrier[0], 0, note_len, SENT_AT, 1));
-
-        // Consumed by the send: the old handle value must no longer resolve in our table.
-        ok = ok && sys_is_error(sys_obj_info(cargo[0]));
-
-        uint64_t got = sys_channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
-        ok           = ok && !sys_is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
-
-        uint64_t arrived = 0;
-        for (size_t i = 0; i < sizeof(uint64_t); i++) { reinterpret_cast<char*>(&arrived)[i] = ipc[ARRIVED_AT + i]; }
-
-        // The arrived handle is a working channel endpoint: ping its peer through it.
-        ok              = ok && !sys_is_error(sys_obj_info(arrived));
-        size_t ping_len = sys_stage(0, "via transferred end");
-        ok              = ok && !sys_is_error(sys_channel_send(arrived, 0, ping_len, 0, 0));
-        ok              = ok && sys_channel_recv(cargo[1], REPLY_AT, 128, 0, 0) == ping_len;
-
-        ok = ok && !sys_is_error(sys_handle_close(carrier[0])) && !sys_is_error(sys_handle_close(carrier[1]));
-        ok = ok && !sys_is_error(sys_handle_close(arrived)) && !sys_is_error(sys_handle_close(cargo[1]));
-        sys_print(ok ? "init: handle transfer ok\n" : "init: HANDLE TRANSFER BROKEN\n");
     }
-
-    // A port: the wait on an empty port times out rather than wedging, a message on a bound
-    // channel becomes a packet carrying the binder's key, and unbind leaves the port empty.
-    {
-        constexpr size_t ENDS_AT   = 512;
-        constexpr size_t PACKET_AT = 640;
-        constexpr uint64_t KEY     = 0xC0FFEE;
-
-        bool ok = !sys_is_error(sys_channel_create(ENDS_AT));
-        uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[ENDS_AT + i]; }
-
-        uint64_t port = sys_port_create();
-        ok            = ok && !sys_is_error(port);
-        ok = ok && !sys_is_error(sys_port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
-
-        // Nothing queued yet: a bounded wait lapses instead of blocking forever. -15 is the
-        // kernel's timed_out code; error values are not installed ABI yet (see todo.md), so this
-        // is the one place init spells one.
-        ok = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(-15);
-
-        size_t note_len = sys_stage(0, "wake the event loop");
-        ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, note_len, 0, 0));
-        ok              = ok && !sys_is_error(sys_port_wait(port, PACKET_AT, 0));
-
-        uint64_t packet[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(packet)[i] = ipc[PACKET_AT + i]; }
-        ok = ok && packet[0] == KEY && (packet[1] & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
-
-        ok = ok && sys_port_unbind(port, KEY) == 1;
-        ok = ok && !sys_is_error(sys_handle_close(port));
-        ok = ok && !sys_is_error(sys_handle_close(ends[0])) && !sys_is_error(sys_handle_close(ends[1]));
-        sys_print(ok ? "init: port ok\n" : "init: PORT BROKEN\n");
-    }
-
-    // If the creator endowed us with a peer -- a channel to the echo server -- exercise server
-    // dispatch end to end: pings come back byte-identical, from another task's event loop rather
-    // than from a second handle in our own table. Bounded waits, so a broken server reports
-    // BROKEN instead of wedging this program (and with it the lifecycle tests).
-    if (have_peer) {
-        constexpr size_t REPLY_AT      = 768;
-        constexpr uint64_t WAIT_NS     = 1'000'000'000;
-        const char* pings[2]           = {"ping across tasks", "second opinion"};
-
-        bool ok = true;
-        for (size_t p = 0; ok && p < 2; p++) {
-            size_t len   = sys_stage(0, pings[p]);
-            ok           = !sys_is_error(sys_channel_send(peer, 0, len, 0, 0));
-            uint64_t sig = ok ? sys_object_wait(peer, abi::syscall::CHANNEL_SIGNAL_READABLE, WAIT_NS) : 0;
-            ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
-            ok           = ok && sys_channel_recv(peer, REPLY_AT, 128, 0, 0) == len;
-            for (size_t i = 0; ok && i < len; i++) { ok = ipc[REPLY_AT + i] == pings[p][i]; }
-        }
-        ok = ok && !sys_is_error(sys_handle_close(peer));
-        sys_print(ok ? "init: echo roundtrip ok\n" : "init: ECHO ROUNDTRIP BROKEN\n");
-    }
-
-    // Touch the demand-paged stack, then sleep so the lifecycle test sees a running task. Keep
-    // the sleep well under user_task_lifecycle's 2000-tick termination wait: the two race, and a
-    // sleep near that bound turns the test into a coin flip (as a temporary 2000 here proved).
-    volatile char stack_probe[64];
-    for (size_t i = 0; i < sizeof(stack_probe); i++) { stack_probe[i] = static_cast<char>(i); }
-    sys_sleep(20);
-
-    return 0;
 }

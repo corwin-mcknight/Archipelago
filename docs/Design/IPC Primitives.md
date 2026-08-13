@@ -1,7 +1,7 @@
 # IPC Primitives
 
 > [!info] Design
-> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals), along with signal wait and poll on any handle with a nanosecond timeout, handle transfer through kernel-table escrow gated by the transfer right on the channel handle, and ports with signal bindings and packet delivery; server dispatch and the message metadata/header regions are not.
+> This page describes the planned design. A first minimal channel pair is implemented (endpoint objects, bounded per-direction FIFO queues, READABLE/WRITABLE/PEER_CLOSED signals), along with signal wait and poll on any handle with a nanosecond timeout, handle transfer through kernel-table escrow gated by the transfer right on the channel handle, and ports with signal bindings and packet delivery; sockets, server dispatch, and the message metadata/header regions are not.
 
 The kernel provides several IPC primitives for communication between processes and between processes and servers.
 All are [[Object Model|kernel objects]] accessed through capability handles, and all operations go through the [[Object Model#Three-Path Dispatch|three-path dispatch model]].
@@ -57,6 +57,25 @@ which the kernel delivers to the waiting client.
 
 A server that manages many object types or many objects can bind its channel endpoints to a [[#Ports|port]] for multiplexed waiting.
 
+## Sockets
+A socket is a bidirectional, point-to-point byte-stream primitive -- the streaming counterpart to a channel.
+Creating a socket yields a pair of handles, one per endpoint, each a separate kernel object with its own signal state.
+Bytes written to one endpoint are readable from the other, in order, with no message boundaries: a read returns whatever bytes are available up to the caller's limit, independent of how they were written.
+
+Sockets exist because streams are not messages.
+A channel imposes a boundary, a per-message queue slot, and a handle-slot capability on every write; a stream of text has none of those needs and should not pay for them.
+The two primitives split the work: channels carry protocol -- envelopes, requests, handles -- and sockets carry bytes.
+A protocol that needs both moves handles over a channel and bulk bytes over a socket end sent through that channel once.
+Sockets carry bytes only and have no handle slots.
+
+Each direction has a bounded byte buffer.
+A write to a full buffer fails immediately, under the same [[Syscall Interface#Kernel Non-Blocking Guarantee|non-blocking contract]] as channels: `WRITABLE` clears when the peer's buffer is full and re-asserts when the reader drains it.
+`READABLE`, `WRITABLE`, and `PEER_CLOSED` behave as they do on channel endpoints, so sockets bind to [[#Ports|ports]] and multiplex into server event loops the same way.
+
+Direction is a property of the handle, not the object.
+An endpoint handle without the write right is a read-only stream, so one primitive covers both UNIX shapes: a socketpair is two full-rights handles, and a pipe is the same pair with the opposing right stripped from each side before the ends are handed over.
+There is no separate pipe type.
+
 ## Ports
 A port is a multi-producer, single-consumer message queue.
 Unlike channels (which are point-to-point), ports aggregate events from multiple sources into a single waitable queue.
@@ -85,7 +104,7 @@ Every [[Object Model|kernel object]] carries a set of signal bits -- a bitmask w
 
 ### Kernel-managed signals
 The lower bits are managed by the kernel automatically based on object state. Examples:
-- `READABLE`, `WRITABLE`, `PEER_CLOSED` on [[#Channels|channel]] endpoints
+- `READABLE`, `WRITABLE`, `PEER_CLOSED` on [[#Channels|channel]] and [[#Sockets|socket]] endpoints
 - `READABLE` on [[#Ports|ports]] with pending packets
 - Interrupt signals on [[Interrupt Model|interrupt objects]]
 

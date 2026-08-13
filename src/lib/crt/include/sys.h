@@ -16,15 +16,15 @@
 extern "C" {
 #endif
 
-// The program supplies `int main(void)`, called by the runtime's _start. The return value is
-// discarded until SYS_EXIT carries a status argument.
+// The program supplies `int main(void)`, called by the runtime's _start. The return value becomes
+// the task's exit status, readable by a task-handle holder once the task has terminated.
 
 // This thread's IPC buffer, as handed over at entry and stashed by _start. There is no way to ask
 // the kernel for it again.
 char* sys_ipc_base(void);
 size_t sys_ipc_size(void);
 
-void sys_exit(void);
+void sys_exit(uint64_t status);
 void sys_yield(void);
 void sys_sleep(uint64_t ticks);
 
@@ -67,6 +67,13 @@ uint64_t sys_object_wait(uint64_t handle, uint64_t mask, uint64_t timeout_ns);
 uint64_t sys_port_create(void);
 uint64_t sys_port_bind(uint64_t port, uint64_t object, uint64_t key, uint64_t mask);
 uint64_t sys_port_unbind(uint64_t port, uint64_t key);
+
+// Task lifecycle: kill and status act on a task handle; spawn turns an image VMO handle into a
+// running child, writing the new task handle then the bootstrap channel handle (two uint64s) at
+// `offset` in the IPC buffer. See <abi/syscall.h> for semantics and rights.
+uint64_t sys_task_kill(uint64_t task);
+uint64_t sys_task_status(uint64_t task);
+uint64_t sys_task_spawn(uint64_t image, uint64_t offset);
 uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns);
 
 #ifdef __cplusplus

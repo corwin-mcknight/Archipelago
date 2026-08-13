@@ -98,4 +98,9 @@ ktl::ref<vmo> create_anonymous_vmo(size_t pages);
 // cache mode. Never resizable; frames are never PMM-owned.
 ktl::ref<vmo> create_device_vmo(vm_paddr_t base, size_t pages, vm_cache_mode mode);
 
+// VMO wrapping already-wired cached RAM (boot module bytes today). Like a device
+// window but without the WIRED descriptor marking -- the range's existing
+// classification is what pins it.
+ktl::ref<vmo> create_wired_vmo(vm_paddr_t base, size_t pages);
+
 }  // namespace kernel::mm

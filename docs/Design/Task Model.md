@@ -1,8 +1,8 @@
 # Task Model
 
 > [!info] Partial Implementation
-> Task creation, ring-3/U-mode entry, scheduling, and last-thread teardown are implemented for an embedded payload on x86_64 and riscv64.
-> ELF loading, region delegation, general task termination, and the broader syscall surface remain planned.
+> Task creation, ELF loading, ring-3/U-mode entry, scheduling, teardown, kill, exit status, the TERMINATED signal, and spawn-from-VMO are implemented on x86_64 and riscv64.
+> Region delegation, the userspace loader, and the broader syscall surface remain planned.
 
 A task is the unit of isolation in Archipelago.
 It is deliberately not called a "process" -- there is no UNIX lineage here.
@@ -56,25 +56,39 @@ The kernel follows the normal task creation path to launch the first userspace p
 Because the kernel is task zero with full rights, it can do everything any parent task could do:
 create a new task object, populate its handle table, map memory, and start a thread.
 
-The kernel finds a userspace program called init and launches it.
+The kernel finds a userspace program called init -- the [[Service Coordination|coordinator]] -- and launches it.
+The coordinator then spawns every other task, so the kernel launches exactly one.
 There is no special bootstrap mode -- the same code path used for the first launch is used for every launch.
 
 ### ELF Loading
 The kernel has one built-in binary format loader: ELF.
 It parses the ELF binary, creates VMOs for each loadable segment, maps them into the task's address space, and sets the thread's entry point.
 
-Other binary formats are handled entirely in userspace.
-A shim loader -- for example, a Mach-O loader -- would create a task within itself, map the foreign binary's segments, start the new task's thread, then clean up its own resources.
-The kernel does not need to understand every executable format.
+The built-in loader is scaffolding for everything except the boot path.
+The end state is that the [[Service Coordination|coordinator]] builds executables in memory itself -- ELF, Mach-O, or any other format -- using builder primitives: create an empty task, map VMO ranges into it through region delegation, start a thread at an entry point.
+The kernel then parses ELF only to load the coordinator, and does not need to understand every executable format.
+See [[Service Coordination#The loader trajectory]].
 
 ## Service Discovery
-Discovery of available services is open and queryable.
-Any task can see what services exist on the system.
-The security boundary is at access, not knowledge.
-Opening a channel to a service requires the right capabilities, and the rights on the resulting handle determine what operations are permitted.
+The kernel provides no service naming.
+A task reaches a named service through the [[Service Coordination|coordinator]] -- its parent -- over the bootstrap channel it was born holding.
+The security boundary is at access, not knowledge: the coordinator decides who connects to what, and the rights on the handed-over channel end determine what operations are permitted.
 
-The kernel brokers service introductions because it already tracks the type-to-server mapping through the [[Object Model#Type Registration|type registry]].
-This is a natural consequence of the [[Object Transaction Programs|OTP system]] -- the kernel must know about registered types to execute programs on their behalf.
+A kernel-side type-to-server mapping arrives later with the [[Object Model#Type Registration|type registry]] and [[Object Transaction Programs|OTP system]]; it will route operations on typed objects, not introductions.
+
+## Termination
+A task dies in one of three ways: its last thread exits, it faults fatally, or someone kills it through its task handle.
+Kill is the first type-specific handle operation -- it requires a task-typed handle with the right to terminate.
+
+Kill is asynchronous and unrefusable: the task is marked, each of its threads is forced onto the exit path at its next kernel boundary, and threads blocked in the kernel are woken to exit rather than resume.
+The task never executes another user instruction after the mark is observed.
+
+Every death converges on the same teardown, and death is observable two ways:
+- The task object asserts a `TERMINATED` signal, so any holder of the task handle can wait on it or bind it to a [[IPC Primitives#Ports|port]].
+- Closing the handle table hangs up the task's channels, so peers see `PEER_CLOSED` without holding a task handle.
+
+Exit carries a status: the exit syscall takes one, the C runtime forwards main's return value, and a kill stores a killed marker instead.
+The status is recorded on the task object and readable through the task handle after `TERMINATED` asserts.
 
 ## Teardown
 A task being torn down means all its threads are already dead.

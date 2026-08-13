@@ -1,5 +1,6 @@
 #include <abi/syscall.h>
 #include <kernel/obj/handle_dispatch.h>
+#include <kernel/sched/user_task.h>
 
 namespace kernel::obj {
 
@@ -33,6 +34,27 @@ uint64_t op_info(op_context& ctx) {
     return static_cast<uint64_t>(ctx.verified.object->type_id()) | (static_cast<uint64_t>(ctx.verified.rights) << 32);
 }
 
+// The first type-specific operations: the pipeline has already verified the handle names a task,
+// so the casts here are the safe kind the expected-type column exists to make safe.
+
+uint64_t op_task_kill(op_context& ctx) {
+#if defined(ARCH_X86_64) || defined(ARCH_RISCV64)
+    auto task   = ktl::static_ref_cast<kernel::sched::Task>(ctx.verified.object);
+    auto killed = kernel::sched::task_kill(task);
+    return killed.is_ok() ? 0 : errc_of(killed.unwrap_err());
+#else
+    // Hosted builds link no scheduler to kill through; the verify path above is still exercised.
+    (void)ctx;
+    return errc_of(ktl::errc::invalid_operation);
+#endif
+}
+
+uint64_t op_task_status(op_context& ctx) {
+    auto task = ktl::static_ref_cast<kernel::sched::Task>(ctx.verified.object);
+    if (task->state() != kernel::sched::task_state::TERMINATED) { return errc_of(ktl::errc::would_block); }
+    return task->exit_code();
+}
+
 // One row per handle syscall: the operation cannot run without passing the pipeline with exactly
 // these requirements. expected_type INVALID means any type -- every operation so far is generic,
 // but the column is what a task- or thread-specific operation will fill in.
@@ -47,6 +69,8 @@ constexpr op_spec OPS[] = {
     {sys::SYS_HANDLE_CLOSE, type_ids::INVALID, 0, op_close},
     {sys::SYS_HANDLE_DUPLICATE, type_ids::INVALID, RIGHT_DUPLICATE, op_duplicate},
     {sys::SYS_OBJ_INFO, type_ids::INVALID, 0, op_info},
+    {sys::SYS_TASK_KILL, type_ids::TASK, RIGHT_WRITE, op_task_kill},
+    {sys::SYS_TASK_STATUS, type_ids::TASK, RIGHT_READ, op_task_status},
 };
 
 }  // namespace

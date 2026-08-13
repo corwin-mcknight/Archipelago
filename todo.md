@@ -1,7 +1,7 @@
 # TODO
 
 ## Next Up
-- Capability-aware routing and the service protocol: the first cross-task server exists (`srv/echo`, port event loop, wired to init by a creator-composed channel pair), so dispatch is demonstrated; the open design piece is message schemas, how a program obtains a channel to a *named* service rather than an endowed one, and policy (see `docs/Design/IPC Primitives.md` and `docs/Design/Object Model.md`).
+- Standard streams (`docs/Design/Standard Streams.md`): the socket primitive (kernel byte-stream pair, rights-directional, port-bindable, no handle slots), the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. Natural slices: kernel socket object + syscalls + tests; coordinator/crt stdio wiring; the console server program with selftest coverage.
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
@@ -122,8 +122,8 @@
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
 ## Task & Thread Lifecycle
-- Implement task-kill and exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals).
-- `SYS_EXIT` carries no status argument, so `lib/crt`'s `_start` discards main's return value. When the exit syscall grows a status, `__crt_start` forwards it and observers need somewhere to read it (task object info, or the parent's mailbox).
+- Implement exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals); task-kill, exit status, and the TERMINATED signal landed with the lifecycle slice.
+- Kill's compute-loop backstop exits from the deferred-preemption hook only when no syscall is in flight; a killed thread blocked on a contended kernel mutex busy-waits (bounded by preemption) instead of parking, an accepted cost of refusing signal-wait parks after the kill scan.
 - ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):
     - No `ET_DYN`/PIE support, which is the prerequisite for user-space ASLR; relocation processing is a milestone of its own.
     - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.
@@ -144,9 +144,14 @@
 - Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
 - Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
-- The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end only as today's sole creator, as `Task::mailbox()`). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
-- Define service discovery, registration, and policy enforcement for core daemons.
-- Design input and output. There are no files and there will be no file-shaped "standard input"/"standard output", so a program needs some other way to reach a device it may write to or read from. The `write` syscall is a debug convenience with no console object behind it and is not the answer; it stays a non-handle debug facility. The open part is how a program holding only its own task and thread handles obtains a channel to a device server, and what that server's interface looks like -- see `docs/Design/Syscall Interface.md`.
+- The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end as `Task::mailbox()` only for the coordinator, its one child; spawned tasks' parent ends live in the spawner's handle table). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
+- Coordinator follow-ups (the register/connect layer itself landed: `sys/init`, `docs/Design/Service Coordination.md`):
+    - Policy is open-with-logging by design; per-program rules (who may register/reach which names) land with manifests, which wait on packaging.
+    - No respawn: the coordinator closes each image VMO after spawning it; keeping them is the restart story, which also needs crash observation policy (it already sees every child's death).
+    - Fixed tables: 8 children/registrations/parked connects, 31-byte names, echo serves 4 clients; a parked connect for a name that never appears parks forever (a negative-reply or timeout opcode is the upgrade).
+    - The coordinator's drain accepts up to 4 handles per message but the protocol only ever carries one; stray handles sent by a child arrive in its table and leak until the child dies.
+    - `bootstrap_extra` creator endowment now has zero callers (the coordinator replaced the endowed-peer wiring); delete it or fold it into spawn as endowment arguments when a spawner first needs it.
+- Device handoff to userspace (`docs/Design/Standard Streams.md` device trajectory): mapping a device VMO into a user address space and interrupt delivery via interrupt objects, the two bricks a real userspace UART driver waits on. Until then the console server drains through the debug write.
 
 ## Storage & Filesystem
 - Implement the package store mount path and signed read-only root filesystem driver.

@@ -29,15 +29,22 @@ void wait_queue::block_if(wait_node& node, uint32_t mask, bool (*should_block)(v
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     kernel::synchronization::preempt_disable();
     m_lock.lock();
-    if (should_block != nullptr && !should_block(ctx)) {
+    // A killed thread must not park on a signal wait: its wake may never come, and the kill scan
+    // that would have claimed it has already run. Mask-0 waits (mutexes) still park -- their wake
+    // is the holder's unlock, which always comes, and refusing them would spin instead. The check
+    // lives under the queue lock so a thread that slipped past the kill scan unparked cannot then
+    // park unnoticed.
+    ktl::ref<Thread> self = current();
+    if ((mask != 0 && self->killed()) || (should_block != nullptr && !should_block(ctx))) {
         m_lock.unlock();
         kernel::synchronization::preempt_enable();
         kernel::arch::restore_interrupts(flags);
         return;
     }
-    ktl::ref<Thread> self = current();
     self->stats().blocks += 1;
     self->set_state(thread_state::BLOCKED);
+    Thread* parked = self.get();
+    parked->set_parked(this, &node);
     node.thread = ktl::move(self);
     node.next   = m_waiters;
     node.prev   = nullptr;
@@ -48,6 +55,7 @@ void wait_queue::block_if(wait_node& node, uint32_t mask, bool (*should_block)(v
     // Interrupts stay off between unlock and the switch: on the single scheduling core nothing
     // can run and wake us in that window.
     schedule_out(switch_reason::BLOCK);
+    parked->set_parked(nullptr, nullptr);
     kernel::arch::restore_interrupts(flags);
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: woke id={0}", current()->id()); }
 }
@@ -164,7 +172,10 @@ uint32_t Object::wait_signals(uint32_t mask) {
     };
     Ctx ctx{this, mask};
     uint32_t cur = signals();
-    while ((cur & mask) == 0) {
+    // A killed thread falls out with whatever signals are current -- block_if refuses to park it,
+    // so looping on would busy-spin. The caller's syscall return is moot; the thread exits at the
+    // syscall boundary.
+    while ((cur & mask) == 0 && !kernel::sched::current()->killed()) {
         // The predicate re-checks under the queue lock; a signal_set that ran between our check
         // and the park either flips the predicate or finds the node via wake_matching.
         m_waiters.block_if(
@@ -188,7 +199,7 @@ uint32_t Object::wait_signals_deadline(uint32_t mask, ktime_t deadline) {
     };
     Ctx ctx{this, mask, deadline};
     uint32_t cur = signals();
-    while ((cur & mask) == 0 && kernel::time::now() < deadline) {
+    while ((cur & mask) == 0 && kernel::time::now() < deadline && !kernel::sched::current()->killed()) {
         // The node lives in this frame and the registry entry points at it; register before
         // parking so the expiry scan can find the node, and unregister after every wake before
         // the next iteration reuses the frame. The predicate re-checks the deadline under the

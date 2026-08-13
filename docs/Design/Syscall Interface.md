@@ -24,18 +24,19 @@ The kernel does not have per-type syscall handlers -- the object model provides 
 ## Non-Handle Syscalls
 A small number of syscalls do not operate on handles:
 - Thread yield and exit
-- Service discovery queries
 - System information queries
 - Debug output
 
 These bypass the three-path pipeline because there is no handle to look up.
+Service discovery is deliberately not in this list: reaching a named service is a conversation with the [[Service Coordination|coordinator]] over the bootstrap channel, not a syscall.
 
 Debug output is a kernel debugging convenience, not the system's I/O mechanism, and there is deliberately no console object or console handle behind it. Real input and output are an open design question -- see below -- and nothing about the debug write should be read as answering it.
 
 ## Input and Output
-Undesigned. This system has no files, and will not grow "standard input" and "standard output" as file-shaped things -- that is a UNIX answer to a question this object model asks differently.
-
-What the existing pieces imply is that a program producing output holds a [[IPC Primitives#Channels|channel]] to a server that owns the device, obtained through service discovery rather than inherited by position at startup, and that bulk data moves by handle rather than by copy. What that means for the ordinary case -- how a program with nothing but its own task and thread handles reaches a place to write to, and what a device server's interface looks like -- is not settled.
+This system has no files, and stdio is not file-shaped: no descriptor numbers, no paths, no open.
+A program's ordinary input and output are [[IPC Primitives#Sockets|socket]] ends endowed at spawn -- see [[Standard Streams]].
+The capability is inherited, but what it names is not a file; the writer holds an object it can write, wait on, and pass along like any other, and bulk data still moves by handle rather than by copy.
+There are no stdio syscalls: writing to output is the ordinary socket write on an ordinary handle, and the console is a userspace server behind some of those handles, not a kernel object.
 
 ## Kernel Non-Blocking Guarantee
 The kernel never blocks on behalf of a caller during IPC.

@@ -4,6 +4,7 @@
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
+#include <kernel/sched/user_task.h>
 #include <kernel/shell/shell.h>
 #include <kernel/time.h>
 
@@ -50,26 +51,27 @@ bool cmdline_has_token(ktl::string_view cmdline, ktl::string_view token) {
     return false;
 }
 
-// Boot mode is a compile-time default that the command line can override at runtime: the
-// "shell" token forces the interactive shell, "noshell" forces a normal boot. The shell can only
-// be entered when it was compiled in (CONFIG_KERNEL_SHELL), so the runtime override only narrows or
-// confirms within that capability.
-bool resolve_shell_boot() {
-    bool shell_boot = CONFIG_KERNEL_SHELL;
-    if (collect().cmdline == nullptr) {
-        g_log.info("boot: no command line; using compile-time boot mode");
-        return shell_boot;
-    }
+// The three boot modes: hand the machine to the operator and hold the boot sequence (SHELL),
+// run both -- shell prompt with the boot sequence proceeding underneath (SHELL_AND_BOOT), or
+// boot straight through with no shell (BOOT).
+enum class boot_mode : uint8_t { BOOT, SHELL, SHELL_AND_BOOT };
+
+// A plain boot is the absence of a request: the shell is entered only when the command line asks
+// for it with "shell" (hold the boot sequence) or "shell+boot" (boot with the prompt alongside),
+// and only when it was compiled in (CONFIG_KERNEL_SHELL).
+boot_mode resolve_boot_mode() {
+    if (collect().cmdline == nullptr) { return boot_mode::BOOT; }
     ktl::string_view cmdline(collect().cmdline);
     g_log.info("boot: command line: \"{0}\"", cmdline);
-    if (cmdline_has_token(cmdline, "noshell")) {
-        g_log.info("boot: command line requested normal boot (noshell)");
-        shell_boot = false;
-    } else if (cmdline_has_token(cmdline, "shell")) {
-        g_log.info("boot: command line requested kernel shell boot (shell)");
-        shell_boot = true;
+    if (cmdline_has_token(cmdline, "shell+boot")) {
+        g_log.info("boot: command line requested shell with background boot (shell+boot)");
+        return boot_mode::SHELL_AND_BOOT;
     }
-    return shell_boot;
+    if (cmdline_has_token(cmdline, "shell")) {
+        g_log.info("boot: command line requested kernel shell boot (shell)");
+        return boot_mode::SHELL;
+    }
+    return boot_mode::BOOT;
 }
 
 }  // namespace
@@ -177,6 +179,25 @@ void init_memory() {
     g_log.info("Slab heap active; early heap serves boot-lifetime allocations only");
 }
 
+bool continue_boot() {
+    // Interrupts-off makes the test-and-set atomic on the single scheduling core, so a `boot
+    // continue` racing late_boot cannot launch two coordinators.
+    static bool s_continued = false;
+    uint64_t flags          = kernel::arch::save_and_disable_interrupts();
+    bool first              = !s_continued;
+    s_continued             = true;
+    kernel::arch::restore_interrupts(flags);
+    if (!first) { return false; }
+
+    auto launched = kernel::sched::launch_coordinator();
+    if (launched.is_err()) {
+        g_log.error("boot: coordinator launch failed");
+    } else {
+        g_log.info("boot: coordinator running (task id={0})", launched.unwrap()->id());
+    }
+    return true;
+}
+
 #if CONFIG_KERNEL_SHELL
 static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 #endif
@@ -211,18 +232,23 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 
     kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");
 
-    bool shell_boot = resolve_shell_boot();
+    boot_mode mode      = resolve_boot_mode();
+    bool entering_shell = false;
 #if CONFIG_KERNEL_SHELL
-    if (shell_boot) {
-        g_log.info("boot: kernel shell boot -- starting shell thread");
+    if (mode != boot_mode::BOOT) {
+        g_log.info("boot: starting kernel shell thread");
         kernel::sched::spawn("kshell", shell_thread_main, nullptr).expect("boot: shell spawn failed");
-    } else {
-        g_log.info("boot: normal boot -- initialization complete");
+        entering_shell = true;
     }
 #else
-    if (shell_boot) { g_log.warn("boot: shell requested but not compiled in (CONFIG_KERNEL_SHELL=0)"); }
-    g_log.info("boot: normal boot -- initialization complete");
+    if (mode != boot_mode::BOOT) { g_log.warn("boot: shell requested but not compiled in (CONFIG_KERNEL_SHELL=0)"); }
 #endif
+
+    // A SHELL boot holds the sequence here for the operator, who resumes it with `boot continue`
+    // -- also what keeps test-harness boots quiet. The other modes (and a shell request the build
+    // cannot honor) continue immediately, with the shell prompt live underneath in SHELL_AND_BOOT.
+    if (mode != boot_mode::SHELL || !entering_shell) { continue_boot(); }
+    g_log.info("boot: initialization complete");
 
     kernel::sched::idle_loop();
 }

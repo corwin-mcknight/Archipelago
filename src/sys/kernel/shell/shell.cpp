@@ -21,7 +21,7 @@ constexpr size_t kMaxArgs           = 16;
 constexpr size_t kHistoryDepth      = 8;
 
 kernel::shell::ShellOutput g_output;
-bool g_boot_continue = false;
+bool g_exit_requested = false;
 
 // Ring of previously accepted lines; g_history_count only grows, so entry i lives at i % depth.
 char g_history[kHistoryDepth][kCommandBufferSize];
@@ -151,7 +151,7 @@ void shell_main() {
     char buffer[kCommandBufferSize];
     ktl::string_view argv[kMaxArgs];
 
-    while (!g_boot_continue) {
+    while (!g_exit_requested) {
         if (g_output.protocol_mode()) {
             g_output.event("{{\"event\":\"ready\",\"protocol\":2}}");
         } else {
@@ -172,7 +172,7 @@ void run_line(const char* line, ShellOutput& output) {
 
 ShellOutput& shell_output() { return g_output; }
 
-void request_boot_continue() { g_boot_continue = true; }
+void request_exit() { g_exit_requested = true; }
 
 }  // namespace kernel::shell
 

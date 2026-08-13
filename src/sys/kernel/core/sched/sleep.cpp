@@ -46,6 +46,13 @@ void sleep_ticks(uint64_t ticks) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
     auto& c        = cur_cpu();
     assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
+    // A killed thread must not enter the sleeper list: its deadline could be arbitrarily far out,
+    // and the kill scan that wakes sleepers early has already run. Checked with interrupts off so
+    // a kill cannot slip between the check and the park; the thread exits at the syscall boundary.
+    if (c.current->killed()) {
+        kernel::arch::restore_interrupts(flags);
+        return;
+    }
     c.current->stats().sleeps += 1;
     c.current->set_state(thread_state::BLOCKED);
     bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
@@ -67,6 +74,17 @@ void wake_due_sleepers() {
 }
 
 size_t sleeper_count() { return g_sleepers.size(); }
+
+bool wake_sleeper(Thread* thread) {
+    for (size_t i = 0; i < g_sleepers.size(); i++) {
+        if (g_sleepers[i].thread.get() != thread) { continue; }
+        ktl::ref<Thread> woken = ktl::move(g_sleepers[i].thread);
+        g_sleepers.swap_remove(i);
+        make_ready(ktl::move(woken));
+        return true;
+    }
+    return false;
+}
 
 bool sleepers_reserve(size_t capacity) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
