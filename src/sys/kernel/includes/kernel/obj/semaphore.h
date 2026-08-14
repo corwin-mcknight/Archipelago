@@ -17,7 +17,8 @@ class Semaphore : public Object {
 
     explicit Semaphore(uint32_t initial_count = 1) : Object(TYPE_ID), m_count(initial_count) {}
 
-    /// Blocks until a unit is available. Kernel-only (defined in core/sched/wait_queue.cpp).
+    /// Blocks until a unit is available; returns without one if the calling thread has been
+    /// killed. Kernel-only (defined in core/sched/wait_queue.cpp).
     void acquire();
     /// Releases one unit and wakes one blocked acquirer. Kernel-only.
     void release();

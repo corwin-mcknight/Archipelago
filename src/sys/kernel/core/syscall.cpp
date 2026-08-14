@@ -79,6 +79,11 @@ uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1) {
 
 uint64_t errc_of(ktl::errc error) { return static_cast<uint64_t>(error); }
 
+// The installed error codes in <abi/syscall.h> are spelled as literals there; pin each to its
+// kernel-internal value so the two cannot drift.
+static_assert(static_cast<int64_t>(ktl::errc::truncated) == ::abi::syscall::ERR_TRUNCATED);
+static_assert(static_cast<int64_t>(ktl::errc::timed_out) == ::abi::syscall::ERR_TIMED_OUT);
+
 // Copy between a pre-validated IPC buffer range and contiguous kernel memory, page run by page
 // run -- the backing frames are not physically contiguous. Callers check contains() first.
 void buffer_write(const kernel::sched::ipc_buffer& buffer, uint64_t offset, const void* src, size_t length) {
@@ -366,11 +371,15 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_EXIT: {
             // Record the status before the thread is unreachable. Task zero records nothing: a
             // kernel-context test driving SYS_EXIT is exiting a thread, not ending the kernel.
-            auto self = kernel::sched::current();
-            if (self) {
-                auto task = calling_task(self);
-                if (task.get() != kernel::sched::kernel_task().get()) {
-                    task->record_exit(kernel::syscall::TASK_EXIT_EXITED, static_cast<uint32_t>(a0));
+            // The refs are scoped: exit_current() abandons this stack without unwinding, so a
+            // ref still live here would leak the Thread and pin its Task forever.
+            {
+                auto self = kernel::sched::current();
+                if (self) {
+                    auto task = calling_task(self);
+                    if (task.get() != kernel::sched::kernel_task().get()) {
+                        task->record_exit(kernel::syscall::TASK_EXIT_EXITED, static_cast<uint32_t>(a0));
+                    }
                 }
             }
             kernel::synchronization::syscall_exit();
@@ -394,14 +403,21 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_PORT_UNBIND: ret = sys_port_unbind(a0, a1); break;
         case kernel::syscall::SYS_PORT_WAIT: ret = sys_port_wait(a0, a1, a2); break;
         case kernel::syscall::SYS_TASK_SPAWN: ret = sys_task_spawn(a0, a1); break;
-        default: kernel::synchronization::syscall_exit(); return static_cast<uint64_t>(-1);
+        // Unknown numbers fall through to the kill boundary like every other exit path -- an
+        // early return here would let a killed thread slip back to user code.
+        default: ret = static_cast<uint64_t>(-1); break;
     }
     // The kill boundary: a thread marked while it was in (or entering) this syscall exits here
     // instead of returning to user code. Every kernel lock is released by now, which is what makes
-    // this the one safe place to exit a thread that was interrupted mid-operation.
+    // this the one safe place to exit a thread that was interrupted mid-operation. The ref is
+    // dropped before exit_current() abandons this stack (see SYS_EXIT above).
     {
-        auto self = kernel::sched::current();
-        if (self && self->killed()) {
+        bool exit_now = false;
+        {
+            auto self = kernel::sched::current();
+            exit_now  = self && self->killed();
+        }
+        if (exit_now) {
             kernel::synchronization::syscall_exit();
             kernel::sched::exit_current();
         }

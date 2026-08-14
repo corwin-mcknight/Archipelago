@@ -5,31 +5,20 @@
 
 #include <ktl/ref>
 #include <ktl/result>
-#include <ktl/span>
 
 namespace kernel::mm { class vmo; }
 
 namespace kernel::sched {
 
-// A handle the creator endows a new task with, appended to its bootstrap message after the two
-// self-handles (<abi/syscall.h>). This is how a task is wired to anything beyond itself -- a
-// channel to a peer today, a channel to a service later.
-struct bootstrap_extra {
-    ktl::ref<kernel::obj::Object> object;
-    kernel::obj::Rights rights;
-};
-
 // Create and queue a user task running the ELF image in [elf, elf + elf_size). The image is a plain
 // byte span rather than something this layer looks up itself, so where it came from -- a boot
-// module today, a filesystem later -- stays the caller's business. At most two extras fit: the
-// bootstrap message's two leading handles are the self-handles and a message carries four.
+// module today, a filesystem later -- stays the caller's business.
 //
 // The bootstrap channel's parent end goes to exactly one owner, decided before the child can run:
 // null parent_end_out leaves it in Task::mailbox (the kernel-as-parent arrangement), non-null
 // receives it instead -- the spawn path, where the calling task is the parent and the kernel
 // keeps only its owner-of-last-resort task handle.
 ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size,
-                                             ktl::span<const bootstrap_extra> extras        = {},
                                              ktl::ref<kernel::obj::Channel>* parent_end_out = nullptr);
 // Reaper-only teardown after the task's final thread has been removed.
 void teardown_user_task(ktl::ref<Task> task);
@@ -56,8 +45,9 @@ ktl::result<ktl::ref<Task>> launch_coordinator();
 // Mail one IMAGE message (<abi/message.h>) per boot module to `task`'s mailbox: a read-only wired
 // VMO over the module's bytes rides each message, with the exact byte size and the module's role
 // name in the payload. This is how the creator hands a task the images it may spawn from -- boot
-// modules never reach the ABI, only VMOs and names do. Stops at the first failure; messages
-// already mailed stay delivered.
+// modules never reach the ABI, only VMOs and names do. Every module is attempted; each failure is
+// logged with its module's name, the first error is returned, and messages already mailed stay
+// delivered.
 ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task);
 // Kill every thread of `task`: mark each, wake the blocked ones, and let each exit at its next
 // kernel boundary. Asynchronous -- returns once every thread is marked and unblocked, not once the

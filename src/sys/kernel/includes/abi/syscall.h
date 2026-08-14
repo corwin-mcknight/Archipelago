@@ -67,11 +67,18 @@
             offset, arg2 = capacity, arg3 = IPC-buffer offset for       \
             arrived handles, arg4 = handle capacity. Returns the handle \
             count in the high 32 bits and the byte count in the low 32; \
-            a message larger than either capacity fails and stays       \
-            queued. */
+            a message larger than either capacity is consumed and       \
+            discarded (its handles closed) and the recv fails with      \
+            ERR_TRUNCATED, so the next recv sees the next message. */
 
 // The most handles one message can carry.
 #define ABI_CHANNEL_MAX_MESSAGE_HANDLES 4ull
+
+// Error returns a user program must branch on, as signed values of the negative band described at
+// SYS_HANDLE_CLOSE. The full band is still kernel-internal; codes are installed here one by one
+// as programs first need them, and the kernel static_asserts each against its internal value.
+#define ABI_ERR_TRUNCATED (-12ll) /* recv: the front message exceeded a capacity and was discarded */
+#define ABI_ERR_TIMED_OUT (-15ll) /* a bounded wait lapsed */
 
 // arg0 = handle (needs the wait right), arg1 = signal mask, arg2 = timeout in nanoseconds. A
 // nonzero mask blocks the calling thread until any bit in it is asserted on the object and returns
@@ -172,6 +179,8 @@ constexpr uint64_t SYS_CHANNEL_CREATE          = ABI_SYS_CHANNEL_CREATE;
 constexpr uint64_t SYS_CHANNEL_SEND            = ABI_SYS_CHANNEL_SEND;
 constexpr uint64_t SYS_CHANNEL_RECV            = ABI_SYS_CHANNEL_RECV;
 constexpr uint64_t CHANNEL_MAX_MESSAGE_HANDLES = ABI_CHANNEL_MAX_MESSAGE_HANDLES;
+constexpr int64_t ERR_TRUNCATED                = ABI_ERR_TRUNCATED;
+constexpr int64_t ERR_TIMED_OUT                = ABI_ERR_TIMED_OUT;
 constexpr uint64_t SYS_OBJECT_WAIT             = ABI_SYS_OBJECT_WAIT;
 constexpr uint64_t SYS_PORT_CREATE             = ABI_SYS_PORT_CREATE;
 constexpr uint64_t SYS_PORT_BIND               = ABI_SYS_PORT_BIND;

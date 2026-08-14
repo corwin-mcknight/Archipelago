@@ -19,4 +19,4 @@ pkg_build:
 pkg_install:
 	@echo "[plume] Installing $(CATEGORY)/$(P)"
 	mkdir -p $(D)/boot
-	cp $(OBJ_DIR)/echo.elf $(D)/boot/echo.elf
+	cp $(OBJ_DIR)/$(PN).elf $(D)/boot/$(PN).elf

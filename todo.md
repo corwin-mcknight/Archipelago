@@ -129,6 +129,7 @@
     - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.
     - `MAX_SEGMENTS` is a fixed 8, chosen for static binaries; a real toolchain image with more loadable segments would be refused.
     - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image; first-fit virtual address search is a VMM to-do.
+    - `task_spawn` checks the ELF magic on page 0 before committing the whole image, but an image that then fails contiguity or full parsing keeps its frames committed until the VMO dies -- bounded and idempotent, and free for today's wired VMOs, but a VMO decommit path belongs with the first userspace-supplied VMO reaching spawn.
     - `PT_GNU_STACK` is ignored -- the stack is mapped `READ|WRITE` unconditionally.
     - `e_phentsize` is accepted at any value at or above `sizeof(Elf64_Phdr)`, but only entry 0's alignment is checked, so a stride that is not a multiple of 8 misaligns every later header -- the UB the existing alignment check exists to prevent, and invisible to ASan. Require the stride to be a multiple of the alignment.
     - `entry_covered` ignores segment flags, so an entry point inside a non-executable segment parses clean and faults on the first instruction fetch.
@@ -149,8 +150,7 @@
     - Policy is open-with-logging by design; per-program rules (who may register/reach which names) land with manifests, which wait on packaging.
     - No respawn: the coordinator closes each image VMO after spawning it; keeping them is the restart story, which also needs crash observation policy (it already sees every child's death).
     - Fixed tables: 8 children/registrations/parked connects, 31-byte names, echo serves 4 clients; a parked connect for a name that never appears parks forever (a negative-reply or timeout opcode is the upgrade).
-    - The coordinator's drain accepts up to 4 handles per message but the protocol only ever carries one; stray handles sent by a child arrive in its table and leak until the child dies.
-    - `bootstrap_extra` creator endowment now has zero callers (the coordinator replaced the endowed-peer wiring); delete it or fold it into spawn as endowment arguments when a spawner first needs it.
+    - `endow_boot_modules` can mail at most `Channel::QUEUE_DEPTH` (8) IMAGE messages before the coordinator first drains; failures now name their module in the log, but chunking or retrying against the queue depth is still needed once a target ships more modules than that.
 - Device handoff to userspace (`docs/Design/Standard Streams.md` device trajectory): mapping a device VMO into a user address space and interrupt delivery via interrupt objects, the two bricks a real userspace UART driver waits on. Until then the console server drains through the debug write.
 
 ## Storage & Filesystem

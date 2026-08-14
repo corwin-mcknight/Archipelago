@@ -144,8 +144,9 @@ class Channel : public Object {
     ktl::result<void> write(MessageBuffer message);
 
     // Dequeue this endpoint's front message. truncated if it exceeds max_bytes or carries more
-    // handles than max_handles (the message stays queued), would_block if the queue is empty,
-    // peer_closed if it is empty and can never refill.
+    // handles than max_handles -- the message is consumed and discarded (its handles closed), so
+    // the next read sees the next message. would_block if the queue is empty, peer_closed if it
+    // is empty and can never refill.
     ktl::result<MessageBuffer> read(size_t max_bytes, size_t max_handles = MessageBuffer::MAX_HANDLES);
 
     // DUPLICATE is deliberately outside the valid mask: an endpoint handle is move-only. Two

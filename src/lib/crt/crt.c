@@ -86,6 +86,37 @@ size_t sys_stage(size_t offset, const char* s) {
 
 uint64_t sys_print(const char* s) { return sys_write(0, sys_stage(0, s)); }
 
+void sys_copy_in(void* to, size_t offset, size_t length) {
+    for (size_t i = 0; i < length; i++) { ((char*)to)[i] = g_ipc_base[offset + i]; }
+}
+
+void sys_copy_out(size_t offset, const void* from, size_t length) {
+    for (size_t i = 0; i < length; i++) { g_ipc_base[offset + i] = ((const char*)from)[i]; }
+}
+
+int sys_channel_drain(uint64_t channel, uint64_t msg_at, uint64_t msg_cap, uint64_t handles_at, uint64_t handle_cap,
+                      void (*consume)(void* ctx, uint64_t result), void* ctx) {
+    for (;;) {
+        uint64_t got = sys_channel_recv(channel, msg_at, msg_cap, handles_at, handle_cap);
+        // An oversized message was consumed and discarded by the kernel; keep draining what is
+        // behind it. Any other error means the queue is exhausted.
+        if ((int64_t)got == ABI_ERR_TRUNCATED) { continue; }
+        if (sys_is_error(got)) { break; }
+        consume(ctx, got);
+    }
+    uint64_t sig = sys_object_wait(channel, 0, 0);
+    return (sig & ABI_CHANNEL_SIGNAL_PEER_CLOSED) != 0 && (sig & ABI_CHANNEL_SIGNAL_READABLE) == 0;
+}
+
+void sys_close_arrived(uint64_t result, uint64_t handles_at) {
+    size_t count = (size_t)(result >> 32);
+    for (size_t i = 0; i < count; i++) {
+        uint64_t handle;
+        sys_copy_in(&handle, handles_at + i * sizeof(handle), sizeof(handle));
+        (void)sys_handle_close(handle);
+    }
+}
+
 uint64_t sys_channel_create(uint64_t offset) { return syscall1(ABI_SYS_CHANNEL_CREATE, offset); }
 uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uint64_t handles_offset,
                           uint64_t handle_count) {

@@ -30,7 +30,9 @@ static_assert(sizeof(abi_message_header) == 16, "the envelope is exactly two wor
 // The kernel speaks IMAGE; the rest are the userspace coordinator's. Replies echo the request's
 // opcode and txid, with status 0 for success or a negative error. Names are flat lowercase
 // strings, never nul-terminated on the wire -- a name's length is whatever remains of the message
-// after the fixed part.
+// after the fixed part, at most ABI_COORD_NAME_MAX bytes. The coordinator refuses a longer name
+// (REGISTER/CONNECT reply with a negative status) rather than truncating it, and does not spawn
+// an image whose name exceeds the bound.
 //
 // IMAGE (parent -> task, unsolicited): an executable image the receiver may spawn from. One VMO
 // handle rides the message; the payload after the envelope is abi_image_payload followed by the
@@ -51,6 +53,9 @@ static_assert(sizeof(abi_message_header) == 16, "the envelope is exactly two wor
 #define ABI_COORD_OP_REGISTER 2u
 #define ABI_COORD_OP_CONNECT 3u
 #define ABI_COORD_OP_CONNECTION 4u
+
+// The bound on coordinator names, shared so every program sizes its buffers from one place.
+#define ABI_COORD_NAME_MAX 31u
 
 typedef struct abi_image_payload {
     uint64_t size_bytes; /* exact image size; the VMO covers it rounded up to whole pages */

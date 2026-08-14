@@ -30,7 +30,7 @@ constexpr uint64_t KEY_CHILD_BASE  = 0x100;
 constexpr size_t MAX_CHILDREN      = 8;
 constexpr size_t MAX_REGISTRATIONS = 8;
 constexpr size_t MAX_PENDING       = 8;
-constexpr size_t NAME_CAP          = 31;
+constexpr size_t NAME_CAP          = ABI_COORD_NAME_MAX;
 
 struct child_slot {
     bool used;
@@ -58,16 +58,6 @@ registration g_names[MAX_REGISTRATIONS];
 pending_connect g_pending[MAX_PENDING];
 uint64_t g_port;
 
-void copy_in(void* to, size_t offset, size_t length) {
-    char* ipc = sys_ipc_base();
-    for (size_t i = 0; i < length; i++) { static_cast<char*>(to)[i] = ipc[offset + i]; }
-}
-
-void copy_out(size_t offset, const void* from, size_t length) {
-    char* ipc = sys_ipc_base();
-    for (size_t i = 0; i < length; i++) { ipc[offset + i] = static_cast<const char*>(from)[i]; }
-}
-
 bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
     if (a_len != b_len) { return false; }
     for (size_t i = 0; i < a_len; i++) {
@@ -79,7 +69,7 @@ bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
 // One log line built from a prefix and a length-delimited name: "coord: spawned echo\n".
 void log_name(const char* prefix, const char* name, size_t name_len) {
     size_t at = sys_stage(0, prefix);
-    copy_out(at, name, name_len);
+    sys_copy_out(at, name, name_len);
     sys_ipc_base()[at + name_len] = '\n';
     sys_write(0, at + name_len + 1);
 }
@@ -89,9 +79,9 @@ void log_name(const char* prefix, const char* name, size_t name_len) {
 uint64_t send_message(uint64_t channel, uint32_t opcode, uint32_t status, uint64_t txid, const char* name,
                       size_t name_len, const uint64_t* handle) {
     abi_message_header header{opcode, status, txid};
-    copy_out(0, &header, sizeof(header));
-    if (name_len != 0) { copy_out(sizeof(header), name, name_len); }
-    if (handle != nullptr) { copy_out(HANDLE_AT, handle, sizeof(*handle)); }
+    sys_copy_out(0, &header, sizeof(header));
+    if (name_len != 0) { sys_copy_out(sizeof(header), name, name_len); }
+    if (handle != nullptr) { sys_copy_out(HANDLE_AT, handle, sizeof(*handle)); }
     return sys_channel_send(channel, 0, sizeof(header) + name_len, HANDLE_AT, handle != nullptr ? 1 : 0);
 }
 
@@ -107,7 +97,7 @@ void serve_connect(size_t requester, uint64_t txid, const char* name, size_t nam
                            nullptr, 0, nullptr);
         return;
     }
-    copy_in(ends, PAIR_AT, sizeof(ends));
+    sys_copy_in(ends, PAIR_AT, sizeof(ends));
 
     if (sys_is_error(send_message(g_children[server].mailbox, ABI_COORD_OP_CONNECTION, 0, 0, name, name_len,
                                   &ends[0]))) {
@@ -140,8 +130,14 @@ void serve_pending(const char* name, size_t name_len, size_t server) {
 // for.
 void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
     char name[NAME_CAP];
-    if (name_len > NAME_CAP) { name_len = NAME_CAP; }
-    copy_in(name, name_at, name_len);
+    if (name_len > NAME_CAP) {
+        // Refused rather than truncated: a child spawned under a shortened identity would then
+        // have its own full-name REGISTER refused, and two long module names could collide.
+        sys_print("coord: IMAGE NAME TOO LONG; not spawned\n");
+        (void)sys_handle_close(vmo);
+        return;
+    }
+    sys_copy_in(name, name_at, name_len);
 
     if (name_equal(name, name_len, "init", 4)) {
         (void)sys_handle_close(vmo);
@@ -163,7 +159,7 @@ void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
     (void)sys_handle_close(vmo);
 
     uint64_t handles[2];
-    copy_in(handles, SPAWN_AT, sizeof(handles));
+    sys_copy_in(handles, SPAWN_AT, sizeof(handles));
     g_children[slot].used     = true;
     g_children[slot].task     = handles[0];
     g_children[slot].mailbox  = handles[1];
@@ -172,21 +168,37 @@ void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
 
     if (sys_is_error(sys_port_bind(g_port, g_children[slot].mailbox, KEY_CHILD_BASE + slot,
                                    ABI_CHANNEL_SIGNAL_READABLE | ABI_CHANNEL_SIGNAL_PEER_CLOSED))) {
+        // An unbound child is unservable and its death unobservable; kill it and free the slot
+        // rather than leaking both for the coordinator's lifetime.
         log_name("coord: BIND FAILED ", name, name_len);
+        (void)sys_task_kill(g_children[slot].task);
+        (void)sys_handle_close(g_children[slot].task);
+        (void)sys_handle_close(g_children[slot].mailbox);
+        g_children[slot].used = false;
         return;
     }
     log_name("coord: spawned ", name, name_len);
 }
 
 void handle_child_message(size_t slot, uint64_t recv_result) {
+    // No coordinator request carries a handle; whatever rode in must not squat in our table.
+    sys_close_arrived(recv_result, ARRIVE_AT);
     size_t size = recv_result & 0xFFFFFFFF;
     if (size < sizeof(abi_message_header)) { return; }
     abi_message_header header;
-    copy_in(&header, MSG_AT, sizeof(header));
+    sys_copy_in(&header, MSG_AT, sizeof(header));
     size_t name_len = size - sizeof(header);
-    if (name_len > NAME_CAP) { return; }
+    if (name_len > NAME_CAP) {
+        // Over the ABI bound: refuse with a reply rather than dropping silently, so a requester
+        // blocked on the txid hears back instead of hanging forever.
+        if (header.opcode == ABI_COORD_OP_REGISTER || header.opcode == ABI_COORD_OP_CONNECT) {
+            (void)send_message(g_children[slot].mailbox, header.opcode, static_cast<uint32_t>(-10), header.txid,
+                               nullptr, 0, nullptr);
+        }
+        return;
+    }
     char name[NAME_CAP];
-    copy_in(name, MSG_AT + sizeof(header), name_len);
+    sys_copy_in(name, MSG_AT + sizeof(header), name_len);
 
     if (header.opcode == ABI_COORD_OP_REGISTER) {
         for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
@@ -261,19 +273,6 @@ void child_gone(size_t slot) {
     g_children[slot].used = false;
 }
 
-// Drain a channel to exhaustion through `consume`; afterwards, report whether it is gone for good
-// (hung up with nothing left to read).
-template <typename F>
-bool drain(uint64_t channel, F consume) {
-    for (;;) {
-        uint64_t got = sys_channel_recv(channel, MSG_AT, MSG_CAP, ARRIVE_AT, 4);
-        if (sys_is_error(got)) { break; }
-        consume(got);
-    }
-    uint64_t sig = sys_object_wait(channel, 0, 0);
-    return (sig & ABI_CHANNEL_SIGNAL_PEER_CLOSED) != 0 && (sig & ABI_CHANNEL_SIGNAL_READABLE) == 0;
-}
-
 }  // namespace
 
 extern "C" int main() {
@@ -300,29 +299,39 @@ extern "C" int main() {
             return 1;
         }
         uint64_t key;
-        copy_in(&key, PACKET_AT, sizeof(key));
+        sys_copy_in(&key, PACKET_AT, sizeof(key));
 
         if (key == KEY_SELF) {
             // Our own mailbox: IMAGE messages from the kernel. A hangup here would mean the
             // kernel dropped our parent end, which it never does; keep serving regardless.
-            (void)drain(abi::syscall::BOOTSTRAP_HANDLE, [](uint64_t result) {
-                size_t size = result & 0xFFFFFFFF;
-                if ((result >> 32) != 1 || size < sizeof(abi_message_header) + sizeof(abi_image_payload)) {
-                    return;
-                }
-                abi_message_header header;
-                copy_in(&header, MSG_AT, sizeof(header));
-                if (header.opcode != ABI_COORD_OP_IMAGE) { return; }
-                uint64_t vmo;
-                copy_in(&vmo, ARRIVE_AT, sizeof(vmo));
-                size_t fixed = sizeof(abi_message_header) + sizeof(abi_image_payload);
-                handle_image(vmo, MSG_AT + fixed, size - fixed);
-            });
+            (void)sys_channel_drain(
+                abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, MSG_CAP, ARRIVE_AT, 4,
+                [](void*, uint64_t result) {
+                    size_t size = result & 0xFFFFFFFF;
+                    abi_message_header header{};
+                    if ((result >> 32) == 1 && size >= sizeof(abi_message_header) + sizeof(abi_image_payload)) {
+                        sys_copy_in(&header, MSG_AT, sizeof(header));
+                    }
+                    if (header.opcode != ABI_COORD_OP_IMAGE) {
+                        // Malformed mail: whatever handles rode it must not squat in our table.
+                        sys_close_arrived(result, ARRIVE_AT);
+                        return;
+                    }
+                    uint64_t vmo;
+                    sys_copy_in(&vmo, ARRIVE_AT, sizeof(vmo));
+                    size_t fixed = sizeof(abi_message_header) + sizeof(abi_image_payload);
+                    handle_image(vmo, MSG_AT + fixed, size - fixed);
+                },
+                nullptr);
         } else if (key >= KEY_CHILD_BASE && key < KEY_CHILD_BASE + MAX_CHILDREN) {
             size_t slot = static_cast<size_t>(key - KEY_CHILD_BASE);
             if (!g_children[slot].used) { continue; }
-            bool gone = drain(g_children[slot].mailbox,
-                              [slot](uint64_t result) { handle_child_message(slot, result); });
+            bool gone = sys_channel_drain(
+                            g_children[slot].mailbox, MSG_AT, MSG_CAP, ARRIVE_AT, 4,
+                            [](void* ctx, uint64_t result) {
+                                handle_child_message(*static_cast<size_t*>(ctx), result);
+                            },
+                            &slot) != 0;
             if (gone) { child_gone(slot); }
         }
     }

@@ -119,18 +119,21 @@ KTEST_CASE(obj_channel_full_queue_flow_control) {
     KTEST_EXPECT_TRUE(pair.first->write(message_of("fits now")).is_ok());
 }
 
-// A message wider than the reader's capacity fails with truncated and stays queued, so the caller
-// can retry with room; the retry delivers the same message intact.
-KTEST_CASE(obj_channel_truncated_read_keeps_message) {
+// A message wider than the reader's capacity fails with truncated and is discarded -- leaving it
+// queued would wedge the endpoint behind a message nobody can receive -- so the next read moves
+// on to the next message, and READABLE clears once the queue is empty.
+KTEST_CASE(obj_channel_truncated_read_discards_message) {
     KTEST_UNWRAP(pair, Channel::create());
     KTEST_REQUIRE_TRUE(pair.first->write(message_of("twelve bytes")).is_ok());
+    KTEST_REQUIRE_TRUE(pair.first->write(message_of("next")).is_ok());
 
     auto small = pair.second->read(4);
     KTEST_EXPECT_ALL(small.is_err(), small.unwrap_err() == ktl::errc::truncated);
     KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) != 0);
 
-    KTEST_UNWRAP(whole, pair.second->read(64));
-    KTEST_EXPECT_TRUE(payload_equals(whole, "twelve bytes"));
+    KTEST_UNWRAP(next, pair.second->read(64));
+    KTEST_EXPECT_TRUE(payload_equals(next, "next"));
+    KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) == 0);
 }
 
 // Dropping one endpoint: the survivor sees PEER_CLOSED and loses WRITABLE, writes fail with
@@ -154,23 +157,30 @@ KTEST_CASE(obj_channel_peer_close) {
 }
 
 // Handle escrow: a message owns kernel-table entries for handles in transit. They ride FIFO with
-// the payload, a reader without room for them cannot dequeue the message, and detaching hands
-// them onward with rights intact and the kernel table back at its baseline.
+// the payload, a reader without room for them discards the message (closing its handles in the
+// kernel table), and detaching hands them onward with rights intact and the kernel table back at
+// its baseline.
 KTEST_CASE(obj_channel_escrow_rides_message) {
     auto& escrow    = kernel::sched::kernel_task()->handles();
     size_t baseline = escrow.count();
 
     KTEST_UNWRAP(pair, Channel::create());
-    bool destroyed = false;
-    KTEST_UNWRAP(cargo, escrow.emplace<TestObjA>(RIGHT_READ, &destroyed));
-
-    auto msg = message_of("with cargo");
-    KTEST_REQUIRE_TRUE(msg.attach_handle(cargo));
-    KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(msg)).is_ok());
+    bool lost = false;
+    KTEST_UNWRAP(doomed, escrow.emplace<TestObjA>(RIGHT_READ, &lost));
+    auto no_room = message_of("no room for cargo");
+    KTEST_REQUIRE_TRUE(no_room.attach_handle(doomed));
+    KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(no_room)).is_ok());
 
     auto refused = pair.second->read(64, 0);
     KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::truncated);
-    KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) != 0);
+    KTEST_EXPECT_ALL(lost, escrow.count() == baseline);
+    KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) == 0);
+
+    bool destroyed = false;
+    KTEST_UNWRAP(cargo, escrow.emplace<TestObjA>(RIGHT_READ, &destroyed));
+    auto msg = message_of("with cargo");
+    KTEST_REQUIRE_TRUE(msg.attach_handle(cargo));
+    KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(msg)).is_ok());
 
     KTEST_UNWRAP(arrived, pair.second->read(64));
     KTEST_EXPECT_ALL(payload_equals(arrived, "with cargo"), arrived.handle_count() == 1);

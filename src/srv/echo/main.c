@@ -25,51 +25,40 @@
 static uint64_t g_port;
 static uint64_t g_clients[MAX_CLIENTS];
 static int g_client_used[MAX_CLIENTS];
+static int g_refused;
 
-static void copy_in(void* to, size_t offset, size_t length) {
-    char* ipc = sys_ipc_base();
-    for (size_t i = 0; i < length; i++) { ((char*)to)[i] = ipc[offset + i]; }
-}
-
-static void copy_out(size_t offset, const void* from, size_t length) {
-    char* ipc = sys_ipc_base();
-    for (size_t i = 0; i < length; i++) { ipc[offset + i] = ((const char*)from)[i]; }
-}
-
-// Drain a channel: every queued message through `consume`, stopping at the first recv failure --
-// empty queue and hung-up-and-empty look the same here, and the signal poll afterwards is what
-// distinguishes them. Returns 1 if the endpoint is exhausted for good (peer gone, queue empty).
-static int drain(uint64_t channel, void (*consume)(uint64_t channel, uint64_t result)) {
-    for (;;) {
-        uint64_t got = sys_channel_recv(channel, MSG_AT, MSG_CAP, ARRIVE_AT, 1);
-        if (sys_is_error(got)) { break; }
-        consume(channel, got);
-    }
-    uint64_t sig = sys_object_wait(channel, 0, 0);
-    return (sig & ABI_CHANNEL_SIGNAL_PEER_CLOSED) != 0 && (sig & ABI_CHANNEL_SIGNAL_READABLE) == 0;
-}
-
-static void echo_back(uint64_t channel, uint64_t result) {
-    sys_channel_send(channel, MSG_AT, result & 0xFFFFFFFF, 0, 0);
+// Echo the bytes back; any handle a client attached is closed, not kept -- an echo reply carries
+// bytes only, and an unclosed arrival would grow our handle table by one entry per message.
+static void echo_back(void* ctx, uint64_t result) {
+    sys_close_arrived(result, ARRIVE_AT);
+    sys_channel_send(*(const uint64_t*)ctx, MSG_AT, result & 0xFFFFFFFF, 0, 0);
 }
 
 // Parent mail: the registration reply, and CONNECTION messages carrying a new client's channel
-// end. Anything else is ignored.
-static void parent_mail(uint64_t channel, uint64_t result) {
-    (void)channel;
+// end. Anything else is ignored, its stray handles closed.
+static void parent_mail(void* ctx, uint64_t result) {
+    (void)ctx;
     size_t size = result & 0xFFFFFFFF;
-    if (size < sizeof(abi_message_header)) { return; }
-    abi_message_header header;
-    copy_in(&header, MSG_AT, sizeof(header));
+    abi_message_header header = {0, 0, 0};
+    if (size >= sizeof(header)) { sys_copy_in(&header, MSG_AT, sizeof(header)); }
 
     if (header.opcode == ABI_COORD_OP_REGISTER && header.txid == REGISTER_TXID) {
-        sys_print(header.status == 0 ? "echo: registered\n" : "echo: REGISTER REFUSED\n");
+        sys_close_arrived(result, ARRIVE_AT);
+        if (header.status != 0) {
+            sys_print("echo: REGISTER REFUSED\n");
+            g_refused = 1;
+            return;
+        }
+        sys_print("echo: registered\n");
         return;
     }
-    if (header.opcode != ABI_COORD_OP_CONNECTION || (result >> 32) != 1) { return; }
+    if (header.opcode != ABI_COORD_OP_CONNECTION || (result >> 32) != 1) {
+        sys_close_arrived(result, ARRIVE_AT);
+        return;
+    }
 
     uint64_t client;
-    copy_in(&client, ARRIVE_AT, sizeof(client));
+    sys_copy_in(&client, ARRIVE_AT, sizeof(client));
     for (size_t i = 0; i < MAX_CLIENTS; i++) {
         if (g_client_used[i]) { continue; }
         if (sys_is_error(sys_port_bind(g_port, client, KEY_CLIENT_BASE + i,
@@ -104,7 +93,7 @@ int main(void) {
     // never hears back and serves nothing, forever.
     {
         abi_message_header reg = {ABI_COORD_OP_REGISTER, 0, REGISTER_TXID};
-        copy_out(0, &reg, sizeof(reg));
+        sys_copy_out(0, &reg, sizeof(reg));
         size_t name_len = sys_stage(sizeof(reg), "echo");
         sys_channel_send(ABI_BOOTSTRAP_HANDLE, 0, sizeof(reg) + name_len, 0, 0);
     }
@@ -116,17 +105,18 @@ int main(void) {
             return 1;
         }
         uint64_t key;
-        copy_in(&key, PACKET_AT, sizeof(key));
+        sys_copy_in(&key, PACKET_AT, sizeof(key));
 
         if (key == KEY_PARENT) {
-            if (drain(ABI_BOOTSTRAP_HANDLE, parent_mail)) {
+            if (sys_channel_drain(ABI_BOOTSTRAP_HANDLE, MSG_AT, MSG_CAP, ARRIVE_AT, 4, parent_mail, 0)) {
                 sys_print("echo: orphaned\n");
                 return 0;
             }
+            if (g_refused) { return 1; }
         } else if (key >= KEY_CLIENT_BASE && key < KEY_CLIENT_BASE + MAX_CLIENTS) {
             size_t slot = (size_t)(key - KEY_CLIENT_BASE);
             if (!g_client_used[slot]) { continue; }
-            if (drain(g_clients[slot], echo_back)) {
+            if (sys_channel_drain(g_clients[slot], MSG_AT, MSG_CAP, ARRIVE_AT, 1, echo_back, &g_clients[slot])) {
                 sys_port_unbind(g_port, key);
                 sys_handle_close(g_clients[slot]);
                 g_client_used[slot] = 0;

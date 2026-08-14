@@ -78,10 +78,8 @@ extern "C" int main() {
         constexpr size_t ARRIVED_AT = 512;  // where recv lands the endowed handles
         uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
         bool ok      = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
-        for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(&self_task)[i]   = ipc[ARRIVED_AT + i];
-            reinterpret_cast<char*>(&self_thread)[i] = ipc[ARRIVED_AT + sizeof(uint64_t) + i];
-        }
+        sys_copy_in(&self_task, ARRIVED_AT, sizeof(self_task));
+        sys_copy_in(&self_thread, ARRIVED_AT + sizeof(uint64_t), sizeof(self_thread));
 
         uint64_t task_info   = sys_obj_info(self_task);
         uint64_t thread_info = sys_obj_info(self_thread);
@@ -109,7 +107,7 @@ extern "C" int main() {
 
         bool ok = !sys_is_error(sys_channel_create(HANDLES_AT));
         uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[HANDLES_AT + i]; }
+        sys_copy_in(ends, HANDLES_AT, sizeof(ends));
 
         // Poll (zero mask): a fresh endpoint is writable and has nothing to read.
         uint64_t sig = sys_object_wait(ends[0], 0, 0);
@@ -162,15 +160,11 @@ extern "C" int main() {
         bool ok = !sys_is_error(sys_channel_create(CARRIER_AT)) && !sys_is_error(sys_channel_create(CARGO_AT));
         uint64_t carrier[2];
         uint64_t cargo[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) {
-            reinterpret_cast<char*>(carrier)[i] = ipc[CARRIER_AT + i];
-            reinterpret_cast<char*>(cargo)[i]   = ipc[CARGO_AT + i];
-        }
+        sys_copy_in(carrier, CARRIER_AT, sizeof(carrier));
+        sys_copy_in(cargo, CARGO_AT, sizeof(cargo));
 
         size_t note_len = sys_stage(0, note);
-        for (size_t i = 0; i < sizeof(uint64_t); i++) {
-            ipc[SENT_AT + i] = reinterpret_cast<const char*>(&cargo[0])[i];
-        }
+        sys_copy_out(SENT_AT, &cargo[0], sizeof(cargo[0]));
         ok = ok && !sys_is_error(sys_channel_send(carrier[0], 0, note_len, SENT_AT, 1));
 
         // Consumed by the send: the old handle value must no longer resolve in our table.
@@ -180,7 +174,7 @@ extern "C" int main() {
         ok           = ok && !sys_is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
 
         uint64_t arrived = 0;
-        for (size_t i = 0; i < sizeof(uint64_t); i++) { reinterpret_cast<char*>(&arrived)[i] = ipc[ARRIVED_AT + i]; }
+        sys_copy_in(&arrived, ARRIVED_AT, sizeof(arrived));
 
         // The arrived handle is a working channel endpoint: ping its peer through it.
         ok              = ok && !sys_is_error(sys_obj_info(arrived));
@@ -202,23 +196,21 @@ extern "C" int main() {
 
         bool ok = !sys_is_error(sys_channel_create(ENDS_AT));
         uint64_t ends[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(ends)[i] = ipc[ENDS_AT + i]; }
+        sys_copy_in(ends, ENDS_AT, sizeof(ends));
 
         uint64_t port = sys_port_create();
         ok            = ok && !sys_is_error(port);
         ok = ok && !sys_is_error(sys_port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
 
-        // Nothing queued yet: a bounded wait lapses instead of blocking forever. -15 is the
-        // kernel's timed_out code; error values are not installed ABI yet (see todo.md), so this
-        // is the one place selftest spells one.
-        ok = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(-15);
+        // Nothing queued yet: a bounded wait lapses instead of blocking forever.
+        ok = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(ABI_ERR_TIMED_OUT);
 
         size_t note_len = sys_stage(0, "wake the event loop");
         ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, note_len, 0, 0));
         ok              = ok && !sys_is_error(sys_port_wait(port, PACKET_AT, 0));
 
         uint64_t packet[2];
-        for (size_t i = 0; i < 2 * sizeof(uint64_t); i++) { reinterpret_cast<char*>(packet)[i] = ipc[PACKET_AT + i]; }
+        sys_copy_in(packet, PACKET_AT, sizeof(packet));
         ok = ok && packet[0] == KEY && (packet[1] & abi::syscall::CHANNEL_SIGNAL_READABLE) != 0;
 
         ok = ok && sys_port_unbind(port, KEY) == 1;
@@ -243,7 +235,7 @@ extern "C" int main() {
 
         // CONNECT "echo": envelope, then the name as the rest of the payload.
         abi_message_header req{ABI_COORD_OP_CONNECT, 0, TXID};
-        for (size_t i = 0; i < sizeof(req); i++) { ipc[MSG_AT + i] = reinterpret_cast<const char*>(&req)[i]; }
+        sys_copy_out(MSG_AT, &req, sizeof(req));
         size_t name_len = sys_stage(MSG_AT + sizeof(req), "echo");
         bool sent = !sys_is_error(sys_channel_send(abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, sizeof(req) + name_len,
                                                    0, 0));
@@ -260,13 +252,11 @@ extern "C" int main() {
             if (sys_is_error(got)) { break; }
             if ((got & 0xFFFFFFFF) < sizeof(abi_message_header)) { continue; }
             abi_message_header reply;
-            for (size_t i = 0; i < sizeof(reply); i++) { reinterpret_cast<char*>(&reply)[i] = ipc[MSG_AT + i]; }
+            sys_copy_in(&reply, MSG_AT, sizeof(reply));
             if (reply.txid != TXID) { continue; }
             replied = true;
             ok      = reply.opcode == ABI_COORD_OP_CONNECT && reply.status == 0 && (got >> 32) == 1;
-            for (size_t i = 0; i < sizeof(uint64_t); i++) {
-                reinterpret_cast<char*>(&peer)[i] = ipc[ARRIVE_AT + i];
-            }
+            sys_copy_in(&peer, ARRIVE_AT, sizeof(peer));
         }
 
         if (!replied) {

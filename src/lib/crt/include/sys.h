@@ -47,6 +47,11 @@ size_t sys_stage(size_t offset, const char* s);
 // Stage at offset 0 and emit in one call.
 uint64_t sys_print(const char* s);
 
+// Move typed values between program memory and the IPC buffer, byte-by-byte so alignment never
+// matters. These are the one sanctioned way to read a syscall's copy-out or stage a struct.
+void sys_copy_in(void* to, size_t offset, size_t length);
+void sys_copy_out(size_t offset, const void* from, size_t length);
+
 // Channel syscalls; like everything else, data rides in the IPC buffer and arguments are offsets
 // into it. create writes the two endpoint handles at `offset`. Messages can carry handles: send
 // reads `handle_count` uint64 handle values at `handles_offset`, recv lands arrived handles there
@@ -56,6 +61,20 @@ uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uin
                           uint64_t handle_count);
 uint64_t sys_channel_recv(uint64_t handle, uint64_t offset, uint64_t capacity, uint64_t handles_offset,
                           uint64_t handle_capacity);
+
+// Drain a channel to exhaustion: every queued message lands at msg_at (bytes, up to msg_cap) and
+// handles_at (arrived handles, up to handle_cap) and goes through consume(ctx, recv's return
+// value); a message wider than either window is discarded by the kernel and skipped here, so a
+// hostile or buggy sender cannot wedge the endpoint. Afterwards reports whether the endpoint is
+// gone for good: 1 when the peer has hung up with nothing left to read, 0 otherwise -- the
+// distinction an edge-observed port binding cannot make on its own.
+int sys_channel_drain(uint64_t channel, uint64_t msg_at, uint64_t msg_cap, uint64_t handles_at, uint64_t handle_cap,
+                      void (*consume)(void* ctx, uint64_t result), void* ctx);
+
+// Close every handle a recv landed at handles_at, the count taken from recv's return value. For
+// consume paths that do not take ownership of what arrived -- an unclosed stray handle squats in
+// the receiver's table forever.
+void sys_close_arrived(uint64_t result, uint64_t handles_at);
 
 // Nonzero mask blocks until any of those signal bits assert and returns the signals observed;
 // zero mask polls, returning the current signals immediately. timeout_ns of 0 waits forever;

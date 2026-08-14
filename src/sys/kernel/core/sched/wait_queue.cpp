@@ -222,7 +222,13 @@ uint32_t Object::wait_signals_deadline(uint32_t mask, ktime_t deadline) {
 }
 
 void Semaphore::acquire() {
+    // A killed thread gives up instead of re-parking: block_if lets mask-0 waits park even when
+    // killed because a mutex holder's unlock always comes, but a semaphore's release() has no
+    // obligated sender, so re-parking here would leave the thread unwakeable and its task
+    // unkillable. The caller gets no unit in that case; the thread is on its way to the exit
+    // boundary.
     while (!try_acquire()) {
+        if (kernel::sched::current()->killed()) { return; }
         // mask 0: woken by release()'s wake_one, never by signal waiters' wake_matching.
         waiters().block_if(0, [](void* p) { return static_cast<Semaphore*>(p)->count() == 0; }, this);
     }

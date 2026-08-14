@@ -188,8 +188,15 @@ void on_tick() {
     // switch target.
     wake_due_sleepers();
     wake_due_timed_waits();
-    if (c.run_queue.size() == 0) { return; }
     bool idle_running = (c.current.get() == c.idle.get());
+    // A killed thread gets the preemption request even with an empty run queue: the backstop in
+    // service_pending_preemption is what stops a killed compute loop that never syscalls, and
+    // gating it on other runnable work would let the loop run until something else woke up.
+    if (!idle_running && c.current->killed()) {
+        kernel::synchronization::request_preemption();
+        return;
+    }
+    if (c.run_queue.size() == 0) { return; }
     if (!idle_running && c.current->decrement_slice() > 0) { return; }
     kernel::synchronization::request_preemption();
 }

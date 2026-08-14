@@ -13,7 +13,9 @@ SYSROOT ?= $(BUILD_DIR)/sysroot
 
 ifeq ($(ARCH),x86_64)
 TRIPLE ?= x86_64-unknown-none
-ARCH_CFLAGS := -m64 --target=$(TRIPLE)
+# Integer registers only, same contract as user.mk: the kernel neither enables SSE for user mode
+# nor saves FPU/SSE state across context switches.
+ARCH_CFLAGS := -m64 --target=$(TRIPLE) -mno-80387 -mno-mmx -mno-sse -mno-sse2
 else ifeq ($(ARCH),riscv64)
 TRIPLE ?= riscv64-unknown-none
 ARCH_CFLAGS := --target=$(TRIPLE) -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany

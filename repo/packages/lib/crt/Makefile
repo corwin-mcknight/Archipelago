@@ -21,4 +21,5 @@ pkg_install:
 	mkdir -p $(D)/usr/lib $(D)/usr/include
 	cp $(OBJ_DIR)/libcrt.a $(D)/usr/lib/libcrt.a
 	cp $(LIVE_SOURCES)/user.ld $(D)/usr/lib/user.ld
+	cp $(LIVE_SOURCES)/user.mk $(D)/usr/lib/user.mk
 	cp $(LIVE_SOURCES)/include/sys.h $(D)/usr/include/sys.h

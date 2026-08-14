@@ -102,6 +102,10 @@ ktl::result<void> Channel::write(MessageBuffer message) {
 }
 
 ktl::result<MessageBuffer> Channel::read(size_t max_bytes, size_t max_handles) {
+    // Declared before the guard: a discarded message's destructor closes escrowed handles, which
+    // can destroy another endpoint -- of this very pair in the worst case -- so it must run after
+    // the state lock is released.
+    MessageBuffer discarded;
     kernel::synchronization::lock_guard guard(m_state->lock);
     auto& queue = m_state->inbound[m_side];
     if (queue.count == 0) {
@@ -109,17 +113,23 @@ ktl::result<MessageBuffer> Channel::read(size_t max_bytes, size_t max_handles) {
         return ktl::err(peer_alive ? ktl::errc::would_block : ktl::errc::peer_closed);
     }
 
-    MessageBuffer& front = queue.slots[queue.head];
-    if (front.size() > max_bytes || front.handle_count() > max_handles) { return ktl::err(ktl::errc::truncated); }
+    // An oversized front message is consumed and discarded, not left queued: READABLE is
+    // edge-observed by ports, so a message nobody can ever receive would otherwise wedge the
+    // endpoint (and every message behind it) forever.
+    bool oversized = queue.slots[queue.head].size() > max_bytes || queue.slots[queue.head].handle_count() > max_handles;
 
-    bool was_full         = queue.count == QUEUE_DEPTH;
-    MessageBuffer message = ktl::move(front);
+    bool was_full  = queue.count == QUEUE_DEPTH;
+    MessageBuffer message = ktl::move(queue.slots[queue.head]);
     queue.head            = (queue.head + 1) % QUEUE_DEPTH;
     queue.count--;
 
     if (queue.count == 0) { signal_clear(SIGNAL_READABLE); }
     if (was_full) {
         if (Channel* peer = m_state->ends[m_side ^ 1]) { peer->signal_set(SIGNAL_WRITABLE); }
+    }
+    if (oversized) {
+        discarded = ktl::move(message);
+        return ktl::err(ktl::errc::truncated);
     }
     return ktl::result<MessageBuffer>::ok(ktl::move(message));
 }
