@@ -16,7 +16,7 @@ Every spawned thread keeps a reference to its owning task and records its kernel
 
 The scheduler also publishes the incoming kernel stack for privilege transitions. x86_64 writes TSS `rsp0` and the SYSCALL entry stack. riscv64 reconstructs the stack top in `sscratch` whenever a trap returns to U-mode.
 
-User FP/SIMD state is carried per thread and switched eagerly: the kernel itself is built without FP or vector instructions, so whatever user code left in those registers survives every kernel entry untouched, and the scheduler saves and restores it only across a context switch. On x86_64 this is the FXSAVE area, giving user programs the standard ABI including SSE2. On riscv64 it is the f-register file plus fcsr, giving user programs the lp64d ABI; sstatus.FS is switched on once at boot and never turns Off, so FP execution needs no per-trap management.
+User FP/SIMD state is carried per thread and switched eagerly, but only for user threads: the kernel itself is built without FP or vector instructions, so whatever user code left in those registers survives every kernel entry -- and every kernel-thread stretch -- untouched, and the scheduler saves and restores it only when a switch leaves or enters a thread whose task has an address space. On x86_64 this is the FXSAVE area, giving user programs the standard ABI including SSE2. On riscv64 it is the f-register file plus fcsr, giving user programs the lp64d ABI; sstatus.FS is switched on per hart when the trap vector is installed and never turns Off, so FP execution needs no per-trap management.
 
 ## Syscalls
 The initial syscall surface is deliberately small:

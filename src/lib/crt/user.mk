@@ -16,21 +16,9 @@ SRC_DIRS  ?= ./
 ARCH ?= x86_64
 SYSROOT ?= $(BUILD_DIR)/sysroot
 
-ifeq ($(ARCH),x86_64)
-TRIPLE ?= x86_64-unknown-none
-# Standard x86_64 ABI, vector instructions included: the kernel enables SSE for user mode and
-# carries FP/SIMD state per thread across context switches.
-ARCH_FLAGS   := -m64 --target=$(TRIPLE)
-LD_EMULATION := elf_x86_64
-else ifeq ($(ARCH),riscv64)
-TRIPLE ?= riscv64-unknown-none
-# Standard lp64d ABI, F/D included: the kernel enables sstatus.FS and carries the f-register file
-# plus fcsr per thread across context switches.
-ARCH_FLAGS   := --target=$(TRIPLE) -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany
-LD_EMULATION := elf64lriscv
-else
-$(error unsupported ARCH '$(ARCH)')
-endif
+# TRIPLE, ARCH_FLAGS, and LD_EMULATION come from the shared per-arch contract, installed (and
+# maintained) beside this file.
+include $(dir $(lastword $(MAKEFILE_LIST)))arch.mk
 
 SRCS := $(wildcard $(SRC_DIRS)/*.c) $(wildcard $(SRC_DIRS)/*.cpp)
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)

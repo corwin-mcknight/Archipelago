@@ -52,6 +52,15 @@ void trap_init() {
     asm volatile("csrw stvec, %0" ::"r"(&riscv_trap_entry));
     asm volatile("csrw sscratch, zero");
 
+    // Allow FP execution: sstatus.FS resets to Off, where any FP touch -- user code or the
+    // scheduler's own state switching -- traps as an illegal instruction. Setting Initial (0b01)
+    // once per hart is enough: hardware only ever promotes FS toward Dirty, every other sstatus
+    // write in the kernel is bit-scoped or round-trips a live value, and the trap return path
+    // restores the frame's saved sstatus, so no path can turn FS back Off. It lives here so any
+    // future secondary hart inherits FP enablement along with its trap vector.
+    constexpr uint64_t SSTATUS_FS_INITIAL = 1ull << 13;
+    asm volatile("csrs sstatus, %0" ::"r"(SSTATUS_FS_INITIAL));
+
     // Limine guarantees at least 64 KiB of boot stack below the entry sp;
     // trap_init runs near the top of it, so 48 KiB down is legitimately
     // reachable and the last 16 KiB is the overflow tripwire.

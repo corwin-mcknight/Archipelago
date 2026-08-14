@@ -40,15 +40,17 @@ static void enable_nxe() {
     kernel::x86::wrmsr(MSR_EFER, kernel::x86::rdmsr(MSR_EFER) | (1u << 11));
 }
 
-// Enable x87/SSE execution: CR0.MP set, EM and TS clear, CR4.OSFXSR and OSXMMEXCPT set. This is
-// for user code -- the kernel itself is built without vector instructions, and the scheduler
-// carries the state per thread (arch::fpu_save/fpu_restore). TS stays clear for good: state is
-// switched eagerly, so the lazy-#NM machinery is never armed. Every core, not just the BP, so the
-// guarantee does not lean on what the boot protocol set up.
+// Enable x87/SSE execution: CR0.MP and NE set, EM and TS clear, CR4.OSFXSR and OSXMMEXCPT set.
+// This is for user code -- the kernel itself is built without vector instructions, and the
+// scheduler carries the state per thread (arch::fpu_save/fpu_restore). TS stays clear for good:
+// state is switched eagerly, so the lazy-#NM machinery is never armed. NE routes unmasked x87
+// errors to #MF instead of the legacy FERR#/IRQ13 path, which nothing here handles -- and Limine
+// clears it. Every core, not just the BP, so the guarantee does not lean on what the boot
+// protocol set up.
 static void enable_sse() {
     uint64_t cr;
     asm volatile("mov %%cr0, %0" : "=r"(cr));
-    cr = (cr & ~((1ull << 2) | (1ull << 3))) | (1ull << 1);  // -EM -TS +MP
+    cr = (cr & ~((1ull << 2) | (1ull << 3))) | (1ull << 1) | (1ull << 5);  // -EM -TS +MP +NE
     asm volatile("mov %0, %%cr0" : : "r"(cr));
     asm volatile("mov %%cr4, %0" : "=r"(cr));
     cr |= (1ull << 9) | (1ull << 10);  // OSFXSR, OSXMMEXCPT

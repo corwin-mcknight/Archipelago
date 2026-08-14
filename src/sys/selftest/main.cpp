@@ -48,8 +48,8 @@ bool bss_is_zero() {
 // kernel must preserve whatever user code physically left there. One asm block loads a pattern,
 // forces context switches with raw yield and sleep syscalls, and compares in place.
 bool sse_state_survives() {
-    alignas(16) static const uint64_t pattern[4] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull,
-                                                    0xA5A5A5A55A5A5A5Aull, 0x0F1E2D3C4B5A6978ull};
+    alignas(16) static const uint64_t pattern[4] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull, 0xA5A5A5A55A5A5A5Aull,
+                                                    0x0F1E2D3C4B5A6978ull};
     uint32_t match;
     asm volatile(
         "movdqa (%[pat]), %%xmm7\n"
@@ -72,9 +72,11 @@ bool sse_state_survives() {
     return match == 0xFFFF;
 }
 #elif defined(__riscv)
-// F/D state across the kernel boundary -- the riscv twin of the SSE check above, with the same
-// shape for the same reason: the ABI kills FP registers at call boundaries, so only one asm block
-// can hold values in them across syscalls. Bit-exact comparison via fmv.x.d, not feq.d.
+// F/D state across the kernel boundary -- the riscv twin of the SSE check above, one asm block
+// for a sharper reason: fs0/fs1 are callee-saved in lp64d, so around a real call the compiler may
+// legally spill and reload them through memory, which would repair a corrupted register and mask
+// exactly the kernel bug this test exists to catch. The pattern must sit in the physical register
+// across the ecall, which only one block guarantees. Bit-exact comparison via fmv.x.d, not feq.d.
 bool fp_state_survives() {
     static const uint64_t pattern[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
     uint64_t diff;

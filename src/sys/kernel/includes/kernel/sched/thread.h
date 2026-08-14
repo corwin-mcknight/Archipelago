@@ -98,8 +98,9 @@ class Thread : public kernel::obj::Object {
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
     void set_saved_sp(uintptr_t sp) { m_saved_sp = sp; }
 
-    // User FP/SIMD register state, restored when the thread is switched in. Kernel threads never
-    // execute FP code (the kernel is built without it), so for them the area only round-trips.
+    // User FP/SIMD register state, saved/restored when the thread is switched out/in. Kernel
+    // threads never execute FP code (the kernel is built without it), so the scheduler skips
+    // their areas entirely.
     void* fpu_area() { return m_fpu_area; }
 
     void reset_slice() { m_slice = CONFIG_SCHED_TIMESLICE_TICKS; }

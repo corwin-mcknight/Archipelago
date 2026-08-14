@@ -43,12 +43,21 @@ uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* 
 /// Its rate is a board property; see kernel::platform::timestamp_hz().
 uint64_t timestamp();
 
-/// Per-thread user FP/SIMD register state, saved and restored across context switches. The size
-/// and alignment fit the largest per-arch format: the x86_64 FXSAVE area uses all 512 bytes, the
-/// riscv64 f-register file plus fcsr uses the first 260.
+/// Per-thread user FP/SIMD register state, saved and restored across user-thread context switches.
+/// These are per-arch facts, not a shared format: x86_64's FXSAVE area (512 bytes, 16-aligned),
+/// riscv64's f0-f31 plus fcsr (260 bytes, padded to 8). Neither XSAVE (CPUID-derived size,
+/// 64-aligned) nor the V extension (VLEN-scaled) fits a compile-time constant; whichever arrives
+/// first makes the area dynamically sized.
+#if defined(__riscv)
+inline constexpr size_t FPU_AREA_SIZE  = 264;
+inline constexpr size_t FPU_AREA_ALIGN = 8;
+#else
 inline constexpr size_t FPU_AREA_SIZE  = 512;
 inline constexpr size_t FPU_AREA_ALIGN = 16;
-/// Fill `area` with the architecture's program-entry FP state: registers clear, exceptions masked.
+#endif
+/// Write the architecture's nonzero program-entry FP state into `area` (exceptions masked,
+/// round-to-nearest). The area arrives zeroed -- Thread zero-initializes it -- and zero covers
+/// everything else: cleared registers, empty x87 tags, no accrued flags.
 void fpu_init(void* area);
 void fpu_save(void* area);
 void fpu_restore(void* area);

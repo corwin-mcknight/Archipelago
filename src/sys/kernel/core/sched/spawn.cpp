@@ -28,9 +28,9 @@ ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* 
         return ktl::err(ktl::errc::oom);
     }
     thread->set_saved_sp(kernel::arch::prepare_thread_stack(virt_base + CONFIG_KERNEL_STACK_SIZE, entry, arg));
-    // A fresh thread is switched in -- and its FP state restored -- before it ever saves, so the
-    // area must hold the entry-state image now. Adopted boot threads save before restoring and
-    // need no seeding.
+    // A fresh user thread is switched in -- and its FP state restored -- before it ever saves, so
+    // the area must hold the entry-state image now: the zero-initialized area plus the arch's
+    // nonzero entry fields. Kernel threads' areas are never touched, so seeding them is harmless.
     kernel::arch::fpu_init(thread->fpu_area());
 
     // A thread gets an IPC buffer exactly when its task has an address space to map one into.

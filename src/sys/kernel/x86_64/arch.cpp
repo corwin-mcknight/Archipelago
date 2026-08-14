@@ -135,9 +135,9 @@ uint64_t timestamp() {
 
 void fpu_init(void* area) {
     // FXSAVE layout: FCW at +0, MXCSR at +24, both at their reset defaults (all exceptions masked,
-    // round-to-nearest). Everything else stays zero -- empty x87 tag word, cleared registers -- so
-    // the first fxrstor of a fresh thread loads exactly the state the ABI promises at entry.
-    __builtin_memset(area, 0, FPU_AREA_SIZE);
+    // round-to-nearest). Everything else is zero in the entry image -- empty x87 tag word, cleared
+    // registers -- which the area already holds, so the first fxrstor of a fresh thread loads
+    // exactly the state the ABI promises at entry.
     *static_cast<uint16_t*>(area)                                  = 0x037F;
     *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(area) + 24) = 0x1F80;
 }

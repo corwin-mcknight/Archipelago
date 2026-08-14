@@ -79,6 +79,9 @@ riscv_trap_entry:
     // returning into a demand-paged retry; write the CSRs back before sret.
     ld t0, 248(sp)
     csrw sepc, t0
+    // Full sstatus writeback. Every frame today holds a live capture from trap entry, so FS (FP
+    // enable, set per hart in trap_init) rides through non-Off. Any future code that synthesizes
+    // a frame must keep FS non-Off in its sstatus, or the scheduler's own fpu_save will fault.
     ld t0, 256(sp)
     csrw sstatus, t0
     andi t0, t0, 256

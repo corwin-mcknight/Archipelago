@@ -84,10 +84,13 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
         next_task->aspace()->activate();
     }
     if (c.current->kstack_top() != 0) { kernel::arch::set_kernel_stack(c.current->kstack_top()); }
-    // User FP/SIMD state changes hands only here: kernel code never touches those registers, so
-    // whatever user mode left in them survives every kernel entry until the thread is switched out.
-    kernel::arch::fpu_save(outgoing->fpu_area());
-    kernel::arch::fpu_restore(c.current->fpu_area());
+    // User FP/SIMD state changes hands only here, and only user threads (task with an address
+    // space) have any: kernel code never touches those registers, so whatever user mode left in
+    // them survives every kernel entry -- and every kernel-thread stretch -- until the next user
+    // thread is restored.
+    auto* prev_task = static_cast<Task*>(outgoing->owner().get());
+    if (prev_task != nullptr && prev_task->aspace() != nullptr) { kernel::arch::fpu_save(outgoing->fpu_area()); }
+    if (next_task != nullptr && next_task->aspace() != nullptr) { kernel::arch::fpu_restore(c.current->fpu_area()); }
     arch_context_switch(outgoing->saved_sp_slot(), c.current->saved_sp());
     sched_finish_switch();
 }

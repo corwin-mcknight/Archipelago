@@ -11,18 +11,8 @@ SRC_DIRS  ?= ./
 ARCH ?= x86_64
 SYSROOT ?= $(BUILD_DIR)/sysroot
 
-ifeq ($(ARCH),x86_64)
-TRIPLE ?= x86_64-unknown-none
-# Standard x86_64 ABI, same contract as user.mk: the kernel enables SSE for user mode and carries
-# FP/SIMD state per thread across context switches.
-ARCH_CFLAGS := -m64 --target=$(TRIPLE)
-else ifeq ($(ARCH),riscv64)
-TRIPLE ?= riscv64-unknown-none
-# Standard lp64d ABI, F/D included, same contract as user.mk.
-ARCH_CFLAGS := --target=$(TRIPLE) -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany
-else
-$(error unsupported ARCH '$(ARCH)')
-endif
+# TRIPLE, ARCH_FLAGS, and LD_EMULATION come from the shared per-arch contract.
+include $(dir $(lastword $(MAKEFILE_LIST)))arch.mk
 
 # No board facts are compiled in, so this builds once per architecture.
 SRCS := $(wildcard $(SRC_DIRS)/*.c) $(wildcard $(SRC_DIRS)/$(ARCH)/*.S)
@@ -42,7 +32,7 @@ override CFLAGS += \
 	-fno-omit-frame-pointer \
 	-fno-PIE \
 	-fno-PIC \
-	$(ARCH_CFLAGS) \
+	$(ARCH_FLAGS) \
 	-I include \
 	-I $(SYSROOT)/usr/include
 
@@ -55,7 +45,7 @@ $(OBJ_DIR)/$(TARGET_LIB): $(OBJS)
 $(OBJ_DIR)/%.S.o: %.S
 	@echo -n "A"
 	@$(MKDIR_P) $(dir $@)
-	@$(CC) $(ARCH_CFLAGS) -g -c $< -o $@
+	@$(CC) $(ARCH_FLAGS) -g -c $< -o $@
 
 $(OBJ_DIR)/%.c.o: %.c
 	@echo -n "+"

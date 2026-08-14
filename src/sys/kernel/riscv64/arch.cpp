@@ -134,10 +134,11 @@ uint64_t timestamp() {
 }
 
 // The save area holds f0-f31 at bytes 0..255 and fcsr at 256. All-zero is the entry state --
-// cleared registers, round-to-nearest, no accrued flags -- so fpu_init needs nothing beyond the
-// clear. The kernel builds -march=rv64imac, so the FP instructions are scoped to these two
-// functions with .option arch; they rely on sstatus.FS being switched on at boot (main.cpp).
-void fpu_init(void* area) { __builtin_memset(area, 0, FPU_AREA_SIZE); }
+// cleared registers, round-to-nearest, no accrued flags -- and the area arrives zeroed, so there
+// is nothing to seed. The kernel builds -march=rv64imac, so the FP instructions are scoped to the
+// two functions below with .option arch; they rely on sstatus.FS being switched on per hart
+// (trap_init).
+void fpu_init(void*) {}
 
 void fpu_save(void* area) {
     asm volatile(
