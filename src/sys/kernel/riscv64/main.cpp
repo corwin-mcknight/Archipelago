@@ -45,6 +45,14 @@ extern "C" [[noreturn]] void _start(void) {
     // Single-hart bring-up: install the trap vector, then let interrupts in.
     // CLINT/PLIC routing for external interrupts is future work.
     kernel::riscv::trap_init();
+
+    // Allow FP execution: sstatus.FS resets to Off, where any FP touch -- user code or the
+    // scheduler's own state switching -- traps as an illegal instruction. Setting Initial (0b01)
+    // once is enough: hardware only ever promotes FS toward Dirty, every other sstatus write in
+    // the kernel is bit-scoped or round-trips a live value, and the trap return path restores the
+    // frame's saved sstatus, so no path can turn FS back Off. Per hart, when more harts arrive.
+    constexpr uint64_t SSTATUS_FS_INITIAL = 1ull << 13;
+    asm volatile("csrs sstatus, %0" ::"r"(SSTATUS_FS_INITIAL));
     g_interrupt_manager.initialize();
     kernel::platform::interrupt_init();
     kernel::arch::enable_interrupts();

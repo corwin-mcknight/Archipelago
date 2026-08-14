@@ -24,9 +24,9 @@ ARCH_FLAGS   := -m64 --target=$(TRIPLE)
 LD_EMULATION := elf_x86_64
 else ifeq ($(ARCH),riscv64)
 TRIPLE ?= riscv64-unknown-none
-# Integer registers only: the kernel does not save F/D state, and the rv64imac -march keeps the
-# compiler from emitting it.
-ARCH_FLAGS   := --target=$(TRIPLE) -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
+# Standard lp64d ABI, F/D included: the kernel enables sstatus.FS and carries the f-register file
+# plus fcsr per thread across context switches.
+ARCH_FLAGS   := --target=$(TRIPLE) -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany
 LD_EMULATION := elf64lriscv
 else
 $(error unsupported ARCH '$(ARCH)')

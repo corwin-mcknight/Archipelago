@@ -71,6 +71,35 @@ bool sse_state_survives() {
         : "rcx", "r11", "rdi", "xmm7", "xmm15", "cc", "memory");
     return match == 0xFFFF;
 }
+#elif defined(__riscv)
+// F/D state across the kernel boundary -- the riscv twin of the SSE check above, with the same
+// shape for the same reason: the ABI kills FP registers at call boundaries, so only one asm block
+// can hold values in them across syscalls. Bit-exact comparison via fmv.x.d, not feq.d.
+bool fp_state_survives() {
+    static const uint64_t pattern[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
+    uint64_t diff;
+    asm volatile(
+        "fld fs0, 0(%[pat])\n"
+        "fld fs1, 8(%[pat])\n"
+        "li a7, %[yield]\n"
+        "ecall\n"
+        "li a7, %[sleep]\n"
+        "li a0, 2\n"
+        "ecall\n"
+        "li a7, %[yield]\n"
+        "ecall\n"
+        "fmv.x.d t0, fs0\n"
+        "fmv.x.d t1, fs1\n"
+        "ld t2, 0(%[pat])\n"
+        "xor t0, t0, t2\n"
+        "ld t2, 8(%[pat])\n"
+        "xor t1, t1, t2\n"
+        "or %[diff], t0, t1\n"
+        : [diff] "=&r"(diff)
+        : [pat] "r"(pattern), [yield] "i"(ABI_SYS_YIELD), [sleep] "i"(ABI_SYS_SLEEP)
+        : "a0", "a7", "t0", "t1", "t2", "fs0", "fs1", "memory");
+    return diff == 0;
+}
 #endif
 
 }  // namespace
@@ -130,6 +159,8 @@ extern "C" int main() {
 
 #if defined(__x86_64__)
     report(sse_state_survives(), "selftest: sse2 ok\n", "selftest: SSE2 BROKEN\n");
+#elif defined(__riscv)
+    report(fp_state_survives(), "selftest: fp ok\n", "selftest: FP BROKEN\n");
 #endif
 
     // A channel pair, exercised whole: create hands back two handles through the buffer (the first

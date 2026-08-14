@@ -18,7 +18,8 @@ TRIPLE ?= x86_64-unknown-none
 ARCH_CFLAGS := -m64 --target=$(TRIPLE)
 else ifeq ($(ARCH),riscv64)
 TRIPLE ?= riscv64-unknown-none
-ARCH_CFLAGS := --target=$(TRIPLE) -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
+# Standard lp64d ABI, F/D included, same contract as user.mk.
+ARCH_CFLAGS := --target=$(TRIPLE) -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany
 else
 $(error unsupported ARCH '$(ARCH)')
 endif

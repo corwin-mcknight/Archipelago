@@ -44,8 +44,8 @@ uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* 
 uint64_t timestamp();
 
 /// Per-thread user FP/SIMD register state, saved and restored across context switches. The size
-/// and alignment fit the largest per-arch format (the x86_64 FXSAVE area); riscv64 user programs
-/// are integer-only (rv64imac), so its three functions are no-ops until the F/D extensions land.
+/// and alignment fit the largest per-arch format: the x86_64 FXSAVE area uses all 512 bytes, the
+/// riscv64 f-register file plus fcsr uses the first 260.
 inline constexpr size_t FPU_AREA_SIZE  = 512;
 inline constexpr size_t FPU_AREA_ALIGN = 16;
 /// Fill `area` with the architecture's program-entry FP state: registers clear, exceptions masked.

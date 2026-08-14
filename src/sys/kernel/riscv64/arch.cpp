@@ -133,10 +133,40 @@ uint64_t timestamp() {
     return t;
 }
 
-// User programs are integer-only (rv64imac, sstatus.FS off): there is no FP state to carry until
-// the F/D extensions are enabled for user mode.
-void fpu_init(void*) {}
-void fpu_save(void*) {}
-void fpu_restore(void*) {}
+// The save area holds f0-f31 at bytes 0..255 and fcsr at 256. All-zero is the entry state --
+// cleared registers, round-to-nearest, no accrued flags -- so fpu_init needs nothing beyond the
+// clear. The kernel builds -march=rv64imac, so the FP instructions are scoped to these two
+// functions with .option arch; they rely on sstatus.FS being switched on at boot (main.cpp).
+void fpu_init(void* area) { __builtin_memset(area, 0, FPU_AREA_SIZE); }
+
+void fpu_save(void* area) {
+    asm volatile(
+        ".option push\n"
+        ".option arch, +d\n"
+        ".irp idx, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31\n"
+        "fsd f\\idx, (8*\\idx)(%0)\n"
+        ".endr\n"
+        "csrr t0, fcsr\n"
+        "sw t0, 256(%0)\n"
+        ".option pop"
+        :
+        : "r"(area)
+        : "t0", "memory");
+}
+
+void fpu_restore(void* area) {
+    asm volatile(
+        ".option push\n"
+        ".option arch, +d\n"
+        "lw t0, 256(%0)\n"
+        "csrw fcsr, t0\n"
+        ".irp idx, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31\n"
+        "fld f\\idx, (8*\\idx)(%0)\n"
+        ".endr\n"
+        ".option pop"
+        :
+        : "r"(area)
+        : "t0", "memory");
+}
 
 }  // namespace kernel::arch
