@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/arch.h>
 #include <kernel/config.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
@@ -97,6 +98,10 @@ class Thread : public kernel::obj::Object {
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
     void set_saved_sp(uintptr_t sp) { m_saved_sp = sp; }
 
+    // User FP/SIMD register state, restored when the thread is switched in. Kernel threads never
+    // execute FP code (the kernel is built without it), so for them the area only round-trips.
+    void* fpu_area() { return m_fpu_area; }
+
     void reset_slice() { m_slice = CONFIG_SCHED_TIMESLICE_TICKS; }
     // Returns the remaining slice after the decrement; saturates at zero.
     uint32_t decrement_slice() {
@@ -143,6 +148,7 @@ class Thread : public kernel::obj::Object {
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
     ipc_buffer m_ipc;
+    alignas(kernel::arch::FPU_AREA_ALIGN) uint8_t m_fpu_area[kernel::arch::FPU_AREA_SIZE] = {};
 #ifndef NDEBUG
     kernel::synchronization::held_lock m_held_locks[CONFIG_LOCKDEP_MAX_HELD] = {};
     size_t m_held_lock_count                                                 = 0;

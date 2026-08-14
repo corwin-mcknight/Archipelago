@@ -43,6 +43,16 @@ uintptr_t prepare_thread_stack(uintptr_t stack_top, void (*entry)(void*), void* 
 /// Its rate is a board property; see kernel::platform::timestamp_hz().
 uint64_t timestamp();
 
+/// Per-thread user FP/SIMD register state, saved and restored across context switches. The size
+/// and alignment fit the largest per-arch format (the x86_64 FXSAVE area); riscv64 user programs
+/// are integer-only (rv64imac), so its three functions are no-ops until the F/D extensions land.
+inline constexpr size_t FPU_AREA_SIZE  = 512;
+inline constexpr size_t FPU_AREA_ALIGN = 16;
+/// Fill `area` with the architecture's program-entry FP state: registers clear, exceptions masked.
+void fpu_init(void* area);
+void fpu_save(void* area);
+void fpu_restore(void* area);
+
 /// Publish the current kernel stack top for user-to-kernel transitions.
 void set_kernel_stack(uintptr_t top);
 /// Drops to user mode at `entry`; never returns. The thread's IPC buffer base and size arrive in the

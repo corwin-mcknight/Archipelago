@@ -40,6 +40,21 @@ static void enable_nxe() {
     kernel::x86::wrmsr(MSR_EFER, kernel::x86::rdmsr(MSR_EFER) | (1u << 11));
 }
 
+// Enable x87/SSE execution: CR0.MP set, EM and TS clear, CR4.OSFXSR and OSXMMEXCPT set. This is
+// for user code -- the kernel itself is built without vector instructions, and the scheduler
+// carries the state per thread (arch::fpu_save/fpu_restore). TS stays clear for good: state is
+// switched eagerly, so the lazy-#NM machinery is never armed. Every core, not just the BP, so the
+// guarantee does not lean on what the boot protocol set up.
+static void enable_sse() {
+    uint64_t cr;
+    asm volatile("mov %%cr0, %0" : "=r"(cr));
+    cr = (cr & ~((1ull << 2) | (1ull << 3))) | (1ull << 1);  // -EM -TS +MP
+    asm volatile("mov %0, %%cr0" : : "r"(cr));
+    asm volatile("mov %%cr4, %0" : "=r"(cr));
+    cr |= (1ull << 9) | (1ull << 10);  // OSFXSR, OSXMMEXCPT
+    asm volatile("mov %0, %%cr4" : : "r"(cr));
+}
+
 // Bring a single CPU online. core_index is a dense logical index in [0, CONFIG_MAX_CORES) used to
 // subscript the per-core tables (g_cpu_cores[], gdts[]); it is derived from the bootloader CPU-list
 // position, never from the hardware LAPIC id (which may be sparse or exceed CONFIG_MAX_CORES).
@@ -50,6 +65,7 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     kernel::synchronization::init_execution_context(core_index);
 
     enable_nxe();
+    enable_sse();
 
     // Start basic hardware initialisation
     g_log.debug("cpu{0} (lapic {1}): Initializing", core_index, lapic_id);

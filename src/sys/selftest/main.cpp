@@ -42,6 +42,37 @@ bool bss_is_zero() {
     return true;
 }
 
+#if defined(__x86_64__)
+// SSE2 state across the kernel boundary, checked at the register level. The SysV ABI kills every
+// xmm register at any call, so C code cannot hold a value in one across a syscall -- but the
+// kernel must preserve whatever user code physically left there. One asm block loads a pattern,
+// forces context switches with raw yield and sleep syscalls, and compares in place.
+bool sse_state_survives() {
+    alignas(16) static const uint64_t pattern[4] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull,
+                                                    0xA5A5A5A55A5A5A5Aull, 0x0F1E2D3C4B5A6978ull};
+    uint32_t match;
+    asm volatile(
+        "movdqa (%[pat]), %%xmm7\n"
+        "movdqa 16(%[pat]), %%xmm15\n"
+        "movl %[yield], %%eax\n"
+        "syscall\n"
+        "movl %[sleep], %%eax\n"
+        "movl $2, %%edi\n"
+        "syscall\n"
+        "movl %[yield], %%eax\n"
+        "syscall\n"
+        "pcmpeqb (%[pat]), %%xmm7\n"
+        "pcmpeqb 16(%[pat]), %%xmm15\n"
+        "pmovmskb %%xmm7, %%eax\n"
+        "pmovmskb %%xmm15, %%edi\n"
+        "andl %%edi, %%eax\n"
+        : "=&a"(match)
+        : [pat] "r"(pattern), [yield] "i"(ABI_SYS_YIELD), [sleep] "i"(ABI_SYS_SLEEP)
+        : "rcx", "r11", "rdi", "xmm7", "xmm15", "cc", "memory");
+    return match == 0xFFFF;
+}
+#endif
+
 }  // namespace
 
 // Freestanding C++ gives main no special treatment, so the C linkage the runtime links against
@@ -96,6 +127,10 @@ extern "C" int main() {
 
     uint64_t dup = sys_handle_duplicate(self_task, ~0ull);
     report(sys_is_error(dup), "selftest: rights check ok\n", "selftest: RIGHTS CHECK MISSED\n");
+
+#if defined(__x86_64__)
+    report(sse_state_survives(), "selftest: sse2 ok\n", "selftest: SSE2 BROKEN\n");
+#endif
 
     // A channel pair, exercised whole: create hands back two handles through the buffer (the first
     // kernel-to-user copy-out), a message sent on one end comes back byte-identical on the other,

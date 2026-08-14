@@ -133,4 +133,10 @@ uint64_t timestamp() {
     return t;
 }
 
+// User programs are integer-only (rv64imac, sstatus.FS off): there is no FP state to carry until
+// the F/D extensions are enabled for user mode.
+void fpu_init(void*) {}
+void fpu_save(void*) {}
+void fpu_restore(void*) {}
+
 }  // namespace kernel::arch

@@ -133,4 +133,17 @@ uint64_t timestamp() {
     return (static_cast<uint64_t>(hi) << 32) | lo;
 }
 
+void fpu_init(void* area) {
+    // FXSAVE layout: FCW at +0, MXCSR at +24, both at their reset defaults (all exceptions masked,
+    // round-to-nearest). Everything else stays zero -- empty x87 tag word, cleared registers -- so
+    // the first fxrstor of a fresh thread loads exactly the state the ABI promises at entry.
+    __builtin_memset(area, 0, FPU_AREA_SIZE);
+    *static_cast<uint16_t*>(area)                                  = 0x037F;
+    *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(area) + 24) = 0x1F80;
+}
+
+void fpu_save(void* area) { asm volatile("fxsave64 (%0)" : : "r"(area) : "memory"); }
+
+void fpu_restore(void* area) { asm volatile("fxrstor64 (%0)" : : "r"(area) : "memory"); }
+
 }  // namespace kernel::arch

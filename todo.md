@@ -4,6 +4,7 @@
 - Standard streams (`docs/Design/Standard Streams.md`): the socket primitive (kernel byte-stream pair, rights-directional, port-bindable, no handle slots), the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. Natural slices: kernel socket object + syscalls + tests; coordinator/crt stdio wiring; the console server program with selftest coverage.
 
 ## Second Architecture (riscv64)
+- User programs are integer-only (rv64imac): x86_64 user mode has SSE2 with per-thread state carried by `arch::fpu_save/fpu_restore`, but the riscv64 equivalents are no-ops. Enabling F/D means turning on `sstatus.FS`, saving the f-register file plus fcsr in the thread's FPU area, and lifting the `-march` in `user.mk`/crt.
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
 - SBI timer hardcodes QEMU virt's 10 MHz timebase; read the DTB's /cpus/timebase-frequency for real hardware (VisionFive 2 is 4 MHz).
 - Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).

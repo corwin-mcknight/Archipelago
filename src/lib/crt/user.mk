@@ -18,13 +18,14 @@ SYSROOT ?= $(BUILD_DIR)/sysroot
 
 ifeq ($(ARCH),x86_64)
 TRIPLE ?= x86_64-unknown-none
-# Integer registers only: the kernel neither enables SSE for user mode nor saves FPU/SSE state
-# across context switches, so an emitted vector instruction is an invalid-opcode fault. riscv64
-# gets the same property from its rv64imac -march (no F/D extensions).
-ARCH_FLAGS   := -m64 --target=$(TRIPLE) -mno-80387 -mno-mmx -mno-sse -mno-sse2
+# Standard x86_64 ABI, vector instructions included: the kernel enables SSE for user mode and
+# carries FP/SIMD state per thread across context switches.
+ARCH_FLAGS   := -m64 --target=$(TRIPLE)
 LD_EMULATION := elf_x86_64
 else ifeq ($(ARCH),riscv64)
 TRIPLE ?= riscv64-unknown-none
+# Integer registers only: the kernel does not save F/D state, and the rv64imac -march keeps the
+# compiler from emitting it.
 ARCH_FLAGS   := --target=$(TRIPLE) -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany
 LD_EMULATION := elf64lriscv
 else
