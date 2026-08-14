@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/channel.h>
 #include <kernel/sched/task.h>
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -49,15 +46,12 @@ KTEST_CASE(obj_channel_create_initial_state) {
     KTEST_UNWRAP(id, table.insert(pair.first, Channel::DEFAULT_RIGHTS));
     KTEST_UNWRAP(chan, table.get<Channel>(id));
     KTEST_EXPECT_TRUE(chan->type_id() == Channel::TYPE_ID);
-    auto wrong = table.get<Event>(id);
-    KTEST_EXPECT_ALL(wrong.is_err(), wrong.unwrap_err() == ktl::errc::wrong_type);
+    KTEST_EXPECT_ERR(table.get<Event>(id), ktl::errc::wrong_type);
 
     // Endpoint handles are move-only: DUPLICATE is outside the type's valid rights, so a handle
     // carrying it cannot even be created.
-    auto refused = table.insert(pair.second, Channel::DEFAULT_RIGHTS | RIGHT_DUPLICATE);
-    KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::rights_violation);
-    auto no_dup = table.duplicate(id, Channel::DEFAULT_RIGHTS);
-    KTEST_EXPECT_ALL(no_dup.is_err(), no_dup.unwrap_err() == ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.insert(pair.second, Channel::DEFAULT_RIGHTS | RIGHT_DUPLICATE), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.duplicate(id, Channel::DEFAULT_RIGHTS), ktl::errc::rights_violation);
 
     KTEST_EXPECT_TRUE(table.close(id).is_ok());
 }
@@ -89,16 +83,14 @@ KTEST_CASE(obj_channel_fifo_both_directions) {
 KTEST_CASE(obj_channel_empty_and_bounds) {
     KTEST_UNWRAP(pair, Channel::create());
 
-    auto empty = pair.second->read(64);
-    KTEST_EXPECT_ALL(empty.is_err(), empty.unwrap_err() == ktl::errc::would_block);
+    KTEST_EXPECT_ERR(pair.second->read(64), ktl::errc::would_block);
 
     KTEST_EXPECT_TRUE(pair.first->write(MessageBuffer{}).is_ok());
     KTEST_UNWRAP(nothing, pair.second->read(0));
     KTEST_EXPECT_TRUE(nothing.size() == 0);
 
     // Oversize is rejected where storage is granted, so no oversized message can ever exist.
-    auto rejected = MessageBuffer::create(Channel::MAX_MESSAGE_BYTES + 1);
-    KTEST_EXPECT_ALL(rejected.is_err(), rejected.unwrap_err() == ktl::errc::out_of_range);
+    KTEST_EXPECT_ERR(MessageBuffer::create(Channel::MAX_MESSAGE_BYTES + 1), ktl::errc::out_of_range);
 }
 
 // Filling the peer's queue clears the writer's WRITABLE and fails further writes immediately;
@@ -111,8 +103,7 @@ KTEST_CASE(obj_channel_full_queue_flow_control) {
     }
     KTEST_EXPECT_TRUE((pair.first->signals() & Channel::SIGNAL_WRITABLE) == 0);
 
-    auto refused = pair.first->write(message_of("overflow"));
-    KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::capacity_exhausted);
+    KTEST_EXPECT_ERR(pair.first->write(message_of("overflow")), ktl::errc::capacity_exhausted);
 
     KTEST_EXPECT_TRUE(pair.second->read(64).is_ok());
     KTEST_EXPECT_TRUE((pair.first->signals() & Channel::SIGNAL_WRITABLE) != 0);
@@ -127,8 +118,7 @@ KTEST_CASE(obj_channel_truncated_read_discards_message) {
     KTEST_REQUIRE_TRUE(pair.first->write(message_of("twelve bytes")).is_ok());
     KTEST_REQUIRE_TRUE(pair.first->write(message_of("next")).is_ok());
 
-    auto small = pair.second->read(4);
-    KTEST_EXPECT_ALL(small.is_err(), small.unwrap_err() == ktl::errc::truncated);
+    KTEST_EXPECT_ERR(pair.second->read(4), ktl::errc::truncated);
     KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) != 0);
 
     KTEST_UNWRAP(next, pair.second->read(64));
@@ -147,13 +137,11 @@ KTEST_CASE(obj_channel_peer_close) {
     KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_PEER_CLOSED) != 0);
     KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_WRITABLE) == 0);
 
-    auto refused = pair.second->write(message_of("into the void"));
-    KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::peer_closed);
+    KTEST_EXPECT_ERR(pair.second->write(message_of("into the void")), ktl::errc::peer_closed);
 
     KTEST_UNWRAP(last, pair.second->read(64));
     KTEST_EXPECT_TRUE(payload_equals(last, "parting gift"));
-    auto drained = pair.second->read(64);
-    KTEST_EXPECT_ALL(drained.is_err(), drained.unwrap_err() == ktl::errc::peer_closed);
+    KTEST_EXPECT_ERR(pair.second->read(64), ktl::errc::peer_closed);
 }
 
 // Handle escrow: a message owns kernel-table entries for handles in transit. They ride FIFO with
@@ -171,8 +159,7 @@ KTEST_CASE(obj_channel_escrow_rides_message) {
     KTEST_REQUIRE_TRUE(no_room.attach_handle(doomed));
     KTEST_REQUIRE_TRUE(pair.first->write(ktl::move(no_room)).is_ok());
 
-    auto refused = pair.second->read(64, 0);
-    KTEST_EXPECT_ALL(refused.is_err(), refused.unwrap_err() == ktl::errc::truncated);
+    KTEST_EXPECT_ERR(pair.second->read(64, 0), ktl::errc::truncated);
     KTEST_EXPECT_ALL(lost, escrow.count() == baseline);
     KTEST_EXPECT_TRUE((pair.second->signals() & Channel::SIGNAL_READABLE) == 0);
 
@@ -209,5 +196,3 @@ KTEST_CASE(obj_channel_escrow_closed_with_channel) {
     }
     KTEST_EXPECT_ALL(destroyed, escrow.count() == baseline);
 }
-
-#endif

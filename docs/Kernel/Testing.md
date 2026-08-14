@@ -73,6 +73,16 @@ KTEST_EXPECT_EQUAL(a, b)
 Use `REQUIRE` for preconditions that make the rest of the test meaningless.
 Use `EXPECT` when you want to check multiple things and see all failures.
 
+### Concurrency helpers
+Freestanding tests that exercise the scheduler have two helpers. `KTEST_YIELD_UNTIL(cond)` yields until the condition holds (bounded, then `REQUIRE`s it), replacing hand-rolled spin loops. `kernel::testing::spawn_fn` (from `<kernel/testing/spawn.h>`) spawns a kernel thread running a capturing lambda held by reference on the caller's frame, so tests need no context struct or `void*` trampoline -- the test must wait for the thread before the lambda goes out of scope:
+
+```cpp
+volatile int phase = 0;
+auto body          = [&] { phase = 1; };
+KTEST_UNWRAP(t, kernel::testing::spawn_fn("worker", body));
+KTEST_YIELD_UNTIL(phase == 1);
+```
+
 ### Example
 ```cpp
 #include <kernel/testing/testing.h>

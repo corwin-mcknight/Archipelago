@@ -1,9 +1,6 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/handle_table.h>
 #include <kernel/sched/task.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::obj;
 
@@ -31,5 +28,3 @@ KTEST_CASE(handle_insert_existing_object_and_clear) {
     KTEST_EXPECT_EQUAL(table.count(), 0u);
     KTEST_EXPECT_TRUE(!table.is_valid(a));
 }
-
-#endif

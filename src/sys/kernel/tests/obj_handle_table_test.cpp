@@ -1,9 +1,6 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/sched/task.h>
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -54,8 +51,7 @@ KTEST_CASE(obj_handle_table_take_moves_reference) {
     KTEST_EXPECT_ALL(taken.rights == (RIGHT_READ | RIGHT_SIGNAL), taken.object->type_id() == TEST_TYPE_A);
 
     // The slot is recycled like a closed one, and re-taking the dead handle is refused.
-    auto again = table.take(id);
-    KTEST_EXPECT_ALL(again.is_err(), again.unwrap_err() == ktl::errc::handle_invalid);
+    KTEST_EXPECT_ERR(table.take(id), ktl::errc::handle_invalid);
 
     taken.object.reset();
     KTEST_EXPECT_TRUE(destroyed);
@@ -101,10 +97,8 @@ KTEST_CASE(obj_handle_table_get_enforces_type_and_rights) {
     HandleTable table;
     KTEST_UNWRAP(ro, table.emplace<TestObjA>(RIGHT_READ));
     KTEST_UNWRAP(rw, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
-    auto wrong = table.get<TestObjB>(ro);
-    KTEST_EXPECT_ALL(wrong.is_err(), wrong.unwrap_err() == ktl::errc::wrong_type);
-    auto denied = table.get<TestObjA>(ro, RIGHT_WRITE);
-    KTEST_EXPECT_ALL(denied.is_err(), denied.unwrap_err() == ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.get<TestObjB>(ro), ktl::errc::wrong_type);
+    KTEST_EXPECT_ERR(table.get<TestObjA>(ro, RIGHT_WRITE), ktl::errc::rights_violation);
     KTEST_EXPECT_TRUE(table.get<TestObjA>(rw, RIGHT_READ).is_ok());
 }
 
@@ -122,8 +116,7 @@ KTEST_CASE(obj_handle_table_growth) {
 KTEST_CASE(obj_handle_table_invalid_handle) {
     HandleTable table;
     KTEST_EXPECT_FALSE(table.is_valid(HandleId::invalid()));
-    auto got = table.get<TestObjA>(HandleId::invalid());
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::handle_invalid);
+    KTEST_EXPECT_ERR(table.get<TestObjA>(HandleId::invalid()), ktl::errc::handle_invalid);
 }
 
 KTEST_CASE(obj_handle_table_global_emplace) {
@@ -226,5 +219,3 @@ KTEST_CASE(obj_handle_table_clear_reentrant_destructor) {
     table.clear();
     KTEST_EXPECT_ALL(table.count() == 0, !table.is_valid(victim));
 }
-
-#endif

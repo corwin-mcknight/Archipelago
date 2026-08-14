@@ -1,10 +1,7 @@
 // src/sys/kernel/tests/sched_thread_test.cpp
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/thread.h>
+#include <kernel/testing/testing.h>
 
 #include <ktl/string_view>
 
@@ -59,5 +56,3 @@ KTEST_CASE(sched_thread_runtime_state) {
     t.set_state(thread_state::DEAD);
     KTEST_EXPECT_TRUE(t.state() == thread_state::DEAD);
 }
-
-#endif

@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/expect.h>
+#include <kernel/testing/testing.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -80,5 +77,3 @@ KTEST_CASE(ktl_bit_align) {
     EXPECT(!ktl::is_aligned(uintptr_t{0x2001}, 0x1000));
     static_assert(ktl::align_up(uintptr_t{17}, 8) == 24);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

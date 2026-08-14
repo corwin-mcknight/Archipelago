@@ -229,9 +229,7 @@ KTEST_CASE_INTEGRATION(vmo_resize) {
         auto v = create_device_vmo(window.value(), 1, vm_cache_mode::DEVICE);
         KTEST_REQUIRE_TRUE(v.get() != nullptr);
 
-        auto r = v->set_size(2);
-        KTEST_REQUIRE_TRUE(r.is_err());
-        KTEST_EXPECT_TRUE(r.unwrap_err() == ktl::errc::invalid_operation);
+        KTEST_EXPECT_ERR(v->set_size(2), ktl::errc::invalid_operation);
     }
 }
 

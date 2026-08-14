@@ -1,8 +1,6 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
 #include <kernel/arch.h>
 #include <kernel/interrupt.h>
+#include <kernel/testing/testing.h>
 
 KTEST_MODULE("riscv64/arch");
 
@@ -50,4 +48,3 @@ KTEST_CASE(riscv_software_interrupt_round_trip) {
     g_interrupt_manager.clear_handler(SSI_CODE);
     KTEST_EXPECT_TRUE(g_ssi_fired);
 }
-#endif

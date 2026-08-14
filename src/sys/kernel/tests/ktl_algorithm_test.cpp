@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -70,5 +67,3 @@ KTEST_CASE(ktl_algorithm_size) {
     vec.push_back(20);
     KTEST_EXPECT_EQUAL(ktl::size(vec), (size_t)2);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

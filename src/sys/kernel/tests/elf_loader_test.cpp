@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/elf_loader.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::elf;
 
@@ -66,6 +63,12 @@ bool rejects_with(Image& img, elf_error expected) {
     return parsed.is_err() && parsed.unwrap_err() == expected;
 }
 
+template <typename F> bool rejects_with(elf_error expected, F mutate, uint16_t phnum = 1) {
+    Image img(phnum);
+    mutate(img);
+    return rejects_with(img, expected);
+}
+
 }  // namespace
 
 KTEST_CASE(elf_loader_accepts_a_well_formed_image) {
@@ -86,25 +89,20 @@ KTEST_CASE(elf_loader_accepts_a_well_formed_image) {
 }
 
 KTEST_CASE(elf_loader_rejects_malformed_headers) {
-    Image bad_magic;
-    bad_magic.header().e_ident[1] = 'X';
-    KTEST_EXPECT_TRUE(rejects_with(bad_magic, elf_error::not_elf));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::not_elf, [](Image& i) { i.header().e_ident[1] = 'X'; }));
 
-    Image bad_class;
-    bad_class.header().e_ident[EI_CLASS] = 1;  // ELFCLASS32
-    KTEST_EXPECT_TRUE(rejects_with(bad_class, elf_error::not_elf));
+    // ELFCLASS32
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::not_elf, [](Image& i) { i.header().e_ident[EI_CLASS] = 1; }));
 
-    Image big_endian;
-    big_endian.header().e_ident[EI_DATA] = 2;  // ELFDATA2MSB
-    KTEST_EXPECT_TRUE(rejects_with(big_endian, elf_error::not_elf));
+    // ELFDATA2MSB
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::not_elf, [](Image& i) { i.header().e_ident[EI_DATA] = 2; }));
 
     // Shorter than a header at all: the size check must come before any field is read.
     Image runt;
     runt.size = sizeof(Elf64_Ehdr) - 1;
     KTEST_EXPECT_TRUE(rejects_with(runt, elf_error::not_elf));
 
-    auto null_image = parse_image(nullptr, 4096);
-    KTEST_EXPECT_TRUE(null_image.is_err() && null_image.unwrap_err() == elf_error::not_elf);
+    KTEST_EXPECT_ERR(parse_image(nullptr, 4096), elf_error::not_elf);
 }
 
 KTEST_CASE(elf_loader_rejects_images_it_cannot_run) {
@@ -112,23 +110,15 @@ KTEST_CASE(elf_loader_rejects_images_it_cannot_run) {
     wrong_arch.header().e_machine = EM_NATIVE == EM_RISCV ? EM_X86_64 : EM_RISCV;
     KTEST_EXPECT_TRUE(rejects_with(wrong_arch, elf_error::wrong_machine));
 
-    Image shared;
-    shared.header().e_type = ET_DYN;
-    KTEST_EXPECT_TRUE(rejects_with(shared, elf_error::not_executable));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::not_executable, [](Image& i) { i.header().e_type = ET_DYN; }));
 
-    Image relocatable;
-    relocatable.header().e_type = ET_REL;
-    KTEST_EXPECT_TRUE(rejects_with(relocatable, elf_error::not_executable));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::not_executable, [](Image& i) { i.header().e_type = ET_REL; }));
 
     // A dynamically linked binary is refused rather than loaded without its interpreter, which
     // would fail far away from the cause.
-    Image interp(2);
-    interp.phdr(1).p_type = PT_INTERP;
-    KTEST_EXPECT_TRUE(rejects_with(interp, elf_error::dynamic));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::dynamic, [](Image& i) { i.phdr(1).p_type = PT_INTERP; }, 2));
 
-    Image dynamic(2);
-    dynamic.phdr(1).p_type = PT_DYNAMIC;
-    KTEST_EXPECT_TRUE(rejects_with(dynamic, elf_error::dynamic));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::dynamic, [](Image& i) { i.phdr(1).p_type = PT_DYNAMIC; }, 2));
 }
 
 KTEST_CASE(elf_loader_enforces_segment_policy) {
@@ -153,14 +143,11 @@ KTEST_CASE(elf_loader_enforces_segment_policy) {
     wrapping.header().e_entry = 0xFFFFFFFFFFFFF000ull;
     KTEST_EXPECT_TRUE(rejects_with(wrapping, elf_error::bad_segment));
 
-    Image no_load;
-    no_load.phdr(0).p_type = 4;  // PT_NOTE: skipped, not mapped
-    KTEST_EXPECT_TRUE(rejects_with(no_load, elf_error::no_segments));
+    // PT_NOTE: skipped, not mapped
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::no_segments, [](Image& i) { i.phdr(0).p_type = 4; }));
 
     // Entry lands in no mapped segment, so the first instruction fetch would fault.
-    Image stray_entry;
-    stray_entry.header().e_entry = 0x900000;
-    KTEST_EXPECT_TRUE(rejects_with(stray_entry, elf_error::bad_entry));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::bad_entry, [](Image& i) { i.header().e_entry = 0x900000; }));
 }
 
 KTEST_CASE(elf_loader_caps_mapped_size) {
@@ -185,14 +172,10 @@ KTEST_CASE(elf_loader_caps_mapped_size) {
 
 KTEST_CASE(elf_loader_rejects_out_of_bounds_offsets) {
     // Program header table claims to start past the end of the image.
-    Image far_table;
-    far_table.header().e_phoff = far_table.size + 0x1000;
-    KTEST_EXPECT_TRUE(rejects_with(far_table, elf_error::truncated));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::truncated, [](Image& i) { i.header().e_phoff = i.size + 0x1000; }));
 
     // Table starts inside but its declared extent runs off the end.
-    Image long_table;
-    long_table.header().e_phnum = 4096;
-    KTEST_EXPECT_TRUE(rejects_with(long_table, elf_error::truncated));
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::truncated, [](Image& i) { i.header().e_phnum = 4096; }));
 
     // Segment's file range runs past the end -- the case that would become an over-read in the copy.
     Image far_segment;
@@ -220,5 +203,3 @@ KTEST_CASE(elf_loader_caps_segment_count) {
 
     KTEST_EXPECT_TRUE(rejects_with(img, elf_error::too_many_segments));
 }
-
-#endif

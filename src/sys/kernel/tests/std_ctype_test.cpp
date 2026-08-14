@@ -1,8 +1,6 @@
 #include <kernel/testing/testing.h>
 #include <std/ctype.h>
 
-#if CONFIG_KERNEL_TESTING
-
 using namespace kernel::testing;
 
 KTEST_MODULE("std/ctype");
@@ -23,5 +21,3 @@ KTEST_CASE(std_ctype_classification) {
     KTEST_EXPECT_TRUE(isupper('X'));
     KTEST_EXPECT_FALSE(isupper('x'));
 }
-
-#endif

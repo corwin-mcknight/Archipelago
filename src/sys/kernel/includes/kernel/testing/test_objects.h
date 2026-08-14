@@ -1,9 +1,5 @@
 #pragma once
 
-#include <kernel/config.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/counter.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/handle_table.h>
@@ -82,5 +78,3 @@ inline void register_all_test_types() {
 }
 
 }  // namespace kernel::testing
-
-#endif  // CONFIG_KERNEL_TESTING

@@ -1,9 +1,6 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/arch.h>
 #include <kernel/synchronization/spinlock.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using kernel::synchronization::critical_irq_lock_guard;
@@ -55,5 +52,3 @@ KTEST_CASE(interrupts_save_restore_roundtrip) {
     kernel::arch::restore_interrupts(flags);
     KTEST_EXPECT_TRUE(kernel::arch::interrupts_enabled());  // restored to the saved (enabled) state
 }
-
-#endif  // CONFIG_KERNEL_TESTING

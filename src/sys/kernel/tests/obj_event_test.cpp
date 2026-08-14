@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -27,8 +24,7 @@ KTEST_CASE(obj_event_handle_lifecycle) {
         KTEST_UNWRAP(evt, table.get<Event>(id));
         KTEST_EXPECT_TRUE(evt->type_id() == Event::TYPE_ID);
 
-        auto wrong = table.get<Counter>(id);
-        KTEST_EXPECT_ALL(wrong.is_err(), wrong.unwrap_err() == ktl::errc::wrong_type);
+        KTEST_EXPECT_ERR(table.get<Counter>(id), ktl::errc::wrong_type);
 
         evt->signal_set(0x05);
         KTEST_EXPECT_TRUE(evt->signals() == 0x05);
@@ -55,5 +51,3 @@ KTEST_CASE(obj_event_duplicate_survives_close) {
     KTEST_EXPECT_TRUE(table.close(id2).is_ok());
     KTEST_EXPECT_TRUE(g_type_registry.live_count(Event::TYPE_ID) == before);
 }
-
-#endif

@@ -64,25 +64,17 @@ KTEST_CASE_INTEGRATION(region_tree_construction_and_validation) {
         KTEST_UNWRAP(a_ref, aspace.root().create_child(A_BASE, A_SIZE, RW));
 
         // Out of parent bounds.
-        auto oob = a_ref->create_child(A_BASE + A_SIZE, 0x1000, RW);
-        KTEST_REQUIRE_TRUE(oob.is_err());
-        KTEST_EXPECT_TRUE(oob.unwrap_err() == ktl::errc::out_of_range);
+        KTEST_EXPECT_ERR(a_ref->create_child(A_BASE + A_SIZE, 0x1000, RW), ktl::errc::out_of_range);
 
         // Sibling overlap.
         KTEST_REQUIRE_TRUE(a_ref->create_child(B_BASE, B_SIZE, RW).is_ok());
-        auto overlap = a_ref->create_child(B_BASE + B_SIZE - 0x1000, 0x2000, RW);
-        KTEST_REQUIRE_TRUE(overlap.is_err());
-        KTEST_EXPECT_TRUE(overlap.unwrap_err() == ktl::errc::invalid_operation);
+        KTEST_EXPECT_ERR(a_ref->create_child(B_BASE + B_SIZE - 0x1000, 0x2000, RW), ktl::errc::invalid_operation);
 
         // Prot escalation past the parent's max-prot.
-        auto escalate = a_ref->create_child(A_BASE, 0x1000, RWX);
-        KTEST_REQUIRE_TRUE(escalate.is_err());
-        KTEST_EXPECT_TRUE(escalate.unwrap_err() == ktl::errc::rights_violation);
+        KTEST_EXPECT_ERR(a_ref->create_child(A_BASE, 0x1000, RWX), ktl::errc::rights_violation);
 
         // Same checks apply to bindings.
-        auto bind_escalate = a_ref->map(A_BASE, 0x1000, ktl::ref<vmo>{}, 0, RWX);
-        KTEST_REQUIRE_TRUE(bind_escalate.is_err());
-        KTEST_EXPECT_TRUE(bind_escalate.unwrap_err() == ktl::errc::rights_violation);
+        KTEST_EXPECT_ERR(a_ref->map(A_BASE, 0x1000, ktl::ref<vmo>{}, 0, RWX), ktl::errc::rights_violation);
     }
 }
 
@@ -102,9 +94,7 @@ KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
         KTEST_REQUIRE_TRUE(aspace.walk(MAP_BASE).has_value());
 
         // Partial unmap cutting through the binding is rejected untouched.
-        auto partial = aspace.root().unmap(MAP_BASE, 0x1000);
-        KTEST_REQUIRE_TRUE(partial.is_err());
-        KTEST_EXPECT_TRUE(partial.unwrap_err() == ktl::errc::invalid_operation);
+        KTEST_EXPECT_ERR(aspace.root().unmap(MAP_BASE, 0x1000), ktl::errc::invalid_operation);
         KTEST_EXPECT_TRUE(aspace.walk(MAP_BASE).has_value());
 
         // Whole-slot unmap removes the binding and its translations.
@@ -133,9 +123,7 @@ KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
         KTEST_EXPECT_EQUAL(hit->prot, vm_prot::READ);
 
         // Widening back is a rights violation.
-        auto widen = aspace.root().protect(MAP_BASE, MAP_SIZE, RW);
-        KTEST_REQUIRE_TRUE(widen.is_err());
-        KTEST_EXPECT_TRUE(widen.unwrap_err() == ktl::errc::rights_violation);
+        KTEST_EXPECT_ERR(aspace.root().protect(MAP_BASE, MAP_SIZE, RW), ktl::errc::rights_violation);
 
         kernel::mm::g_page_frame_allocator.free(frame);
     }

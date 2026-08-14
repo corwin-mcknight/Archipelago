@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -53,5 +50,3 @@ KTEST(obj_init_registers_builtin_types, "obj/object") {
     KTEST_EXPECT_TRUE(g_type_registry.lookup(Event::TYPE_ID).has_value());
     KTEST_EXPECT_TRUE(g_type_registry.lookup(Counter::TYPE_ID).has_value());
 }
-
-#endif

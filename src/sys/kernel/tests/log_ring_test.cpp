@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/json_escape.h>
 #include <kernel/log.h>
 #include <kernel/log_ring.h>
+#include <kernel/testing/testing.h>
 
 #include <ktl/string_view>
 
@@ -15,31 +12,28 @@ using kernel::log_ring;
 
 KTEST_MODULE("kernel/log_ring");
 
+// Reserve a slot, write v, and publish it; requires the reservation to succeed.
+static void put(auto& ring, int v) {
+    uint64_t s;
+    int* p = ring.reserve(s);
+    KTEST_REQUIRE_TRUE(p != nullptr);
+    *p = v;
+    ring.publish(s);
+}
+
 // One ring through its basic lifecycle: reserved-then-published messages drain in sequence
 // order; a full ring fails to log without consuming a sequence and counts every drop; and
 // draining frees slots so reservation succeeds again with the accumulated drop count intact.
 KTEST_CASE(log_ring_write_full_drop_reuse_lifecycle) {
     log_ring<int, 4> ring;
-    for (int i = 0; i < 3; i++) {
-        uint64_t seq;
-        int* p = ring.reserve(seq);
-        KTEST_REQUIRE_TRUE(p != nullptr);
-        *p = i * 10;
-        ring.publish(seq);
-    }
+    for (int i = 0; i < 3; i++) { put(ring, i * 10); }
     int out[4];
     int n = 0;
     ring.drain([&](const int& v) { out[n++] = v; });
     KTEST_EXPECT_ALL(n == 3, out[0] == 0, out[1] == 10, out[2] == 20);
 
     // Fill the drained ring back to capacity, then overflow it repeatedly.
-    for (int i = 0; i < 4; i++) {
-        uint64_t s;
-        int* p = ring.reserve(s);
-        KTEST_REQUIRE_TRUE(p != nullptr);
-        *p = i;
-        ring.publish(s);
-    }
+    for (int i = 0; i < 4; i++) { put(ring, i); }
     uint64_t s;
     int* p = ring.reserve(s);  // ring full
     KTEST_EXPECT_ALL(p == nullptr, ring.dropped() == 1, ring.size() == 4);
@@ -128,10 +122,8 @@ KTEST_CASE(log_ring_wrap_history_and_crash_scan) {
 // The crash scan emits committed slots and flags in-progress ones.
 KTEST_CASE(log_ring_crash_scan_flags_in_progress) {
     log_ring<int, 4> ring;
-    uint64_t s0, s1;
-    int* p0 = ring.reserve(s0);
-    *p0     = 7;
-    ring.publish(s0);
+    uint64_t s1;
+    put(ring, 7);
     int* p1    = ring.reserve(s1);
     *p1        = 8;  // WRITING, not published
 
@@ -151,12 +143,7 @@ KTEST_CASE(log_ring_crash_scan_flags_in_progress) {
 // Capacity messages in order via for_each.
 KTEST_CASE(log_ring_retains_flushed_history) {
     log_ring<int, 4> ring;
-    for (int i = 0; i < 4; i++) {
-        uint64_t s;
-        int* p = ring.reserve(s);
-        *p     = i + 1;
-        ring.publish(s);
-    }
+    for (int i = 0; i < 4; i++) { put(ring, i + 1); }
     int drained = 0;
     ring.drain([&](const int&) { drained++; });
     KTEST_REQUIRE_TRUE(drained == 4 && ring.size() == 0);  // everything FLUSHED, nothing pending
@@ -170,12 +157,7 @@ KTEST_CASE(log_ring_retains_flushed_history) {
 // for_each(min_seq) filters below min_seq and returns the one-past-highest cursor.
 KTEST_CASE(log_ring_for_each_min_seq_and_cursor) {
     log_ring<int, 8> ring;
-    for (int i = 0; i < 5; i++) {
-        uint64_t s;
-        int* p = ring.reserve(s);
-        *p     = i;
-        ring.publish(s);
-    }
+    for (int i = 0; i < 5; i++) { put(ring, i); }
 
     int vals[8];
     int n           = 0;
@@ -193,15 +175,11 @@ KTEST_CASE(log_ring_for_each_min_seq_and_cursor) {
 // The history scan skips an in-progress slot but still shows committed neighbors in order.
 KTEST_CASE(log_ring_for_each_skips_in_progress) {
     log_ring<int, 4> ring;
-    uint64_t s0, s1, s2;
-    int* p0 = ring.reserve(s0);
-    *p0     = 10;
-    ring.publish(s0);
+    uint64_t s1;
+    put(ring, 10);
     int* p1 = ring.reserve(s1);
     *p1     = 20;  // WRITING (in-progress)
-    int* p2 = ring.reserve(s2);
-    *p2     = 30;
-    ring.publish(s2);
+    put(ring, 30);
 
     int vals[8];
     int n = 0;
@@ -269,5 +247,3 @@ KTEST(json_escape_specials, "kernel/json_escape") {
     buf[n] = '\0';
     KTEST_EXPECT_TRUE(ktl::string_view(buf) == "a\\\"b\\\\c\\nd\\te\\u0001");
 }
-
-#endif  // CONFIG_KERNEL_TESTING

@@ -1,11 +1,8 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/event.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
+#include <kernel/testing/testing.h>
 
 #include <ktl/ref>
 #include <ktl/vector>
@@ -53,5 +50,3 @@ KTEST_CASE(sched_task_thread_membership) {
     task.remove_thread(t1->id());         // removing an absent id is a no-op
     KTEST_EXPECT_EQUAL(task.thread_count(), 1u);
 }
-
-#endif

@@ -1,7 +1,5 @@
 #include <kernel/config.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include "kernel/arch.h"
 #include "kernel/panic.h"
 #include "kernel/testing/testing.h"
@@ -27,5 +25,3 @@ KTEST_CASE_CRASH(crash_dump_pagefault) {
 KTEST_CASE_CRASH(crash_dump_invalid_opcode) { kernel::arch::trigger_invalid_opcode(); }
 
 #pragma clang diagnostic pop
-
-#endif  // CONFIG_KERNEL_TESTING

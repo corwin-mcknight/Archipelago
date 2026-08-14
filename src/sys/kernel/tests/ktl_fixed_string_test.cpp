@@ -1,7 +1,5 @@
 #include <kernel/testing/testing.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/fixed_string>
 #include <ktl/string_view>
 
@@ -17,5 +15,3 @@ KTEST_CASE(ktl_fixed_string_view_fills_buffer_keeps_terminator) {
     KTEST_EXPECT_TRUE(s.length() == 3);
     KTEST_EXPECT_TRUE(ktl::string_view(s.c_str()) == "abc");
 }
-
-#endif  // CONFIG_KERNEL_TESTING

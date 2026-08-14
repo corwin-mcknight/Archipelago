@@ -2,8 +2,6 @@
 #include <std/string.h>
 #include <stddef.h>
 
-#if CONFIG_KERNEL_TESTING
-
 using namespace kernel::testing;
 
 KTEST_MODULE("std/string");
@@ -109,5 +107,3 @@ KTEST_CASE(std_strlcpy) {
     KTEST_EXPECT_EQUAL(copied, static_cast<size_t>(6));
     KTEST_EXPECT_EQUAL(guard, 'Z');
 }
-
-#endif

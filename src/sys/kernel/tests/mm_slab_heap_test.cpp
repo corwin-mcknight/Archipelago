@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/mm/slab_heap.h>
+#include <kernel/testing/testing.h>
 
 #include <ktl/vector>
 
@@ -163,5 +160,3 @@ KTEST_CASE(slab_heap_mixed_churn) {
     }
     KTEST_EXPECT_TRUE(live == 0);
 }
-
-#endif

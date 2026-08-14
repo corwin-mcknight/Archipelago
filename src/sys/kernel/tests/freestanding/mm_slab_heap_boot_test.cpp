@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/mm/early_heap.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/slab_heap.h>
+#include <kernel/testing/testing.h>
 #include <std/new.h>
 
 #include <ktl/vector>
@@ -52,5 +49,3 @@ KTEST_CASE(heap_pages_return_to_pmm) {
     // and unrelated kernel threads allocate concurrently -- allow a small drift, not a leak.
     KTEST_EXPECT_TRUE(free_before <= free_after + slab_heap::CLASS_COUNT + 4);
 }
-
-#endif

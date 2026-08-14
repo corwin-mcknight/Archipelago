@@ -1,7 +1,3 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/arch.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/semaphore.h>
@@ -13,6 +9,8 @@
 #include <kernel/sched/wait_queue.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/synchronization/mutex.h>
+#include <kernel/testing/spawn.h>
+#include <kernel/testing/testing.h>
 #include <kernel/time.h>
 
 #include <ktl/ref>
@@ -20,21 +18,9 @@
 #include <ktl/vector>
 
 using namespace kernel::sched;
+using kernel::testing::spawn_fn;
 
 KTEST_MODULE("kernel/sched");
-
-namespace {
-volatile int g_flag;
-void set_flag_thread(void*) { g_flag = 1; }
-void exit_immediately_thread(void*) {}
-volatile int g_pings;
-void ping_thread(void*) {
-    for (int i = 0; i < 5; ++i) {
-        g_pings = g_pings + 1;
-        kernel::sched::yield();
-    }
-}
-}  // namespace
 
 KTEST_CASE(sched_current_is_kshell_thread) {
     auto self = current();
@@ -43,49 +29,49 @@ KTEST_CASE(sched_current_is_kshell_thread) {
 }
 
 KTEST_CASE(sched_spawn_runs) {
-    g_flag = 0;
-    KTEST_UNWRAP(t, spawn("flagger", set_flag_thread, nullptr));
-    for (int i = 0; i < 100000 && g_flag == 0; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_flag, 1);
+    volatile int flag = 0;
+    auto body         = [&] { flag = 1; };
+    KTEST_UNWRAP(t, spawn_fn("flagger", body));
+    KTEST_YIELD_UNTIL(flag == 1);
 }
 
 KTEST_CASE(sched_yield_interleaves) {
-    g_pings = 0;
-    KTEST_UNWRAP(t, spawn("pinger", ping_thread, nullptr));
-    for (int i = 0; i < 100000 && g_pings < 5; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_pings, 5);
+    volatile int pings = 0;
+    auto body          = [&] {
+        for (int i = 0; i < 5; ++i) {
+            pings = pings + 1;
+            kernel::sched::yield();
+        }
+    };
+    KTEST_UNWRAP(t, spawn_fn("pinger", body));
+    KTEST_YIELD_UNTIL(pings == 5);
 }
 
 KTEST_CASE(sched_exit_reaps_thread) {
     using kernel::obj::g_type_registry;
     uint32_t before = g_type_registry.live_count(Thread::TYPE_ID);
+    auto body       = [] {};
     {
-        KTEST_UNWRAP(t, spawn("exiter", exit_immediately_thread, nullptr));
+        KTEST_UNWRAP(t, spawn_fn("exiter", body));
         // t drops at scope end; the zombie + reaper path must release the rest.
     }
-    for (int i = 0; i < 100000 && g_type_registry.live_count(Thread::TYPE_ID) > before; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_type_registry.live_count(Thread::TYPE_ID), before);
+    KTEST_YIELD_UNTIL(g_type_registry.live_count(Thread::TYPE_ID) <= before);
 }
-
-namespace {
-volatile uint64_t g_spin_count;
-volatile bool g_spin_stop;
-void spinner_thread(void*) {
-    while (!g_spin_stop) { g_spin_count = g_spin_count + 1; }
-}
-}  // namespace
 
 // One spinner fixture drives both halves of the contention story: the spinner only runs if
 // preemption works, and its accounting must record the preemptions and the wait latency.
 KTEST_CASE(sched_preempts_spinner_and_accounts_latency) {
-    g_spin_count = 0;
-    g_spin_stop  = false;
-    KTEST_UNWRAP(t, spawn("spinner", spinner_thread, nullptr));
+    volatile uint64_t spin_count = 0;
+    volatile bool spin_stop      = false;
+    auto body                    = [&] {
+        while (!spin_stop) { spin_count = spin_count + 1; }
+    };
+    KTEST_UNWRAP(t, spawn_fn("spinner", body));
     // Busy-wait WITHOUT yielding: only preemption can give the spinner CPU time.
     ktime_t start = kernel::time::now();
     while (kernel::time::now() < start + 3 * CONFIG_SCHED_TIMESLICE_TICKS) {}
-    uint64_t observed = g_spin_count;
-    g_spin_stop       = true;
+    uint64_t observed = spin_count;
+    spin_stop         = true;
     KTEST_EXPECT_TRUE(observed > 0);
     uint32_t sig = t->wait_signals(Thread::SIGNAL_TERMINATED);
     KTEST_EXPECT_TRUE((sig & Thread::SIGNAL_TERMINATED) != 0);
@@ -94,16 +80,6 @@ KTEST_CASE(sched_preempts_spinner_and_accounts_latency) {
     KTEST_EXPECT_TRUE(t->stats().lat_max_cycles > 0);  // waited while main held the CPU
 }
 
-namespace {
-kernel::sched::wait_queue g_test_wq;
-volatile int g_blocked_phase;
-void blocker_thread(void*) {
-    g_blocked_phase = 1;
-    g_test_wq.block();
-    g_blocked_phase = 2;
-}
-}  // namespace
-
 KTEST_CASE(sched_sleep_advances_time) {
     ktime_t before = kernel::time::now();
     sleep_ticks(5);
@@ -111,183 +87,127 @@ KTEST_CASE(sched_sleep_advances_time) {
 }
 
 KTEST_CASE(sched_block_and_wake) {
-    g_blocked_phase = 0;
-    KTEST_UNWRAP(t, spawn("blocker", blocker_thread, nullptr));
-    for (int i = 0; i < 100000 && g_blocked_phase == 0; ++i) { yield(); }
-    KTEST_REQUIRE_EQUAL(g_blocked_phase, 1);
-    for (int i = 0; i < 100000; ++i) {
-        if (t->state() == thread_state::BLOCKED) break;
-        yield();
-    }
-    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    kernel::sched::wait_queue wq;
+    volatile int phase = 0;
+    auto body          = [&] {
+        phase = 1;
+        wq.block();
+        phase = 2;
+    };
+    KTEST_UNWRAP(t, spawn_fn("blocker", body));
+    KTEST_YIELD_UNTIL(phase == 1);
+    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
     sleep_ticks(3);  // give it slices; it must stay blocked, not spin
-    KTEST_EXPECT_EQUAL(g_blocked_phase, 1);
+    KTEST_EXPECT_EQUAL(phase, 1);
     KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
-    g_test_wq.wake_one();
-    for (int i = 0; i < 100000 && g_blocked_phase != 2; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_blocked_phase, 2);
+    wq.wake_one();
+    KTEST_YIELD_UNTIL(phase == 2);
 }
 
-namespace {
-void sleep_then_exit_thread(void*) { kernel::sched::sleep_ticks(3); }
-}  // namespace
-
 KTEST_CASE(sched_join_via_terminated_signal) {
-    KTEST_UNWRAP(t, spawn("mortal", sleep_then_exit_thread, nullptr));
+    auto body = [] { kernel::sched::sleep_ticks(3); };
+    KTEST_UNWRAP(t, spawn_fn("mortal", body));
     uint32_t sig = t->wait_signals(Thread::SIGNAL_TERMINATED);
     KTEST_EXPECT_TRUE((sig & Thread::SIGNAL_TERMINATED) != 0);
     KTEST_EXPECT_TRUE(t->state() == thread_state::DEAD);
 }
 
-namespace {
-// Bundles a mask==0 waiter and a signal (nonzero-mask) waiter with the shared object they park on,
-// so the two directions of the mask-disjointness contract (wake_one/wake_matching only ever cross
-// their own lane) can be driven from a single spawned thread each.
-struct EventWaitArgs {
-    kernel::obj::Event* ev;
-    volatile int* phase;
-};
-
-constexpr uint32_t TEST_SIGNAL = 1u << 3;
-
-void mask_zero_wait_thread(void* arg) {
-    auto* a   = static_cast<EventWaitArgs*>(arg);
-    *a->phase = 1;
-    a->ev->waiters().block(0);
-    *a->phase = 2;
-}
-
-void signal_wait_thread(void* arg) {
-    auto* a   = static_cast<EventWaitArgs*>(arg);
-    *a->phase = 1;
-    a->ev->wait_signals(TEST_SIGNAL);
-    *a->phase = 2;
-}
-}  // namespace
+namespace { constexpr uint32_t TEST_SIGNAL = 1u << 3; }  // namespace
 
 // wake_matching (driven here via signal_set) must never wake a mask==0 waiter -- only wake_one/
 // wake_all may.
 KTEST_CASE(sched_mask_zero_ignores_signal_wake) {
     kernel::obj::Event ev;
     volatile int phase = 0;
-    EventWaitArgs args{&ev, &phase};
-    KTEST_UNWRAP(t, spawn("mask0", mask_zero_wait_thread, &args));
-    for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
-    KTEST_REQUIRE_EQUAL(phase, 1);
-    for (int i = 0; i < 100000; ++i) {
-        if (t->state() == thread_state::BLOCKED) break;
-        yield();
-    }
-    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    auto body          = [&] {
+        phase = 1;
+        ev.waiters().block(0);
+        phase = 2;
+    };
+    KTEST_UNWRAP(t, spawn_fn("mask0", body));
+    KTEST_YIELD_UNTIL(phase == 1);
+    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
     ev.signal_set(TEST_SIGNAL);
     sleep_ticks(3);  // give it slices; a wrongly-woken waiter would have advanced by now
     KTEST_EXPECT_EQUAL(phase, 1);
     KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
     ev.waiters().wake_one();
-    for (int i = 0; i < 100000 && phase != 2; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(phase, 2);
+    KTEST_YIELD_UNTIL(phase == 2);
 }
 
 // wake_one/wake_all must never wake a signal (nonzero-mask) waiter -- only wake_matching may.
 KTEST_CASE(sched_signal_waiter_ignores_wake_one) {
     kernel::obj::Event ev;
     volatile int phase = 0;
-    EventWaitArgs args{&ev, &phase};
-    KTEST_UNWRAP(t, spawn("sigwait", signal_wait_thread, &args));
-    for (int i = 0; i < 100000 && phase == 0; ++i) { yield(); }
-    KTEST_REQUIRE_EQUAL(phase, 1);
-    for (int i = 0; i < 100000; ++i) {
-        if (t->state() == thread_state::BLOCKED) break;
-        yield();
-    }
-    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    auto body          = [&] {
+        phase = 1;
+        ev.wait_signals(TEST_SIGNAL);
+        phase = 2;
+    };
+    KTEST_UNWRAP(t, spawn_fn("sigwait", body));
+    KTEST_YIELD_UNTIL(phase == 1);
+    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
     ev.waiters().wake_one();
     sleep_ticks(3);
     KTEST_EXPECT_EQUAL(phase, 1);
     KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
     ev.signal_set(TEST_SIGNAL);
-    for (int i = 0; i < 100000 && phase != 2; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(phase, 2);
+    KTEST_YIELD_UNTIL(phase == 2);
 }
-
-namespace {
-volatile int g_sem_phase;
-void sem_acquirer_thread(void* arg) {
-    auto* sem   = static_cast<kernel::obj::Semaphore*>(arg);
-    g_sem_phase = 1;
-    sem->acquire();
-    g_sem_phase = 2;
-}
-}  // namespace
 
 KTEST_CASE(sched_semaphore_blocks_and_wakes) {
-    auto sem    = ktl::make_ref<kernel::obj::Semaphore>(0u);
-    g_sem_phase = 0;
-    KTEST_UNWRAP(t, spawn("acquirer", sem_acquirer_thread, sem.get()));
-    for (int i = 0; i < 100000 && g_sem_phase == 0; ++i) { yield(); }
-    KTEST_REQUIRE_EQUAL(g_sem_phase, 1);
-    for (int i = 0; i < 100000; ++i) {
-        if (t->state() == thread_state::BLOCKED) break;
-        yield();
-    }
-    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
+    auto sem           = ktl::make_ref<kernel::obj::Semaphore>(0u);
+    volatile int phase = 0;
+    auto body          = [&] {
+        phase = 1;
+        sem->acquire();
+        phase = 2;
+    };
+    KTEST_UNWRAP(t, spawn_fn("acquirer", body));
+    KTEST_YIELD_UNTIL(phase == 1);
+    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
     sleep_ticks(3);  // must stay blocked across slices
-    KTEST_EXPECT_EQUAL(g_sem_phase, 1);
+    KTEST_EXPECT_EQUAL(phase, 1);
     sem->release();
-    for (int i = 0; i < 100000 && g_sem_phase != 2; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_sem_phase, 2);
+    KTEST_YIELD_UNTIL(phase == 2);
     uint32_t sig = t->wait_signals(kernel::sched::Thread::SIGNAL_TERMINATED);
     KTEST_EXPECT_TRUE((sig & kernel::sched::Thread::SIGNAL_TERMINATED) != 0);
 }
 
-namespace {
-kernel::synchronization::mutex g_test_mutex;
-volatile int g_mutex_phase;
-void mutex_waiter_thread(void*) {
-    kernel::synchronization::lock_guard guard(g_test_mutex);
-    g_mutex_phase = 2;
-}
-}  // namespace
-
 KTEST_CASE(sched_mutex_blocks_and_wakes) {
-    g_mutex_phase = 0;
-    g_test_mutex.lock();
-    KTEST_UNWRAP(t, spawn("mutex-waiter", mutex_waiter_thread, nullptr));
-    g_mutex_phase = 1;
-    for (int i = 0; i < 100000; ++i) {
-        if (t->state() == thread_state::BLOCKED) break;
-        yield();
-    }
-    KTEST_REQUIRE_TRUE(t->state() == thread_state::BLOCKED);
-    KTEST_EXPECT_EQUAL(g_mutex_phase, 1);
-    g_test_mutex.unlock();
-    for (int i = 0; i < 100000 && g_mutex_phase != 2; ++i) { yield(); }
-    KTEST_EXPECT_EQUAL(g_mutex_phase, 2);
+    kernel::synchronization::mutex mtx;
+    volatile int phase = 0;
+    auto body          = [&] {
+        kernel::synchronization::lock_guard guard(mtx);
+        phase = 2;
+    };
+    mtx.lock();
+    KTEST_UNWRAP(t, spawn_fn("mutex-waiter", body));
+    phase = 1;
+    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
+    KTEST_EXPECT_EQUAL(phase, 1);
+    mtx.unlock();
+    KTEST_YIELD_UNTIL(phase == 2);
 }
-
-namespace {
-volatile uint64_t g_deferred_runs;
-volatile bool g_deferred_stop;
-void deferred_spinner(void*) {
-    while (!g_deferred_stop) { g_deferred_runs = g_deferred_runs + 1; }
-}
-}  // namespace
 
 KTEST_CASE(sched_critical_section_defers_preemption) {
-    g_deferred_runs = 0;
-    g_deferred_stop = false;
-    KTEST_UNWRAP(t, spawn("deferred-spinner", deferred_spinner, nullptr));
+    volatile uint64_t runs = 0;
+    volatile bool stop     = false;
+    auto body              = [&] {
+        while (!stop) { runs = runs + 1; }
+    };
+    KTEST_UNWRAP(t, spawn_fn("deferred-spinner", body));
     {
         kernel::synchronization::critical_section critical;
-        uint64_t before = g_deferred_runs;
+        uint64_t before = runs;
         ktime_t until   = kernel::time::now() + 2 * CONFIG_SCHED_TIMESLICE_TICKS;
         while (kernel::time::now() < until) {}
-        KTEST_EXPECT_EQUAL(g_deferred_runs, before);
+        KTEST_EXPECT_EQUAL(runs, before);
         KTEST_EXPECT_TRUE(kernel::synchronization::current_execution_context().preempt_pending);
     }
-    KTEST_EXPECT_TRUE(g_deferred_runs > 0);
-    g_deferred_stop = true;
-    for (int i = 0; i < 100000 && t->state() != thread_state::DEAD; ++i) { yield(); }
+    KTEST_EXPECT_TRUE(runs > 0);
+    stop = true;
+    KTEST_YIELD_UNTIL(t->state() == thread_state::DEAD);
 }
 
 namespace {
@@ -330,18 +250,12 @@ KTEST_CASE(time_ns_since_boot_is_highres) {
     }
 }
 
-namespace {
-volatile int g_acct_phase;
-void acct_thread(void*) {
-    g_acct_phase = 1;
-    kernel::sched::yield();
-    kernel::sched::sleep_ticks(2);
-}
-}  // namespace
-
 KTEST_CASE(sched_accounting_lifecycle_counters) {
-    g_acct_phase = 0;
-    KTEST_UNWRAP(t, spawn("acct", acct_thread, nullptr));
+    auto body = [] {
+        kernel::sched::yield();
+        kernel::sched::sleep_ticks(2);
+    };
+    KTEST_UNWRAP(t, spawn_fn("acct", body));
     t->wait_signals(Thread::SIGNAL_TERMINATED);
     KTEST_EXPECT_TRUE(t->stats().scheduled >= 2);  // initial run + wake from sleep
     KTEST_EXPECT_TRUE(t->stats().yields >= 1);
@@ -352,7 +266,8 @@ KTEST_CASE(sched_accounting_lifecycle_counters) {
 
 KTEST_CASE(sched_trace_records_thread_life) {
     kernel::sched::trace_clear();
-    KTEST_UNWRAP(t, spawn("traced", exit_immediately_thread, nullptr));
+    auto body = [] {};
+    KTEST_UNWRAP(t, spawn_fn("traced", body));
     uint64_t tid = t->id();
     t->wait_signals(Thread::SIGNAL_TERMINATED);
     kernel::sched::trace_record recs[64];
@@ -391,5 +306,3 @@ KTEST_CASE(sched_idle_state_truthful_while_switched_out) {
     }
     KTEST_REQUIRE_TRUE(found_idle);
 }
-
-#endif

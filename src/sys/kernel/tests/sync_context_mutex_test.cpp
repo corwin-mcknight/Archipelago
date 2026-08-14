@@ -1,11 +1,8 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/synchronization/guard.h>
 #include <kernel/synchronization/lockdep.h>
 #include <kernel/synchronization/mutex.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::synchronization;
 
@@ -63,5 +60,3 @@ KTEST(sync_lockdep_reclaims_identities, "sync/lockdep") {
     }
     KTEST_EXPECT_EQUAL(current_execution_context().held_count, 0u);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

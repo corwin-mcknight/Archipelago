@@ -2,8 +2,6 @@
 #include <std/stdlib.h>
 #include <stddef.h>
 
-#if CONFIG_KERNEL_TESTING
-
 using namespace kernel::testing;
 
 KTEST_MODULE("std/stdlib");
@@ -36,5 +34,3 @@ KTEST_CASE(std_itoa_zero_and_bases) {
     KTEST_EXPECT_EQUAL(buffer16[7], 'F');
     KTEST_EXPECT_EQUAL(buffer16[8], '\0');
 }
-
-#endif

@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <abi/syscall.h>
 #include <kernel/obj/handle_dispatch.h>
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -86,5 +83,3 @@ KTEST_CASE(handle_dispatch_fresh_table_allocates_slot_zero_first) {
     KTEST_UNWRAP(second, table.emplace<TestObjB>(RIGHTS_ALL));
     KTEST_EXPECT_ALL(pack(first) == sys::BOOTSTRAP_HANDLE, pack(second) == 1);
 }
-
-#endif

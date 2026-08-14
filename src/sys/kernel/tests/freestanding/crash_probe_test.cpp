@@ -1,7 +1,4 @@
 #include <kernel/config.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -92,5 +89,3 @@ KTEST_CASE(crash_walk_fake_chain) {
     KTEST_EXPECT_EQUAL(bt.frames[0], ret1);
     KTEST_EXPECT_EQUAL(bt.frames[1], ret2);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

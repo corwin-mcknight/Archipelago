@@ -1,7 +1,5 @@
 #include <kernel/testing/testing.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/deque>
 
 KTEST_MODULE("ktl/deque_cycle");
@@ -105,5 +103,3 @@ KTEST_CASE(deque_cycle_population_waves) {
     }
     KTEST_EXPECT_EQUAL(next_in, next_out);
 }
-
-#endif

@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/tracking_value.h>
 
 #include <ktl/maybe>
@@ -20,9 +17,7 @@ KTEST_CASE(ktl_vector_push_and_index) {
     KTEST_REQUIRE_TRUE(vec.push_back(3));
 
     KTEST_EXPECT_ALL(vec.size() == 3, vec.capacity() >= vec.size());
-    KTEST_EXPECT_EQUAL(vec[0], 1);
-    KTEST_EXPECT_EQUAL(vec[1], 2);
-    KTEST_EXPECT_EQUAL(vec[2], 3);
+    KTEST_EXPECT_ALL(vec[0] == 1, vec[1] == 2, vec[2] == 3);
 
     KTEST_EXPECT_VALUE(vec.front(), 1);
     KTEST_EXPECT_VALUE(vec.back(), 3);
@@ -80,8 +75,7 @@ KTEST_CASE(ktl_vector_move_semantics) {
 
     ktl::vector<tracking_value> moved = ktl::move(vec);
     KTEST_EXPECT_ALL(vec.size() == 0, moved.size() == 1);
-    KTEST_EXPECT_EQUAL(moved[0].value, 42);
-    KTEST_EXPECT_TRUE(moved[0].move_observed);
+    KTEST_EXPECT_ALL(moved[0].value == 42, moved[0].move_observed);
 }
 
 KTEST_CASE(ktl_vector_iterators) {
@@ -152,5 +146,3 @@ KTEST_CASE(ktl_vector_const_index) {
     const ktl::vector<int>& cref = vec;
     KTEST_EXPECT_EQUAL(cref[0], 7);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

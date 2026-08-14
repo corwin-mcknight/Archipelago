@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/synchronization/spinlock.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using kernel::synchronization::critical_section;
@@ -30,5 +27,3 @@ KTEST_CASE(spinlock_state_machine) {
     KTEST_EXPECT_TRUE(lock.try_lock());
     lock.unlock();
 }
-
-#endif  // CONFIG_KERNEL_TESTING

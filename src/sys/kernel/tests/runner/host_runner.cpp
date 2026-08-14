@@ -51,24 +51,12 @@ void json_escape(const char* in, char* out, size_t cap) {
         unsigned char c = static_cast<unsigned char>(in[i]);
         switch (c) {
             case '"':
-                put('\\');
-                put('"');
-                break;
             case '\\':
-                put('\\');
-                put('\\');
-                break;
             case '\n':
-                put('\\');
-                put('n');
-                break;
             case '\r':
-                put('\\');
-                put('r');
-                break;
             case '\t':
                 put('\\');
-                put('t');
+                put(c);
                 break;
             default:
                 if (c < 0x20) {

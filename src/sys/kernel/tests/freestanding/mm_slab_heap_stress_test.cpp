@@ -1,12 +1,9 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/log.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/slab_heap.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/thread.h>
+#include <kernel/testing/testing.h>
 #include <std/string.h>
 
 #include <ktl/atomic>
@@ -114,5 +111,3 @@ KTEST_CASE_INTEGRATION(slab_heap_concurrent_hammer) {
     size_t free_after = g_page_frame_allocator.free_pages();
     KTEST_EXPECT_TRUE(free_before <= free_after + slab_heap::CLASS_COUNT + 16);
 }
-
-#endif

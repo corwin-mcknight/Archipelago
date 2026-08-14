@@ -1,13 +1,11 @@
+#include "kernel/symbols.h"
+
 #include <kernel/config.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <stdint.h>
 
 #include <ktl/span>
 #include <ktl/string_view>
 
-#include "kernel/symbols.h"
 #include "kernel/testing/testing.h"
 
 KTEST_MODULE("symbols");
@@ -83,5 +81,3 @@ KTEST_CASE(symbols_demangle_rejects_unsupported) {
     // Contains a destructor token (`D1`) we don't support; expect graceful fail.
     KTEST_EXPECT_FALSE(kernel::symbols::demangle("_ZN6kernelD1Ev", ktl::span(buf)));
 }
-
-#endif  // CONFIG_KERNEL_TESTING

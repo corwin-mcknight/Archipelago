@@ -1,10 +1,8 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/event.h>
 #include <kernel/obj/port.h>
 #include <kernel/sched/scheduler.h>
+#include <kernel/testing/spawn.h>
+#include <kernel/testing/testing.h>
 #include <kernel/time.h>
 
 using namespace kernel::obj;
@@ -20,14 +18,11 @@ KTEST_CASE_INTEGRATION(port_wait_wakes_through_binding) {
     KTEST_REQUIRE_TRUE(port && event);
     KTEST_REQUIRE_TRUE(port->bind(event, 9, 0b1).is_ok());
 
-    auto signaler = kernel::sched::spawn(
-        "port-signaler",
-        [](void* arg) {
-            kernel::sched::sleep_ticks(2);
-            static_cast<Event*>(arg)->signal_set(0b1);
-        },
-        event.get());
-    KTEST_REQUIRE_TRUE(signaler.is_ok());
+    auto signal_soon = [&] {
+        kernel::sched::sleep_ticks(2);
+        event->signal_set(0b1);
+    };
+    KTEST_REQUIRE_TRUE(kernel::testing::spawn_fn("port-signaler", signal_soon).is_ok());
 
     uint32_t got = port->wait_signals_deadline(Port::SIGNAL_READABLE, kernel::time::now() + 500);
     KTEST_REQUIRE_TRUE((got & Port::SIGNAL_READABLE) != 0);
@@ -43,5 +38,3 @@ KTEST_CASE_INTEGRATION(port_wait_wakes_through_binding) {
     KTEST_EXPECT_TRUE(kernel::time::now() - before >= 3);
     KTEST_EXPECT_TRUE(port->unbind(9) == 1);
 }
-
-#endif

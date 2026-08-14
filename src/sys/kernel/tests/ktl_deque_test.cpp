@@ -1,9 +1,6 @@
 #include <kernel/testing/testing.h>
-#include <stddef.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/tracking_value.h>
+#include <stddef.h>
 
 #include <ktl/deque>
 #include <ktl/maybe>
@@ -53,11 +50,7 @@ KTEST_CASE(ktl_deque_push_front_back_order) {
     KTEST_REQUIRE_TRUE(dq.push_back(3));
     KTEST_REQUIRE_TRUE(dq.emplace_front(0));
 
-    KTEST_EXPECT_TRUE(dq.size() == 4);
-    KTEST_EXPECT_EQUAL(dq[0], 0);
-    KTEST_EXPECT_EQUAL(dq[1], 1);
-    KTEST_EXPECT_EQUAL(dq[2], 2);
-    KTEST_EXPECT_EQUAL(dq[3], 3);
+    KTEST_EXPECT_ALL(dq.size() == 4, dq[0] == 0, dq[1] == 1, dq[2] == 2, dq[3] == 3);
 
     KTEST_EXPECT_VALUE(dq.front(), 0);
     KTEST_EXPECT_VALUE(dq.back(), 3);
@@ -73,13 +66,10 @@ KTEST_CASE(ktl_deque_pop_front_back) {
     KTEST_EXPECT_VALUE(dq.pop_back(), 4);
     KTEST_EXPECT_TRUE(dq.size() == 3);
 
-    KTEST_EXPECT_EQUAL(dq[0], 1);
-    KTEST_EXPECT_EQUAL(dq[1], 2);
-    KTEST_EXPECT_EQUAL(dq[2], 3);
+    KTEST_EXPECT_ALL(dq[0] == 1, dq[1] == 2, dq[2] == 3);
 
     dq.clear();
-    KTEST_EXPECT_TRUE(dq.empty());
-    KTEST_EXPECT_FALSE(dq.pop_front().has_value());
+    KTEST_EXPECT_ALL(dq.empty(), !dq.pop_front().has_value());
 }
 
 KTEST_CASE(ktl_deque_move_semantics) {
@@ -120,8 +110,7 @@ KTEST_CASE(ktl_deque_iterator_and_reserve) {
     auto mutable_begin                        = dq.begin();
     ktl::deque<int>::const_iterator converted = mutable_begin;
     KTEST_EXPECT_ALL(converted == dq.begin(), dq.begin() == converted);
-    KTEST_EXPECT_EQUAL(converted[10], 10);
-    KTEST_EXPECT_EQUAL(dq.begin()[15], 15);
+    KTEST_EXPECT_ALL(converted[10] == 10, dq.begin()[15] == 15);
 
     const auto& const_ref = dq;
     int index             = 0;
@@ -134,8 +123,7 @@ KTEST_CASE(ktl_deque_iterator_and_reserve) {
     KTEST_EXPECT_EQUAL(static_cast<size_t>(dq.end() - dq.begin()), dq.size());
     KTEST_EXPECT_EQUAL(static_cast<size_t>(const_ref.cend() - dq.begin()), const_ref.size());
     KTEST_EXPECT_EQUAL(static_cast<size_t>(dq.begin() - const_ref.cbegin()), 0u);
-    KTEST_EXPECT_EQUAL(*(dq.begin() + 5), 5);
-    KTEST_EXPECT_EQUAL(*(dq.begin() + 20), 20);
+    KTEST_EXPECT_ALL(*(dq.begin() + 5) == 5, *(dq.begin() + 20) == 20);
 }
 
 KTEST_CASE(ktl_deque_stress_front_back_mixed) {
@@ -163,8 +151,7 @@ KTEST_CASE(ktl_deque_stress_front_back_mixed) {
 
     size_t index = 0;
     for (auto it = dq.begin(); it != dq.end(); ++it) {
-        KTEST_EXPECT_TRUE(index < model.size());
-        KTEST_EXPECT_EQUAL(*it, model.at(index));
+        KTEST_EXPECT_ALL(index < model.size(), *it == model.at(index));
         ++index;
     }
     KTEST_EXPECT_EQUAL(index, model.size());
@@ -250,8 +237,7 @@ KTEST_CASE(ktl_deque_index_across_blocks) {
 
     const auto& const_ref = dq;
     for (int i = 0; i < element_count; ++i) {
-        KTEST_EXPECT_EQUAL(dq[static_cast<size_t>(i)], i * 3);
-        KTEST_EXPECT_EQUAL(const_ref[static_cast<size_t>(i)], i * 3);
+        KTEST_EXPECT_ALL(dq[static_cast<size_t>(i)] == i * 3, const_ref[static_cast<size_t>(i)] == i * 3);
     }
 
     // Non-const operator[] returns a mutable reference into the right block.
@@ -269,16 +255,10 @@ KTEST_CASE(ktl_deque_push_front_refills_popped_slots) {
     ktl::deque<int> d;
     for (int i = 0; i < 40; ++i) { d.push_back(i); }  // spans multiple 16-slot blocks
     for (int i = 0; i < 5; ++i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == i); }
-    KTEST_EXPECT_TRUE(d.front().value_or(-1) == 5);
-    KTEST_EXPECT_TRUE(d.back().value_or(-1) == 39);
+    KTEST_EXPECT_ALL(d.front().value_or(-1) == 5, d.back().value_or(-1) == 39);
 
     for (int i = 0; i < 5; ++i) { d.push_front(100 + i); }
-    KTEST_EXPECT_TRUE(d.size() == 40);
-    KTEST_EXPECT_TRUE(d.front().value_or(-1) == 104);
-    KTEST_EXPECT_TRUE(d[0] == 104);
-    KTEST_EXPECT_TRUE(d[4] == 100);
-    KTEST_EXPECT_TRUE(d[5] == 5);
-    KTEST_EXPECT_TRUE(d[39] == 39);
+    KTEST_EXPECT_ALL(d.size() == 40, d.front().value_or(-1) == 104, d[0] == 104, d[4] == 100, d[5] == 5, d[39] == 39);
 
     for (int i = 4; i >= 0; --i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == 100 + i); }
     for (int i = 5; i < 40; ++i) { KTEST_EXPECT_TRUE(d.pop_front().value_or(-1) == i); }
@@ -295,9 +275,7 @@ KTEST_CASE(ktl_deque_drain_to_empty_from_front) {
     for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i)); }
     for (int i = 0; i < element_count; ++i) { KTEST_EXPECT_VALUE(dq.pop_front(), i); }
 
-    KTEST_EXPECT_TRUE(dq.empty());
-    KTEST_EXPECT_EQUAL(dq.size(), static_cast<size_t>(0));
-    KTEST_EXPECT_FALSE(dq.pop_front().has_value());
+    KTEST_EXPECT_ALL(dq.empty(), dq.size() == static_cast<size_t>(0), !dq.pop_front().has_value());
 
     // The emptied blocks are kept as reserve, so refilling must still land elements in order.
     for (int i = 0; i < element_count; ++i) { KTEST_REQUIRE_TRUE(dq.push_back(i * 2)); }
@@ -327,5 +305,3 @@ KTEST_CASE(ktl_deque_drain_to_empty_alternating) {
     KTEST_REQUIRE_TRUE(dq.push_front(99));
     KTEST_EXPECT_VALUE(dq.pop_back(), 99);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

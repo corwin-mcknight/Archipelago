@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -27,8 +24,7 @@ KTEST_CASE(obj_counter_value_operations) {
 KTEST_CASE(obj_counter_rights_enforcement) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<Counter>(RIGHT_READ, static_cast<uint64_t>(0)));
-    auto got = table.get<Counter>(id, RIGHT_WRITE);
-    KTEST_EXPECT_ALL(got.is_err(), got.unwrap_err() == ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.get<Counter>(id, RIGHT_WRITE), ktl::errc::rights_violation);
 }
 
 // Counter and Event are distinct registered types that coexist in one table: cross-type
@@ -47,5 +43,3 @@ KTEST_CASE(obj_counter_and_event_coexist) {
     KTEST_EXPECT_ALL(g_type_registry.live_count(Event::TYPE_ID) == evt_before + 1,
                      g_type_registry.live_count(Counter::TYPE_ID) == ctr_before + 1);
 }
-
-#endif

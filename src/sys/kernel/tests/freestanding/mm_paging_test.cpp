@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/mm/paging.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/vm_aspace.h>
+#include <kernel/testing/testing.h>
 
 // HHDM base, set during boot from the Limine response. Its virtual range is a
 // kernel-half mapping the bootloader installs (huge pages on QEMU), so it lets
@@ -245,5 +242,3 @@ KTEST_CASE_INTEGRATION(paging_activate_and_touch) {
     KTEST_REQUIRE_TRUE(space.unmap_page(mid_vaddr).has_value());
     kernel::mm::g_page_frame_allocator.free(frame);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

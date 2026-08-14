@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/tracking_value.h>
 
 #include <ktl/maybe>
@@ -21,8 +18,7 @@ KTEST_CASE(ktl_maybe_basic_operations) {
     KTEST_EXPECT_ALL(!empty.has_value(), value.has_value());
     KTEST_EXPECT_ALL(static_cast<bool>(value), !static_cast<bool>(empty));
     if (!value) { KTEST_EXPECT_TRUE(false); }
-    KTEST_EXPECT_EQUAL(value.value(), 5);
-    KTEST_EXPECT_EQUAL(empty.value_or(42), 42);
+    KTEST_EXPECT_ALL(value.value() == 5, empty.value_or(42) == 42);
 
     KTEST_EXPECT_VALUE(value.map([](int v) { return v * 2; }), 10);
     KTEST_EXPECT_FALSE(empty.map([](int v) { return v + 1; }).has_value());
@@ -67,9 +63,7 @@ KTEST_CASE(ktl_maybe_move_construction) {
     ktl::maybe<tracking_value> moved_in{ktl::move(tv)};
 
     KTEST_REQUIRE_TRUE(moved_in.has_value());
-    KTEST_EXPECT_EQUAL(moved_in.value().value, 7);
-    KTEST_EXPECT_TRUE(moved_in.value().move_observed);
-    KTEST_EXPECT_EQUAL(tv.value, -1);
+    KTEST_EXPECT_ALL(moved_in.value().value == 7, moved_in.value().move_observed, tv.value == -1);
 }
 
 KTEST_CASE(ktl_maybe_take_moves_value_out) {
@@ -77,9 +71,7 @@ KTEST_CASE(ktl_maybe_take_moves_value_out) {
     auto taken = source.take();
 
     KTEST_REQUIRE_TRUE(taken.has_value());
-    KTEST_EXPECT_EQUAL(taken.value().value, 42);
-    KTEST_EXPECT_TRUE(taken.value().move_observed);
-    KTEST_EXPECT_FALSE(source.has_value());
+    KTEST_EXPECT_ALL(taken.value().value == 42, taken.value().move_observed, !source.has_value());
 
     auto taken_again = source.take();
     KTEST_EXPECT_FALSE(taken_again.has_value());
@@ -110,18 +102,14 @@ KTEST_CASE(ktl_maybe_ref_basics) {
     ktl::maybe<int&> empty;
 
     KTEST_EXPECT_ALL(ref.has_value(), !empty.has_value());
-    KTEST_EXPECT_TRUE(static_cast<bool>(ref));
-    KTEST_EXPECT_EQUAL(ref.value(), 5);
-    KTEST_EXPECT_EQUAL(*ref, 5);
+    KTEST_EXPECT_ALL(static_cast<bool>(ref), ref.value() == 5, *ref == 5);
 
     // maybe<T&> aliases the referent: writes through it land at the origin.
     ref.value() = 7;
     KTEST_EXPECT_EQUAL(x, 7);
 
     int fallback = 9;
-    KTEST_EXPECT_EQUAL(empty.value_or(fallback), 9);
-    KTEST_EXPECT_EQUAL(ref.value_or(fallback), 7);
-    KTEST_EXPECT_EQUAL(ref.expect("present"), 7);
+    KTEST_EXPECT_ALL(empty.value_or(fallback) == 9, ref.value_or(fallback) == 7, ref.expect("present") == 7);
 
     KTEST_EXPECT_ALL(empty.ptr_or() == nullptr, ref.ptr_or() == &x);
 
@@ -177,9 +165,7 @@ KTEST_CASE(ktl_maybe_value_round_trip) {
     KTEST_REQUIRE_TRUE(p.has_value());
 
     // value(), operator* and operator-> all expose the stored value.
-    KTEST_EXPECT_EQUAL(p.value().x, 3);
-    KTEST_EXPECT_EQUAL((*p).y, 4);
-    KTEST_EXPECT_EQUAL(p->x, 3);
+    KTEST_EXPECT_ALL(p.value().x == 3, (*p).y == 4, p->x == 3);
 
     // Mutation through the non-const accessors round-trips.
     p.value().x = 10;
@@ -188,9 +174,7 @@ KTEST_CASE(ktl_maybe_value_round_trip) {
 
     const ktl::maybe<point>& const_ref = p;
     KTEST_REQUIRE_TRUE(const_ref.has_value());
-    KTEST_EXPECT_EQUAL(const_ref.value().x, 11);
-    KTEST_EXPECT_EQUAL((*const_ref).y, 20);
-    KTEST_EXPECT_EQUAL(const_ref->y, 20);
+    KTEST_EXPECT_ALL(const_ref.value().x == 11, (*const_ref).y == 20, const_ref->y == 20);
 }
 
 // results with trivially copyable payloads must stay trivially copyable (register-passable).
@@ -201,8 +185,7 @@ KTEST(ktl_result_ok_flow, "ktl/result") {
     auto ok_result = ktl::result<int, const char*>::ok(10);
 
     KTEST_EXPECT_ALL(ok_result.is_ok(), !ok_result.is_err());
-    KTEST_EXPECT_EQUAL(ok_result.unwrap(), 10);
-    KTEST_EXPECT_EQUAL(ok_result.expect("should not fail"), 10);
+    KTEST_EXPECT_ALL(ok_result.unwrap() == 10, ok_result.expect("should not fail") == 10);
 
     KTEST_EXPECT_TRUE((ok_result == ktl::result<int, const char*>::ok(10)));
 }
@@ -258,5 +241,3 @@ KTEST(ktl_result_copy_and_move_construction, "ktl/result") {
     ktl::result<int> err_moved(ktl::move(err_copy));
     KTEST_EXPECT_TRUE(err_moved.is_err());
 }
-
-#endif  // CONFIG_KERNEL_TESTING

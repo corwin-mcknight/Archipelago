@@ -1,7 +1,3 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <abi/message.h>
 #include <kernel/boot.h>
 #include <kernel/elf.h>
@@ -12,6 +8,8 @@
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/syscall.h>
+#include <kernel/testing/spawn.h>
+#include <kernel/testing/testing.h>
 #include <kernel/time.h>
 #include <std/string.h>
 
@@ -408,14 +406,11 @@ KTEST_CASE_INTEGRATION(object_wait_timeout) {
     KTEST_EXPECT_TRUE(kernel::time::now() - before >= ticks);
 
     // A signal arriving before the deadline wins the race against the expiry scan.
-    auto writer = kernel::sched::spawn(
-        "utest-writer",
-        [](void* arg) {
-            kernel::sched::sleep_ticks(2);
-            (void)static_cast<Channel*>(arg)->write(MessageBuffer{});
-        },
-        pair.second.get());
-    KTEST_REQUIRE_TRUE(writer.is_ok());
+    auto write_soon = [&] {
+        kernel::sched::sleep_ticks(2);
+        (void)pair.second->write(MessageBuffer{});
+    };
+    KTEST_REQUIRE_TRUE(kernel::testing::spawn_fn("utest-writer", write_soon).is_ok());
     uint64_t long_timeout = static_cast<uint64_t>(kernel::time::ktime_to_ns(500));
     uint64_t woken = syscall_dispatch(sys::SYS_OBJECT_WAIT, handle, Channel::SIGNAL_READABLE, long_timeout, 0, 0, 0);
     KTEST_EXPECT_TRUE((woken & Channel::SIGNAL_READABLE) != 0);
@@ -491,5 +486,3 @@ KTEST_CASE_INTEGRATION(user_task_unresolved_fault_terminates_task) {
     // Returning a passing test result makes the harness wait for the next shell-ready record,
     // proving the kernel remained live and the shell stayed reachable after the fault.
 }
-
-#endif

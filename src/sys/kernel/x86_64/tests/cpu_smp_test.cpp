@@ -4,8 +4,6 @@
 #include <kernel/testing/testing.h>
 #include <kernel/x86/cpu.h>
 
-#if CONFIG_KERNEL_TESTING
-
 using namespace kernel::testing;
 
 KTEST_MODULE("x86/cpu");
@@ -28,5 +26,3 @@ KTEST_CASE(cpu_smp_cores_initialized) {
         KTEST_EXPECT_EQUAL((size_t)g_cpu_cores[i].lapic_id, (size_t)kernel::boot::cpu_hw_id(i));
     }
 }
-
-#endif

@@ -1,7 +1,5 @@
 #include <kernel/testing/testing.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/static_vector>
 
 using namespace kernel::testing;
@@ -17,5 +15,3 @@ KTEST(ktl_static_vector_at_bounds_on_size_not_capacity, "ktl/static_vector") {
     KTEST_EXPECT_TRUE(!v.at(2).has_value());
     KTEST_EXPECT_TRUE(!v.at(5).has_value());
 }
-
-#endif  // CONFIG_KERNEL_TESTING

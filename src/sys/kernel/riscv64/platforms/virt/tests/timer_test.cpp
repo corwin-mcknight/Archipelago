@@ -1,8 +1,6 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
 #include <kernel/arch.h>
 #include <kernel/platform.h>
+#include <kernel/testing/testing.h>
 #include <kernel/time.h>
 
 KTEST_MODULE("riscv64/virt/timer");
@@ -19,4 +17,3 @@ KTEST_CASE(virt_sbi_timer_advances_time) {
     KTEST_REQUIRE_TRUE(kernel::time::now() > start);
     KTEST_EXPECT_TRUE(kernel::time::ns_since_boot() > 0);
 }
-#endif

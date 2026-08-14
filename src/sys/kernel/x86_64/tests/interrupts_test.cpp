@@ -1,7 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
 #include <kernel/interrupt.h>
+#include <kernel/testing/testing.h>
 #include <kernel/x86/registers.h>
 
 namespace {
@@ -68,5 +66,3 @@ KTEST_CASE_INTEGRATION(interrupt_manager_dispatches_object_handler) {
 
     g_interrupt_manager.clear_handler(kernel_test_interrupt_no);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

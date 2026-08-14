@@ -1,7 +1,5 @@
 #include <kernel/testing/testing.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/atomic>
 
 using namespace kernel::testing;
@@ -46,5 +44,3 @@ KTEST_CASE(ktl_atomic_uint64) {
     KTEST_EXPECT_TRUE(prev == 0xDEADBEEFCAFE);
     KTEST_EXPECT_TRUE(a.load() == 0xDEADBEEFCAFF);
 }
-
-#endif

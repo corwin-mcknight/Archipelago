@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/tracking_value.h>
 
 #include <ktl/stack>
@@ -51,5 +48,3 @@ KTEST_CASE(ktl_stack_move_and_alternate_container) {
     KTEST_EXPECT_VALUE(vector_backed.pop(), 20);
     KTEST_EXPECT_TRUE(vector_backed.size() == 1);
 }
-
-#endif

@@ -1,23 +1,9 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/sched/task.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::sched;
 
 KTEST_MODULE("sched/task");
-
-KTEST_CASE(task_lifecycle_states) {
-    auto task = ktl::make_ref<Task>();
-    KTEST_REQUIRE_TRUE(static_cast<bool>(task));
-    KTEST_EXPECT_TRUE(task->state() == task_state::NEW);
-    task->set_state(task_state::RUNNING);
-    KTEST_EXPECT_TRUE(task->state() == task_state::RUNNING);
-    task->set_state(task_state::TERMINATED);
-    KTEST_EXPECT_TRUE(task->state() == task_state::TERMINATED);
-    KTEST_EXPECT_TRUE(task->aspace() == nullptr);
-}
 
 KTEST_CASE(task_registry_snapshot) {
     ktl::vector<ktl::ref<Task>> before;
@@ -32,5 +18,3 @@ KTEST_CASE(task_registry_snapshot) {
     KTEST_REQUIRE_TRUE(snapshot_tasks(after));
     KTEST_EXPECT_EQUAL(after.size(), before.size());
 }
-
-#endif

@@ -1,9 +1,6 @@
 // src/sys/kernel/tests/sched_trace_test.cpp
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/sched/trace.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::sched;
 
@@ -70,5 +67,3 @@ KTEST_CASE(sched_cycles_to_human_units) {
     auto big = cycles_to_human(10'000'000'000'000ull, 5'000'000'000ull);
     KTEST_EXPECT_EQUAL(big.whole, 2000u);
 }
-
-#endif

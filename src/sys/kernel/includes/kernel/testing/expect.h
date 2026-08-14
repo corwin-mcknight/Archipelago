@@ -1,9 +1,5 @@
 #pragma once
 
-#include <kernel/config.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/registry.h>
 #include <stddef.h>
 
@@ -121,10 +117,3 @@ void run_assert(const lhs_capture<L>& c, bool fatal, const char* file, int line,
 
 #define EXPECT(expr) KTEST_CHECK_IMPL(expr, false)
 #define REQUIRE(expr) KTEST_CHECK_IMPL(expr, true)
-
-#else  // CONFIG_KERNEL_TESTING
-
-#define EXPECT(expr) ((void)0)
-#define REQUIRE(expr) ((void)0)
-
-#endif  // CONFIG_KERNEL_TESTING

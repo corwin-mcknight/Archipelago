@@ -1,10 +1,7 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/event.h>
 #include <kernel/obj/port.h>
 #include <kernel/testing/test_objects.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -116,5 +113,3 @@ KTEST_CASE(obj_port_two_sources_fifo) {
     KTEST_EXPECT_TRUE(packet.key == 100);
     KTEST_EXPECT_FALSE(port->dequeue(packet));
 }
-
-#endif

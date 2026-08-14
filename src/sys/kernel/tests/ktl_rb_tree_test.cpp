@@ -1,8 +1,6 @@
 #include <kernel/testing/testing.h>
 #include <stddef.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/rb_tree>
 
 using namespace kernel::testing;
@@ -68,9 +66,7 @@ KTEST_CASE(ktl_rb_tree_duplicate_rejected) {
     nodes[1].key = 5;
     tree t;
     KTEST_REQUIRE_TRUE(t.insert(nodes[0]));
-    KTEST_EXPECT_FALSE(t.insert(nodes[1]));  // equal key rejected
-    KTEST_EXPECT_EQUAL(t.size(), 1u);
-    KTEST_EXPECT_TRUE(t.validate());
+    KTEST_EXPECT_ALL(!t.insert(nodes[1]), t.size() == 1u, t.validate());  // equal key rejected
 }
 
 KTEST_CASE(ktl_rb_tree_find_and_bounds) {
@@ -82,27 +78,18 @@ KTEST_CASE(ktl_rb_tree_find_and_bounds) {
         KTEST_REQUIRE_TRUE(t.insert(nodes[i]));
     }
 
-    KTEST_EXPECT_TRUE(t.find(30) != t.end());
-    KTEST_EXPECT_EQUAL(t.find(30)->key, 30);
-    KTEST_EXPECT_TRUE(t.find(35) == t.end());
+    KTEST_EXPECT_ALL(t.find(30) != t.end(), t.find(30)->key == 30, t.find(35) == t.end());
 
     // lower_bound: first key >= probe.
-    KTEST_EXPECT_EQUAL(t.lower_bound(30)->key, 30);
-    KTEST_EXPECT_EQUAL(t.lower_bound(31)->key, 40);
-    KTEST_EXPECT_EQUAL(t.lower_bound(0)->key, 0);
-    KTEST_EXPECT_TRUE(t.lower_bound(90) != t.end());
-    KTEST_EXPECT_TRUE(t.lower_bound(91) == t.end());
+    KTEST_EXPECT_ALL(t.lower_bound(30)->key == 30, t.lower_bound(31)->key == 40, t.lower_bound(0)->key == 0,
+                     t.lower_bound(90) != t.end(), t.lower_bound(91) == t.end());
 
     // upper_bound: first key > probe.
-    KTEST_EXPECT_EQUAL(t.upper_bound(30)->key, 40);
-    KTEST_EXPECT_EQUAL(t.upper_bound(29)->key, 30);
-    KTEST_EXPECT_TRUE(t.upper_bound(90) == t.end());
+    KTEST_EXPECT_ALL(t.upper_bound(30)->key == 40, t.upper_bound(29)->key == 30, t.upper_bound(90) == t.end());
 
     // find_le: last key <= probe.
-    KTEST_EXPECT_EQUAL(t.find_le(30)->key, 30);
-    KTEST_EXPECT_EQUAL(t.find_le(35)->key, 30);
-    KTEST_EXPECT_EQUAL(t.find_le(95)->key, 90);
-    KTEST_EXPECT_TRUE(t.find_le(-1) == t.end());
+    KTEST_EXPECT_ALL(t.find_le(30)->key == 30, t.find_le(35)->key == 30, t.find_le(95)->key == 90,
+                     t.find_le(-1) == t.end());
 }
 
 KTEST_CASE(ktl_rb_tree_erase_and_reinsert) {
@@ -150,8 +137,7 @@ KTEST_CASE(ktl_rb_tree_erase_root_and_all) {
         t.erase(*t.begin());
         KTEST_REQUIRE_TRUE(t.validate());
     }
-    KTEST_EXPECT_TRUE(t.empty());
-    KTEST_EXPECT_TRUE(t.begin() == t.end());
+    KTEST_EXPECT_ALL(t.empty(), t.begin() == t.end());
 }
 
 KTEST_CASE(ktl_rb_tree_mixed_workload) {
@@ -189,10 +175,7 @@ KTEST_CASE(ktl_rb_tree_mixed_workload) {
 
     int prev = -1;
     for (auto& e : t) {
-        KTEST_EXPECT_TRUE(e.key > prev);
-        KTEST_EXPECT_TRUE(present[static_cast<size_t>(e.key)]);
+        KTEST_EXPECT_ALL(e.key > prev, present[static_cast<size_t>(e.key)]);
         prev = e.key;
     }
 }
-
-#endif  // CONFIG_KERNEL_TESTING

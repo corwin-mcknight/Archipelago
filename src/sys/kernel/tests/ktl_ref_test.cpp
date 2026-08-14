@@ -1,7 +1,5 @@
 #include <kernel/testing/testing.h>
 
-#if CONFIG_KERNEL_TESTING
-
 #include <ktl/ref>
 
 using namespace kernel::testing;
@@ -87,5 +85,3 @@ KTEST_CASE(ktl_ref_self_assignment_safe) {
     *rp            = r;
     KTEST_EXPECT_ALL(!destroyed, r.ref_count() == 1);
 }
-
-#endif

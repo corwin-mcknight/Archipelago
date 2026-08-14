@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <stddef.h>
 
 #include <ktl/string>
@@ -24,5 +21,3 @@ KTEST_CASE(ktl_strlen_counts_to_first_null) {
     const char16_t wide[] = {u'A', u'B', u'C', u'\0', u'Z'};
     KTEST_EXPECT_TRUE(ktl::strlen(wide) == 3);
 }
-
-#endif  // CONFIG_KERNEL_TESTING

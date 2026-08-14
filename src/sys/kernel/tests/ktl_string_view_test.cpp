@@ -1,6 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
 #include <stddef.h>
 
 #include <ktl/string_view>
@@ -18,10 +16,7 @@ KTEST_CASE(ktl_string_view_default_safe_accessors) {
 KTEST_CASE(ktl_string_view_element_access_and_iteration) {
     ktl::string_view view("kernel");
 
-    KTEST_EXPECT_EQUAL(view.at(0), 'k');
-    KTEST_EXPECT_EQUAL(view.at(3), 'n');
-    KTEST_EXPECT_EQUAL(view.at(view.size() - 1), 'l');
-    KTEST_EXPECT_EQUAL(view.at(2), view[2]);
+    KTEST_EXPECT_ALL(view.at(0) == 'k', view.at(3) == 'n', view.at(view.size() - 1) == 'l', view.at(2) == view[2]);
 
     // The in-range path stays constant-evaluable.
     static_assert(ktl::string_view("abc").at(1) == 'b');
@@ -55,35 +50,25 @@ KTEST_CASE(ktl_string_view_copy_and_substr_clamp) {
     char buffer[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
     size_t copied  = view.copy(buffer, 3);
 
-    KTEST_EXPECT_TRUE(copied == 3);
-    KTEST_EXPECT_EQUAL(buffer[0], 'k');
-    KTEST_EXPECT_EQUAL(buffer[1], 'e');
-    KTEST_EXPECT_EQUAL(buffer[2], 'r');
-    KTEST_EXPECT_EQUAL(buffer[3], 'x');
+    KTEST_EXPECT_ALL(copied == 3, buffer[0] == 'k', buffer[1] == 'e', buffer[2] == 'r', buffer[3] == 'x');
 
     // A copy starting at size() writes nothing.
     copied = view.copy(buffer, sizeof(buffer), view.size());
-    KTEST_EXPECT_TRUE(copied == 0);
-    KTEST_EXPECT_EQUAL(buffer[0], 'k');
+    KTEST_EXPECT_ALL(copied == 0, buffer[0] == 'k');
 
     // substr clamps an oversized count to the remaining length.
     ktl::string_view sub = ktl::string_view("archipelago").substr(4, 50);
-    KTEST_EXPECT_TRUE(sub.size() == 7);
-    KTEST_EXPECT_EQUAL(sub[0], 'i');
-    KTEST_EXPECT_EQUAL(sub[6], 'o');
+    KTEST_EXPECT_ALL(sub.size() == 7, sub[0] == 'i', sub[6] == 'o');
 }
 
 KTEST_CASE(ktl_string_view_compare_and_starts_with) {
     ktl::string_view view("kernel");
 
-    KTEST_EXPECT_EQUAL(view.compare("kernel"), 0);
-    KTEST_EXPECT_TRUE(view.compare("kern") > 0);
-    KTEST_EXPECT_TRUE(view.compare("kernelz") < 0);
+    KTEST_EXPECT_ALL(view.compare("kernel") == 0, view.compare("kern") > 0, view.compare("kernelz") < 0);
 
     // starts_with must reject a prefix longer than the view.
     ktl::string_view arch("arch");
-    KTEST_EXPECT_FALSE(arch.starts_with("archipelago"));
-    KTEST_EXPECT_TRUE(arch.starts_with("ar"));
+    KTEST_EXPECT_ALL(!arch.starts_with("archipelago"), arch.starts_with("ar"));
 }
 
 KTEST_CASE(ktl_string_view_equality) {
@@ -91,18 +76,12 @@ KTEST_CASE(ktl_string_view_equality) {
     ktl::string_view b("kernel");
     ktl::string_view prefix("kern");
 
-    KTEST_EXPECT_TRUE(a == b);
-    KTEST_EXPECT_TRUE(a != prefix);
-    KTEST_EXPECT_TRUE(a.substr(0, 4) == prefix);
-    KTEST_EXPECT_TRUE(ktl::string_view() == ktl::string_view());
-    KTEST_EXPECT_TRUE(ktl::string_view("abc") != "abd");
+    KTEST_EXPECT_ALL(a == b, a != prefix, a.substr(0, 4) == prefix, ktl::string_view() == ktl::string_view(),
+                     ktl::string_view("abc") != "abd");
 
     // Views over the middle of a buffer are not NUL-terminated; equality must only read size() chars.
     const char buffer[] = "kernelspace";
     ktl::string_view middle(buffer + 3, 3);  // "nel"
 
-    KTEST_EXPECT_TRUE(middle == ktl::string_view("nel"));
-    KTEST_EXPECT_TRUE(middle != ktl::string_view("nels"));
+    KTEST_EXPECT_ALL(middle == ktl::string_view("nel"), middle != ktl::string_view("nels"));
 }
-
-#endif  // CONFIG_KERNEL_TESTING

@@ -1,7 +1,4 @@
 #include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/testing/tracking_value.h>
 
 #include <ktl/tuple>
@@ -12,9 +9,10 @@ KTEST_MODULE("ktl/tuple");
 
 KTEST_CASE(ktl_tuple_construct_get_and_traits) {
     ktl::tuple<int, char, bool> t{7, 'a', true};
-    KTEST_EXPECT_TRUE(ktl::get<0>(t) == 7);
-    KTEST_EXPECT_TRUE(ktl::get<1>(t) == 'a');
-    KTEST_EXPECT_TRUE(ktl::get<2>(t) == true);
+    KTEST_EXPECT_ALL(ktl::get<0>(t) == 7, ktl::get<1>(t) == 'a', ktl::get<2>(t) == true);
+
+    // get<Type> works when the type is unique in the pack.
+    KTEST_EXPECT_TRUE(ktl::get<char>(t) == 'a');
 
     ktl::get<0>(t) = 9;
     KTEST_EXPECT_TRUE(ktl::get<0>(t) == 9);
@@ -41,8 +39,7 @@ KTEST_CASE(ktl_tuple_equality) {
     ktl::tuple<int, int> a{1, 2};
     ktl::tuple<int, int> b{1, 2};
     ktl::tuple<int, int> c{1, 3};
-    KTEST_EXPECT_TRUE(a == b);
-    KTEST_EXPECT_TRUE(a != c);
+    KTEST_EXPECT_ALL(a == b, a != c);
 
     ktl::tuple<> e1;
     ktl::tuple<> e2;
@@ -78,5 +75,3 @@ KTEST_CASE(ktl_tuple_structured_binding) {
     const auto& [p, q] = ct;
     KTEST_EXPECT_ALL(p == 4, q == 5);
 }
-
-#endif

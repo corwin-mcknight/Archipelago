@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/obj/type_registry.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::testing;
 using namespace kernel::obj;
@@ -26,10 +23,8 @@ KTEST_CASE(obj_type_registry_register_and_lookup) {
 KTEST_CASE(obj_type_registry_duplicate_registration_fails) {
     TypeRegistry registry;
     KTEST_REQUIRE_TRUE(registry.register_type(10, "type_a", RIGHTS_ALL, RIGHT_READ).is_ok());
-    auto same_id = registry.register_type(10, "type_b", RIGHTS_ALL, RIGHT_READ);
-    KTEST_EXPECT_ALL(same_id.is_err(), same_id.unwrap_err() == ktl::errc::already_registered);
-    auto same_name = registry.register_type(11, "type_a", RIGHTS_ALL, RIGHT_READ);
-    KTEST_EXPECT_ALL(same_name.is_err(), same_name.unwrap_err() == ktl::errc::already_registered);
+    KTEST_EXPECT_ERR(registry.register_type(10, "type_b", RIGHTS_ALL, RIGHT_READ), ktl::errc::already_registered);
+    KTEST_EXPECT_ERR(registry.register_type(11, "type_a", RIGHTS_ALL, RIGHT_READ), ktl::errc::already_registered);
 }
 
 // Multiple distinct types coexist; lookups for ids and names never registered return nothing.
@@ -54,5 +49,3 @@ KTEST_CASE(obj_type_registry_live_count_tracks) {
     registry.on_object_destroyed(10);
     KTEST_EXPECT_TRUE(registry.live_count(10) == 1);
 }
-
-#endif

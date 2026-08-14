@@ -1,8 +1,5 @@
-#include <kernel/testing/testing.h>
-
-#if CONFIG_KERNEL_TESTING
-
 #include <kernel/mm/object_arena.h>
+#include <kernel/testing/testing.h>
 
 using namespace kernel::mm;
 
@@ -86,5 +83,3 @@ KTEST_CASE(object_arena_slab_lifecycle) {
         KTEST_EXPECT_TRUE(a->stats().object_size != BIG);
     }
 }
-
-#endif
