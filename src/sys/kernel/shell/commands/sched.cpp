@@ -47,23 +47,12 @@ const char* reason_name(switch_reason r) {
     }
 }
 
-// argv entries are string_views over the input line, not null-terminated -- parse by hand.
-ktl::maybe<size_t> parse_size(ktl::string_view sv) {
-    if (sv.size() == 0) { return ktl::nothing; }
-    size_t v = 0;
-    for (size_t i = 0; i < sv.size(); ++i) {
-        if (sv[i] < '0' || sv[i] > '9') { return ktl::nothing; }
-        v = v * 10 + static_cast<size_t>(sv[i] - '0');
-    }
-    return v;
-}
-
 void print_human(kernel::shell::ShellOutput& output, uint64_t cycles, uint64_t hz) {
     char buf[24];
     output.print("{0}", human_str(buf, sizeof(buf), cycles, hz));
 }
 
-// Threads are stored in their owning task (spawn_into puts them there); gather across every task so
+// Threads are stored in their owning task (thread_create_in puts them there); gather across every task so
 // user threads show up alongside kernel ones.
 bool snapshot_all_threads(ktl::vector<ktl::ref<Thread>>& out) {
     ktl::vector<ktl::ref<Task>> tasks;
@@ -158,7 +147,7 @@ void sched_handler(int argc, const ktl::string_view argv[], kernel::shell::Shell
         } else if (argc >= 3 && argv[2] == "dump") {
             size_t n = 32;
             if (argc >= 4) {
-                auto parsed = parse_size(argv[3]);
+                auto parsed = kernel::shell::parse_u64(argv[3]);
                 if (!parsed.has_value()) {
                     output.print("bad count: {0}\n", argv[3]);
                     return;

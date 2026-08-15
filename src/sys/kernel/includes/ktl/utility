@@ -38,15 +38,6 @@ template <typename T1, typename T2> struct pair {
 
     constexpr pair& operator=(const pair&) = default;
     constexpr pair& operator=(pair&&)      = default;
-
-    constexpr void swap(pair& other) {
-        T1 t1   = move(first);
-        first   = move(other.first);
-        other.first = move(t1);
-        T2 t2   = move(second);
-        second  = move(other.second);
-        other.second = move(t2);
-    }
 };
 
 template <typename T1, typename T2>
@@ -56,28 +47,6 @@ constexpr bool operator==(const pair<T1, T2>& a, const pair<T1, T2>& b) {
 template <typename T1, typename T2>
 constexpr bool operator!=(const pair<T1, T2>& a, const pair<T1, T2>& b) {
     return !(a == b);
-}
-
-template <typename T1, typename T2> constexpr pair<decay_t<T1>, decay_t<T2>> make_pair(T1&& a, T2&& b) {
-    return pair<decay_t<T1>, decay_t<T2>>(forward<T1>(a), forward<T2>(b));
-}
-
-// get<I> for symmetry with tuple (pair structured bindings do not require this).
-template <size_t I, typename T1, typename T2> constexpr auto& get(pair<T1, T2>& p) {
-    static_assert(I < 2, "pair index out of range");
-    if constexpr (I == 0) {
-        return p.first;
-    } else {
-        return p.second;
-    }
-}
-template <size_t I, typename T1, typename T2> constexpr const auto& get(const pair<T1, T2>& p) {
-    static_assert(I < 2, "pair index out of range");
-    if constexpr (I == 0) {
-        return p.first;
-    } else {
-        return p.second;
-    }
 }
 
 }  // namespace ktl

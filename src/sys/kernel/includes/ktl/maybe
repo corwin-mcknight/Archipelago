@@ -93,20 +93,9 @@ template <typename T> class [[nodiscard]] maybe {
 
     // Monadic operations
 
-    template <typename U> T value_or(U&& default_value) const {
-        if (m_has_value) { return m_value; }
-        return static_cast<T>(default_value);
-    }
-
     template <typename F> auto map(F&& func) const -> maybe<decltype(func(m_value))> {
         if (!m_has_value) { return nothing; }
         return maybe<decltype(func(m_value))>(func(m_value));
-    }
-
-    /// Flat map
-    template <typename F> auto and_then(F&& func) const -> decltype(func(m_value)) {
-        if (!m_has_value) { return nothing; }
-        return func(m_value);
     }
 
     template <typename F> maybe<T> or_else(F&& func) const {
@@ -129,16 +118,6 @@ template <typename T> class [[nodiscard]] maybe {
     template <typename F> const maybe<T>& inspect(F&& func) const {
         if (m_has_value) { func(m_value); }
         return *this;
-    }
-
-    /// @brief Filters this maybe by predicate, returning the original value or nothing
-    /// @tparam F
-    /// @param predicate The predicate
-    /// @return Original maybe or nothing
-    template <typename F> auto filter(F&& predicate) const -> maybe<T> {
-        if (!m_has_value) { return nothing; }
-        if (predicate(m_value)) { return *this; }
-        return nothing;
     }
 };
 
@@ -179,11 +158,6 @@ template <typename T> class [[nodiscard]] maybe<T&> {
         return m_ptr;
     }
 
-    T& value_or(T& fallback) const { return m_ptr ? *m_ptr : fallback; }
-
-    /// Escape hatch for raw-pointer interop.
-    T* ptr_or(T* fallback = nullptr) const { return m_ptr ? m_ptr : fallback; }
-
     void reset() { m_ptr = nullptr; }
 
     // Monadic operations
@@ -191,12 +165,6 @@ template <typename T> class [[nodiscard]] maybe<T&> {
     template <typename F> auto map(F&& func) const -> maybe<decltype(func(*m_ptr))> {
         if (!m_ptr) { return nothing; }
         return maybe<decltype(func(*m_ptr))>(func(*m_ptr));
-    }
-
-    /// Flat map
-    template <typename F> auto and_then(F&& func) const -> decltype(func(*m_ptr)) {
-        if (!m_ptr) { return nothing; }
-        return func(*m_ptr);
     }
 
     template <typename F> maybe<T&> or_else(F&& func) const {
@@ -209,27 +177,11 @@ template <typename T> class [[nodiscard]] maybe<T&> {
         return func(*m_ptr);
     }
 
-    template <typename F> maybe<T&> filter(F&& predicate) const {
-        if (!m_ptr) { return nothing; }
-        if (predicate(*m_ptr)) { return *this; }
-        return nothing;
-    }
-
     template <typename F> const maybe<T&>& inspect(F&& func) const {
         if (m_ptr) { func(*m_ptr); }
         return *this;
     }
 };
-
-/// Bridges a nullable raw pointer (C ABI, bootloader/vendor structs) into the maybe world.
-template <typename T> maybe<T&> from_ptr(T* ptr) {
-    if (ptr == nullptr) { return nothing; }
-    return maybe<T&>(*ptr);
-}
-
-template <typename T, typename F> void filter(maybe<T>* arr, int count, F&& func) {
-    for (int i = 0; i < count; i++) { arr[i] = arr[i].filter(func); }
-}
 
 };  // namespace ktl
 

@@ -64,6 +64,7 @@ class object_arena {
 
     arena_slab* new_slab();
     void* take_slot(arena_slab* slab);
+    void unlink_partial(arena_slab* slab);
 
     const char* m_name;
     size_t m_object_size;

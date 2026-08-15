@@ -60,10 +60,10 @@ void mem_handler(int, const ktl::string_view[], ShellOutput& output) {
                  pmm.alloc_count, pmm.free_count, pmm.alloc_failures);
 
     if (g_page_descriptors.initialized()) {
-        output.print("pages: wired {0}, active {1}, inactive {2}, free {3}, zeroed {4}, mmio {5}\n",
+        output.print("pages: wired {0}, active {1}, free {2}, zeroed {3}, mmio {4}\n",
                      g_page_descriptors.count(page_state::WIRED), g_page_descriptors.count(page_state::ACTIVE),
-                     g_page_descriptors.count(page_state::INACTIVE), g_page_descriptors.count(page_state::FREE),
-                     g_page_descriptors.count(page_state::ZEROED), g_page_descriptors.count(page_state::MMIO));
+                     g_page_descriptors.count(page_state::FREE), g_page_descriptors.count(page_state::ZEROED),
+                     g_page_descriptors.count(page_state::MMIO));
     }
 
     auto heap = g_early_heap.stats();

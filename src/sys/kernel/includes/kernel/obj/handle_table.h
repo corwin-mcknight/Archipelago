@@ -77,7 +77,6 @@ class HandleTable {
 
     template <typename T> ktl::result<ktl::ref<T>> get(HandleId id, Rights required_rights = 0);
 
-    ktl::maybe<HandleInfo> info(HandleId id);
     bool is_valid(HandleId id);
     size_t count();
     // Copy every live entry's metadata under one lock acquisition, so callers can print or

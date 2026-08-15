@@ -14,26 +14,15 @@ namespace kernel::obj {
 
 struct channel_state;
 
-// Message pages: the PMM is the message allocator. A message is at most MAX_MESSAGE_BYTES, which
-// fits one page, so message storage needs no heap -- no fragmentation, quota accounting in the
-// same currency as everything else (pages), and exhaustion is a clean error instead of the early
-// heap's panic. Kernel builds implement these over the PMM through the physmap, in
-// mm/channel_pages.cpp; the host runner supplies malloc-backed stubs, so hosted tests see
-// message logic only.
+// Message pages: Allocates from PMM, a message is at most MAX_MESSAGE_BYTES (1 page) via physmap.
 // Returns 0 when no page is available.
 uintptr_t channel_page_alloc();
 void channel_page_free(uintptr_t page);
 
-// One queued message: a single page carrying up to MAX_MESSAGE_BYTES, plus the byte count that is
-// actually meaningful. Move-only owner; the page returns to the PMM on destruction. A zero-length
-// message holds no page at all. The page is contiguous kernel memory, so filling it from a
-// non-contiguous source (the IPC buffer's page runs) is a memcpy per run into data() + offset.
-//
-// A message can also carry handles in transit. Each slot names an entry in the kernel's own
-// handle table -- the escrow that keeps the object alive between tables (docs/Design/IPC
-// Primitives.md). The message owns those entries: destruction with handles still attached (a
-// channel dying with messages queued, a failed send) closes them in the kernel table like any
-// other handle close.
+// A message. A single physical page containing up to MAX_MESSAGE_BYTES.
+// Move only (Page returns to PMM on destruction). A 0 length message does not contain a page.
+// Can carry handles in transit -- each slot names an entry in the kernel's handle table.
+// A destroyed message can close handles in the kernel table (channel dead, failed send).
 class MessageBuffer {
    public:
     static constexpr size_t MAX_HANDLES = static_cast<size_t>(::abi::syscall::CHANNEL_MAX_MESSAGE_HANDLES);
@@ -109,22 +98,20 @@ class MessageBuffer {
 // state, and the queues between them live in state shared by the pair. Messages are opaque byte
 // payloads delivered FIFO per direction. Every operation fails immediately rather than blocking --
 // a caller that wants to wait parks on the signal bits instead.
+
+// Endpoint of a bidirectional, point-to-point message channel.
 class Channel : public Object {
    public:
     DECLARE_OBJECT_TYPE(Channel, type_ids::CHANNEL)
 
-    // Kernel-managed signals: READABLE while this endpoint's incoming queue is non-empty, WRITABLE
-    // while the peer's incoming queue has room, PEER_CLOSED once the opposite endpoint is destroyed.
-    // The values are the installed ABI in <abi/syscall.h>; aliased here so kernel code and user
-    // programs cannot drift.
+    static constexpr size_t MAX_MESSAGE_BYTES    = 4096;
+    static constexpr size_t QUEUE_DEPTH          = 8;
+
+    // Kernel managed signals. READABLE if incoming is non-empty, WRITABLE if incoming is not full, PEER_CLOSED if other
+    // end is destroyed.
     static constexpr uint32_t SIGNAL_READABLE    = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_READABLE);
     static constexpr uint32_t SIGNAL_WRITABLE    = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_WRITABLE);
     static constexpr uint32_t SIGNAL_PEER_CLOSED = static_cast<uint32_t>(::abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED);
-
-    // ponytail: fixed caps stand in for per-task quotas until the quota work lands with the rest of
-    // the task/IPC milestone. One page per message keeps a full queue bounded at 32K per direction.
-    static constexpr size_t MAX_MESSAGE_BYTES    = 4096;
-    static constexpr size_t QUEUE_DEPTH          = 8;
 
     // TRANSFER is the per-channel gate on carrying handles in messages, per the design doc; the
     // handle being sent needs no right of its own until object types start registering TRANSFER.

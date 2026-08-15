@@ -66,19 +66,19 @@ KTEST_CASE(obj_handle_table_generation_counter) {
                      table.is_valid(id2));
 }
 
-KTEST_CASE(obj_handle_table_info_returns_metadata) {
+KTEST_CASE(obj_handle_table_verify_reports_metadata) {
     HandleTable table;
     KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ | RIGHT_SIGNAL));
-    KTEST_REQUIRE_VALUE(info, table.info(id));
-    KTEST_EXPECT_ALL(info.rights == (RIGHT_READ | RIGHT_SIGNAL), info.type_id == TEST_TYPE_A);
+    KTEST_UNWRAP(verified, table.verify(id, 0, TEST_TYPE_A));
+    KTEST_EXPECT_TRUE(verified.rights == (RIGHT_READ | RIGHT_SIGNAL));
 }
 
 KTEST_CASE(obj_handle_table_duplicate_ands_rights) {
     HandleTable table;
     KTEST_UNWRAP(src, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE));
     KTEST_UNWRAP(dup, table.duplicate(src, RIGHT_READ));
-    KTEST_REQUIRE_VALUE(info, table.info(dup));
-    KTEST_EXPECT_ALL(info.rights == RIGHT_READ, table.count() == 2);
+    KTEST_UNWRAP(verified, table.verify(dup, 0));
+    KTEST_EXPECT_ALL(verified.rights == RIGHT_READ, table.count() == 2);
 }
 
 // Duplication is itself a capability enforced by the table, not just by syscall dispatch: a
@@ -138,11 +138,11 @@ KTEST_CASE(obj_handle_table_enforces_rights_contract) {
     auto mixed = table.emplace<TestObjRestricted>(RIGHT_READ | RIGHT_WRITE);
     KTEST_EXPECT_ALL(mixed.is_err(), mixed.unwrap_err() == ktl::errc::rights_violation, table.count() == 0);
     KTEST_UNWRAP(id, table.emplace<TestObjRestricted>(TEST_RESTRICTED_VALID_RIGHTS));
-    KTEST_REQUIRE_VALUE(info, table.info(id));
-    KTEST_EXPECT_TRUE(info.rights == TEST_RESTRICTED_VALID_RIGHTS);
+    KTEST_UNWRAP(verified, table.verify(id, 0));
+    KTEST_EXPECT_TRUE(verified.rights == TEST_RESTRICTED_VALID_RIGHTS);
     KTEST_UNWRAP(dup, table.duplicate(id, RIGHT_READ));
-    KTEST_REQUIRE_VALUE(dup_info, table.info(dup));
-    KTEST_EXPECT_ALL(dup_info.rights == RIGHT_READ, table.count() == 2);
+    KTEST_UNWRAP(dup_verified, table.verify(dup, 0));
+    KTEST_EXPECT_ALL(dup_verified.rights == RIGHT_READ, table.count() == 2);
 }
 
 // Objects whose type was never registered cannot be given handles at all.

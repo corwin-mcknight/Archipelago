@@ -9,16 +9,16 @@ using TypeId   = uint32_t;
 using Rights   = uint32_t;
 
 namespace type_ids {
-constexpr TypeId INVALID   = 0;
-constexpr TypeId EVENT     = 1;
-constexpr TypeId COUNTER   = 2;
-constexpr TypeId REGION    = 3;
-constexpr TypeId VMO       = 4;
-constexpr TypeId THREAD    = 5;
-constexpr TypeId TASK      = 6;
-constexpr TypeId SEMAPHORE = 7;
-constexpr TypeId CHANNEL   = 8;
-constexpr TypeId PORT      = 9;
+constexpr TypeId INVALID = 0;
+constexpr TypeId EVENT   = 1;
+constexpr TypeId COUNTER = 2;
+constexpr TypeId REGION  = 3;
+constexpr TypeId VMO     = 4;
+constexpr TypeId THREAD  = 5;
+constexpr TypeId TASK    = 6;
+// 7 was SEMAPHORE, removed.
+constexpr TypeId CHANNEL = 8;
+constexpr TypeId PORT    = 9;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;

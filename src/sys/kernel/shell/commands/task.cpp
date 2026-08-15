@@ -14,23 +14,12 @@
 
 namespace {
 
-// argv entries are string_views over the input line, not null-terminated -- parse by hand.
-ktl::maybe<uint64_t> parse_u64(ktl::string_view sv) {
-    if (sv.size() == 0) { return ktl::maybe<uint64_t>{}; }
-    uint64_t value = 0;
-    for (size_t i = 0; i < sv.size(); ++i) {
-        if (sv[i] < '0' || sv[i] > '9') { return ktl::maybe<uint64_t>{}; }
-        value = value * 10 + static_cast<uint64_t>(sv[i] - '0');
-    }
-    return ktl::maybe<uint64_t>{value};
-}
-
 // Queue the words after the id on a task's mailbox -- the parent's end of its bootstrap channel.
 // This is the parent speaking: the message lands on the task's slot-0 endpoint like any other
 // channel mail. The task decides whether it ever reads it; an undrained message dies with the task.
 void task_msg(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     using namespace kernel::sched;
-    auto id = parse_u64(argv[2]);
+    auto id = kernel::shell::parse_u64(argv[2]);
     if (!id.has_value()) {
         output.print("task: bad id\n");
         return;

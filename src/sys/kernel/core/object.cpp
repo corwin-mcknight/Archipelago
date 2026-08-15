@@ -3,7 +3,6 @@
 #include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/port.h>
-#include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/thread.h>
@@ -15,7 +14,6 @@ namespace kernel::obj {
 void obj_init() {
     Event::register_type(g_type_registry).expect("obj_init: Event type registration failed");
     Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
-    Semaphore::register_type(g_type_registry).expect("obj_init: Semaphore type registration failed");
     Channel::register_type(g_type_registry).expect("obj_init: Channel type registration failed");
     Port::register_type(g_type_registry).expect("obj_init: Port type registration failed");
     kernel::sched::Thread::register_type(g_type_registry).expect("obj_init: Thread type registration failed");

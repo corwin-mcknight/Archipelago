@@ -23,6 +23,11 @@ namespace kernel::mm {
 // Shared by slab_heap and its stats struct, which is declared first.
 inline constexpr size_t SLAB_HEAP_CLASS_COUNT = 7;  // 16, 32, 64, 128, 256, 512, 1024
 
+// Only interrupt-free contexts may touch the heap or the object arenas: handlers preallocate at
+// bind time instead. This single rule is what lets both run without reserved pools or IRQ-safe
+// locking. A hard check, not a debug assert -- these invariants must not compile out.
+void check_not_interrupt();
+
 // Page source seam: kernel builds implement these over the PMM through the physmap
 // (mm/heap_pages.cpp); the host runner supplies aligned_alloc-backed stubs so hosted tests
 // exercise the slab logic under ASan. Returns a page-aligned run, or 0 when exhausted.

@@ -13,8 +13,8 @@ extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
-ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
-                                               size_t ipc_pages) {
+ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* name, thread_entry_fn entry,
+                                               void* arg) {
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
     ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
@@ -41,7 +41,7 @@ ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* 
             stack_pool_release(*phys);
             return ktl::err(ktl::errc::capacity_exhausted);
         }
-        auto buffer = ipc_buffer::create(*task->aspace(), ipc_pages, *slot);
+        auto buffer = ipc_buffer::create(*task->aspace(), IPC_BUFFER_DEFAULT_PAGES, *slot);
         if (buffer.is_err()) {
             // Nothing was mapped, so the bit is all there is to give back.
             task->release_ipc_slot(*slot);
@@ -94,18 +94,13 @@ ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
     return ktl::result<void>::ok();
 }
 
-ktl::result<ktl::ref<Thread>> spawn_into(ktl::ref<Task> task, const char* name, thread_entry_fn entry, void* arg,
-                                         size_t ipc_pages) {
-    auto created = thread_create_in(ktl::move(task), name, entry, arg, ipc_pages);
+ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
+    auto created = thread_create_in(kernel_task(), name, entry, arg);
     if (created.is_err()) { return created; }
     auto thread = created.unwrap();
     auto queued = thread_enqueue(thread);
     if (queued.is_err()) { return ktl::err(queued.unwrap_err()); }
     return ktl::result<ktl::ref<Thread>>::ok(ktl::move(thread));
-}
-
-ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
-    return spawn_into(kernel_task(), name, entry, arg);
 }
 
 }  // namespace kernel::sched

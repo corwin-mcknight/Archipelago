@@ -50,8 +50,8 @@ KTEST_CASE_INTEGRATION(user_task_lifecycle) {
     // ("bootstrap ok").
     {
         using namespace kernel::obj;
-        KTEST_REQUIRE_VALUE(bootstrap, task->handles().info(HandleId{0, 0}));
-        KTEST_EXPECT_ALL(bootstrap.type_id == type_ids::CHANNEL, bootstrap.rights == Channel::DEFAULT_RIGHTS);
+        KTEST_UNWRAP(bootstrap, task->handles().verify(HandleId{0, 0}, 0, type_ids::CHANNEL));
+        KTEST_EXPECT_TRUE(bootstrap.rights == Channel::DEFAULT_RIGHTS);
         KTEST_REQUIRE_TRUE(task->mailbox());
 
         // Parent-to-task mail rides the same channel: a message queued here is readable on the

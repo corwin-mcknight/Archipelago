@@ -10,24 +10,13 @@
 
 namespace {
 
-// argv entries are string_views over the input line, not null-terminated -- parse by hand.
-ktl::maybe<uint64_t> parse_u64(ktl::string_view sv) {
-    if (sv.size() == 0) { return ktl::nothing; }
-    uint64_t v = 0;
-    for (size_t i = 0; i < sv.size(); ++i) {
-        if (sv[i] < '0' || sv[i] > '9') { return ktl::nothing; }
-        v = v * 10 + static_cast<uint64_t>(sv[i] - '0');
-    }
-    return v;
-}
-
 // With an argument, formats that UNIX timestamp instead of the current time;
 // useful for decoding epoch values seen in logs, and it makes the conversion
 // testable against known dates.
 void date_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     uint64_t epoch;
     if (argc > 1) {
-        auto parsed = parse_u64(argv[1]);
+        auto parsed = kernel::shell::parse_u64(argv[1]);
         if (!parsed.has_value()) {
             output.write("usage: date [epoch-seconds]\n");
             return;

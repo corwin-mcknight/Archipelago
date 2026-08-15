@@ -11,7 +11,7 @@ KTEST(ktl_static_vector_at_bounds_on_size_not_capacity, "ktl/static_vector") {
     v.push_back(10);
     v.push_back(20);
 
-    KTEST_EXPECT_TRUE(v.at(1).value_or(-1) == 20);
+    KTEST_EXPECT_VALUE(v.at(1), 20);
     KTEST_EXPECT_TRUE(!v.at(2).has_value());
     KTEST_EXPECT_TRUE(!v.at(5).has_value());
 }

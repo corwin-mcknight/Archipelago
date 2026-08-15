@@ -27,16 +27,13 @@ size_t class_for(size_t bytes) {
     __builtin_unreachable();
 }
 
-// Only interrupt-free contexts may touch the heap: handlers preallocate at bind time instead.
-// This single rule is what lets the heap run without reserved pools or IRQ-safe locking. A hard
-// check, not a debug assert -- heap invariants are the kind of thing that must not compile out.
+}  // namespace
+
 void check_not_interrupt() {
     if (kernel::synchronization::current_execution_context().interrupt_depth != 0) {
-        panic("heap: allocation from interrupt context");
+        panic("mm: allocation from interrupt context");
     }
 }
-
-}  // namespace
 
 // Slot freeing threads a uint16 next-offset through the free slots themselves; never-used slots
 // are tracked by a bump offset so a fresh slab initializes nothing but this header. The bitmap

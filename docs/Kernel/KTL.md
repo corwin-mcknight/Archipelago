@@ -12,7 +12,8 @@ Move-only (no copy).
 Supports `push_back`, `pop_back`, `operator[]`, iterators, `size`, `capacity`, `reserve`, `clear`.
 
 ### `ktl::deque<T>`
-Double-ended queue. `push_front`, `push_back`, `pop_front`, `pop_back`.
+Block-based queue. `push_back`, `pop_front`, `pop_back`, `back`, `reserve` (pushes within reserved
+capacity never allocate).
 
 ### `ktl::stack<T>`
 LIFO container. Used by the [[Memory Subsystem#Physical Memory Manager|PMM]] to track free pages.
@@ -37,7 +38,7 @@ Fixed-capacity vector with dynamic count. No heap allocation.
 ### `ktl::maybe<T>`
 Optional value type.
 
-`has_value()`, `value()`, `value_or(default)`, `map(fn)`, `and_then(fn)`, `or_else(fn)`, `filter(pred)`.
+`has_value()`, `value()`, `map(fn)`, `or_else(fn)`, `map_or(fn, default)`, `inspect(fn)`, `take()`.
 
 ### `ktl::result<T, E>`
 Error handling type.
@@ -59,8 +60,5 @@ clamp to the actual span size (forgiving style).
 
 ### Lazy ranges (`ktl::views`)
 CRTP-based closure framework for zero-cost lazy view pipelines:
-- **`enumerate`** — yields `pair<size_t, Elem&>` (index + write-through reference)
-- **`filter(Pred)`** — lazy predicate filtering; iterator skips non-matching elements
-- **`transform(F)`** — lazy element transformation via a callable
-- **`take(n)`** — stops after n elements (clamped by underlying range end)
-- **`drop(n)`** — advances begin past n elements (clamped by underlying range end)
+- **`enumerate`** -- yields `pair<size_t, Elem&>` (index + write-through reference)
+- **`filter(Pred)`** -- lazy predicate filtering; iterator skips non-matching elements

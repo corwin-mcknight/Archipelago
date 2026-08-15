@@ -58,7 +58,6 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     m_head->payload_base = 0;
 
     m_used_bytes         = 0;
-    m_peak_used          = 0;
     m_alloc_calls        = 0;
     m_free_calls         = 0;
 }
@@ -66,9 +65,6 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
 early_heap_stats early_heap::stats() {
     heap_guard guard;
     early_heap_stats s{};
-    s.start       = heap_start;
-    s.end         = heap_end;
-    s.peak_used   = m_peak_used;
     s.alloc_calls = m_alloc_calls;
     s.free_calls  = m_free_calls;
     for (early_heap_block* block = m_head; block != nullptr; block = block->next) {
@@ -76,20 +72,11 @@ early_heap_stats early_heap::stats() {
         size_t payload = block->size > sizeof(early_heap_block) ? block->size - sizeof(early_heap_block) : 0;
         if (block->free) {
             s.free_bytes += payload;
-            if (payload > s.largest_free) { s.largest_free = payload; }
         } else {
             s.used_bytes += payload;
         }
     }
     return s;
-}
-
-void early_heap::for_each_block(void (*fn)(void* ctx, size_t payload_bytes, bool is_free), void* ctx) {
-    heap_guard guard;
-    for (early_heap_block* block = m_head; block != nullptr; block = block->next) {
-        size_t payload = block->size > sizeof(early_heap_block) ? block->size - sizeof(early_heap_block) : 0;
-        fn(ctx, payload, block->free);
-    }
 }
 
 void* early_heap::alloc(size_t size, size_t alignment) {
@@ -127,12 +114,7 @@ void* early_heap::alloc(size_t size, size_t alignment) {
             continue;
         }
 
-        size_t total_consumed = prefix + size;
-        if (total_consumed > block->size) {
-            block = block->next;
-            continue;
-        }
-
+        size_t total_consumed    = prefix + size;
         size_t remaining         = block->size - total_consumed;
         uintptr_t new_block_addr = block_addr + total_consumed;
 
@@ -165,7 +147,6 @@ void* early_heap::alloc(size_t size, size_t alignment) {
 
         ++m_alloc_calls;
         m_used_bytes += block->size - sizeof(early_heap_block);
-        if (m_used_bytes > m_peak_used) { m_peak_used = m_used_bytes; }
 
         return reinterpret_cast<void*>(payload);
     }

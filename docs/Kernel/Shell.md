@@ -33,7 +33,6 @@ Commands use a subcommand structure -- the first word selects a command group, t
 | `mem` | Memory debug view: physical memory, page states, heap, kernel address space, VMOs |
 | `handle` | Inspect the handle table |
 | `obj` | Inspect the object type registry |
-| `cpu` | Show processor state and uptime |
 | `log` | View the kernel log buffer |
 | `boot` | Resume the boot sequence |
 | `harness` | Switch between interactive and protocol mode |

@@ -186,6 +186,7 @@
 
 ## Tooling & Developer Experience
 - Plume decides a package is installed from world membership plus an installed manifest newer than the build stamp, so files removed from the sysroot behind its back are never noticed: deleting `boot/kernel.elf` or `usr/include/abi/` leaves `plume build`/`install` reporting nothing to do, and the ISO is assembled without them. Verifying the manifest's files still exist would close it, at the cost of stat-ing every installed file on each invocation.
+- Plume does not notice deleted source files: the stale `.o` stays in the obj tree and keeps linking into the kernel until a manual `plume rebuild`, so removed code silently survives in the image (and its tests keep passing). Pruning objects with no matching source during incremental builds would close it.
 - Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).
 - Expand the Debugging doc with a concrete GDB/QEMU remote-attach walkthrough (stub port, symbol loading, break-on-entry); `make clangd` already exists.
 - Kernel shell enhancements:

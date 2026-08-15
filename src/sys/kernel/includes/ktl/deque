@@ -3,8 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <kernel/panic.h>
-#include <ktl/algorithm>
 #include <ktl/maybe>
 #include <ktl/utility>
 #include <ktl/vector>
@@ -17,8 +15,8 @@ template <typename T> class deque {
 
     struct block {
         ktl::vector<T> values;
-        // First live element; slots below it are consumed (moved-from) and are reused by
-        // push_front. Advancing it makes pop_front O(1) instead of shifting the block.
+        // First live element; slots below it are consumed (moved-from). Advancing it makes
+        // pop_front O(1) instead of shifting the block.
         size_t head = 0;
 
         size_t size() const { return values.size() - head; }
@@ -32,84 +30,10 @@ template <typename T> class deque {
     };
 
    public:
-    template <bool IsConst> class iterator_impl {
-       public:
-        using deque_ptr       = typename ktl::conditional<IsConst, const deque*, deque*>::type;
-        using difference_type = ptrdiff_t;
-        using value_type      = T;
-        using reference       = typename ktl::conditional<IsConst, const T&, T&>::type;
-        using pointer         = typename ktl::conditional<IsConst, const T*, T*>::type;
-
-        iterator_impl()       = default;
-        iterator_impl(deque_ptr owner, size_t index) : m_owner(owner), m_index(index) {}
-
-        // Allow iterator -> const_iterator conversion
-        template <bool OtherConst>
-            requires(IsConst && !OtherConst)
-        iterator_impl(const iterator_impl<OtherConst>& other) : m_owner(other.owner()), m_index(other.index()) {}
-
-        template <bool OtherConst>
-            requires(IsConst && !OtherConst)
-        iterator_impl& operator=(const iterator_impl<OtherConst>& other) {
-            m_owner = other.owner();
-            m_index = other.index();
-            return *this;
-        }
-
-        reference operator*() const { return (*m_owner)[m_index]; }
-        pointer operator->() const { return &(*m_owner)[m_index]; }
-
-        iterator_impl& operator++() { ++m_index; return *this; }
-        iterator_impl operator++(int) { auto tmp(*this); ++(*this); return tmp; }
-        iterator_impl& operator--() { --m_index; return *this; }
-        iterator_impl operator--(int) { auto tmp(*this); --(*this); return tmp; }
-
-        iterator_impl& operator+=(difference_type n) {
-            if (n >= 0) { m_index += static_cast<size_t>(n); }
-            else { m_index -= static_cast<size_t>(-n); }
-            return *this;
-        }
-
-        iterator_impl& operator-=(difference_type n) { return *this += -n; }
-
-        iterator_impl operator+(difference_type n) const { auto tmp(*this); tmp += n; return tmp; }
-        iterator_impl operator-(difference_type n) const { auto tmp(*this); tmp -= n; return tmp; }
-        friend iterator_impl operator+(difference_type n, iterator_impl it) { return it + n; }
-
-        template <bool C>
-        difference_type operator-(const iterator_impl<C>& other) const {
-            return static_cast<difference_type>(m_index) - static_cast<difference_type>(other.index());
-        }
-
-        reference operator[](difference_type n) const {
-            return (*m_owner)[static_cast<size_t>(static_cast<difference_type>(m_index) + n)];
-        }
-
-        template <bool C> bool operator==(const iterator_impl<C>& o) const { return m_owner == o.owner() && m_index == o.index(); }
-        template <bool C> bool operator!=(const iterator_impl<C>& o) const { return !(*this == o); }
-        template <bool C> bool operator<(const iterator_impl<C>& o) const { return m_index < o.index(); }
-        template <bool C> bool operator>(const iterator_impl<C>& o) const { return o < *this; }
-        template <bool C> bool operator<=(const iterator_impl<C>& o) const { return !(o < *this); }
-        template <bool C> bool operator>=(const iterator_impl<C>& o) const { return !(*this < o); }
-
-        size_t index() const { return m_index; }
-        deque_ptr owner() const { return m_owner; }
-
-       private:
-        deque_ptr m_owner = nullptr;
-        size_t m_index    = 0;
-    };
-
-    using iterator       = iterator_impl<false>;
-    using const_iterator = iterator_impl<true>;
-
     deque() = default;
 
     bool push_back(T value) { return emplace_back_internal(ktl::move(value)); }
     bool emplace_back(T&& value) { return emplace_back_internal(ktl::move(value)); }
-
-    bool push_front(T value) { return emplace_front_internal(ktl::move(value)); }
-    bool emplace_front(T&& value) { return emplace_front_internal(ktl::move(value)); }
 
     ktl::maybe<T> pop_back() {
         if (empty()) { return ktl::nothing; }
@@ -140,12 +64,6 @@ template <typename T> class deque {
         return result;
     }
 
-    ktl::maybe<T> front() const {
-        if (empty()) { return ktl::nothing; }
-        const block& blk = m_blocks[first_non_empty_block_index()];
-        return blk.values[blk.head];
-    }
-
     ktl::maybe<T> back() const {
         if (empty()) { return ktl::nothing; }
         size_t index            = last_non_empty_block_index();
@@ -162,6 +80,8 @@ template <typename T> class deque {
     size_t size() const { return m_size; }
     bool empty() const { return m_size == 0; }
 
+    // Kept for the tests that prove reserve()'s no-allocation promise: capacity unchanged
+    // across a burst means no block was appended.
     size_t capacity() const {
         size_t total = 0;
         for (size_t i = 0; i < m_blocks.size(); ++i) { total += m_blocks[i].values.capacity(); }
@@ -184,34 +104,6 @@ template <typename T> class deque {
 
         return true;
     }
-
-    T& operator[](size_t index) {
-        return const_cast<T&>(const_cast<const deque*>(this)->operator[](index));
-    }
-
-    const T& operator[](size_t index) const {
-        size_t remaining = index;
-        for (size_t block_index = 0; block_index < m_blocks.size(); ++block_index) {
-            const block& blk = m_blocks[block_index];
-            if (remaining < blk.size()) { return blk.values[blk.head + remaining]; }
-            remaining -= blk.size();
-        }
-        panic("deque index out of range");
-    }
-
-    ktl::maybe<T> at(size_t index) const {
-        if (index >= m_size) { return ktl::nothing; }
-        return (*this)[index];
-    }
-
-    iterator begin() { return iterator(this, 0); }
-    iterator end() { return iterator(this, m_size); }
-
-    const_iterator begin() const { return const_iterator(this, 0); }
-    const_iterator end() const { return const_iterator(this, m_size); }
-
-    const_iterator cbegin() const { return begin(); }
-    const_iterator cend() const { return end(); }
 
    private:
     bool emplace_back_internal(T&& value) {
@@ -253,48 +145,10 @@ template <typename T> class deque {
         return true;
     }
 
-    bool emplace_front_internal(T&& value) {
-        if (!ensure_front_block()) { return false; }
-        block& front_block = m_blocks[0];
-        if (front_block.head > 0) {
-            // Refill a slot vacated by pop_front; the moved-from element there is assignable.
-            front_block.values[--front_block.head] = ktl::move(value);
-        } else {
-            if (!front_block.values.push_back(ktl::move(value))) { return false; }
-            for (size_t i = front_block.values.size() - 1; i > 0; --i) {
-                ktl::swap(front_block.values[i], front_block.values[i - 1]);
-            }
-        }
-        ++m_size;
-        return true;
-    }
-
-    // Room checks are against physical occupancy (values.size()), not live size: consumed
-    // front slots are only reusable by push_front, via the head index.
-    bool ensure_front_block() {
-        if (m_blocks.empty()) { return append_empty_block_back(); }
-        block& front_block = m_blocks[0];
-        if (front_block.head > 0 || front_block.values.size() < k_block_capacity) { return true; }
-        return append_empty_block_front();
-    }
-
     bool append_empty_block_back() {
         block new_block;
         if (!new_block.values.reserve(k_block_capacity)) { return false; }
         return m_blocks.push_back(ktl::move(new_block));
-    }
-
-    bool append_empty_block_front() {
-        block new_block;
-        if (!new_block.values.reserve(k_block_capacity)) { return false; }
-
-        block placeholder;
-        if (!m_blocks.push_back(ktl::move(placeholder))) { return false; }
-
-        for (size_t i = m_blocks.size() - 1; i > 0; --i) { m_blocks[i] = ktl::move(m_blocks[i - 1]); }
-
-        m_blocks[0] = ktl::move(new_block);
-        return true;
     }
 
     // Compacting shifts blocks down and keeps the vacated tail as reserve, so the block count never

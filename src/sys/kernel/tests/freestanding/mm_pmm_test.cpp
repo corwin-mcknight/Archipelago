@@ -157,9 +157,8 @@ KTEST_CASE_INTEGRATION(pmm_zeroer_and_stats) {
         pmm.free(again);
     }
 
-    // Phase 3: stats track alloc/free counts and the low-water mark. All
-    // comparisons are deltas against the snapshot taken here; low_water is
-    // monotone since boot, so it is at most this phase's starting free count.
+    // Phase 3: stats track alloc/free counts. All comparisons are deltas
+    // against the snapshot taken here.
     {
         auto before = pmm.stats();
         KTEST_EXPECT_TRUE(before.free_pages + before.reserved_pages <= before.total_pages);
@@ -169,8 +168,6 @@ KTEST_CASE_INTEGRATION(pmm_zeroer_and_stats) {
         KTEST_REQUIRE_VALUE(page, pmm.alloc());
         auto during = pmm.stats();
         KTEST_EXPECT_EQUAL(during.alloc_count, before.alloc_count + 1);
-        KTEST_EXPECT_TRUE(during.low_water <= during.free_pages);
-        KTEST_EXPECT_TRUE(during.low_water <= before.free_pages - 1);
 
         pmm.free(page);
         auto after = pmm.stats();

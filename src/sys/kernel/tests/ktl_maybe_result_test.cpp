@@ -18,19 +18,13 @@ KTEST_CASE(ktl_maybe_basic_operations) {
     KTEST_EXPECT_ALL(!empty.has_value(), value.has_value());
     KTEST_EXPECT_ALL(static_cast<bool>(value), !static_cast<bool>(empty));
     if (!value) { KTEST_EXPECT_TRUE(false); }
-    KTEST_EXPECT_ALL(value.value() == 5, empty.value_or(42) == 42);
+    KTEST_EXPECT_TRUE(value.value() == 5);
 
     KTEST_EXPECT_VALUE(value.map([](int v) { return v * 2; }), 10);
     KTEST_EXPECT_FALSE(empty.map([](int v) { return v + 1; }).has_value());
 
-    KTEST_EXPECT_VALUE(value.and_then([](int v) { return ktl::maybe<int>(v + 3); }), 8);
-    KTEST_EXPECT_FALSE(empty.and_then([](int v) { return ktl::maybe<int>(v + 3); }).has_value());
-
     KTEST_EXPECT_VALUE(empty.or_else([] { return ktl::maybe<int>(99); }), 99);
     KTEST_EXPECT_VALUE(value.or_else([] { return ktl::maybe<int>(111); }), 5);
-
-    KTEST_EXPECT_ALL(value.filter([](int v) { return v == 5; }).has_value(),
-                     !value.filter([](int v) { return v != 5; }).has_value());
 
     // map_or returns the default untouched when empty; the function only ever sees a real value.
     KTEST_EXPECT_EQUAL(empty.map_or([](int v) { return v * 3; }, 7), 7);
@@ -46,16 +40,6 @@ KTEST_CASE(ktl_maybe_basic_operations) {
     // reset empties.
     value.reset();
     KTEST_EXPECT_FALSE(value.has_value());
-}
-
-KTEST_CASE(ktl_maybe_filter_algorithm) {
-    ktl::maybe<int> arr[4] = {ktl::maybe<int>(1), ktl::maybe<int>(4), ktl::nothing, ktl::maybe<int>(9)};
-    ktl::filter(arr, 4, [](int v) { return v >= 4; });
-
-    KTEST_EXPECT_FALSE(arr[0].has_value());
-    KTEST_EXPECT_VALUE(arr[1], 4);
-    KTEST_EXPECT_FALSE(arr[2].has_value());
-    KTEST_EXPECT_VALUE(arr[3], 9);
 }
 
 KTEST_CASE(ktl_maybe_move_construction) {
@@ -108,10 +92,7 @@ KTEST_CASE(ktl_maybe_ref_basics) {
     ref.value() = 7;
     KTEST_EXPECT_EQUAL(x, 7);
 
-    int fallback = 9;
-    KTEST_EXPECT_ALL(empty.value_or(fallback) == 9, ref.value_or(fallback) == 7, ref.expect("present") == 7);
-
-    KTEST_EXPECT_ALL(empty.ptr_or() == nullptr, ref.ptr_or() == &x);
+    KTEST_EXPECT_EQUAL(ref.expect("present"), 7);
 
     ref.reset();
     KTEST_EXPECT_FALSE(ref.has_value());
@@ -125,12 +106,6 @@ KTEST_CASE(ktl_maybe_ref_combinators) {
     KTEST_EXPECT_VALUE(ref.map([](int& v) { return v * 2; }), 10);
     KTEST_EXPECT_FALSE(empty.map([](int& v) { return v * 2; }).has_value());
 
-    KTEST_EXPECT_VALUE(ref.and_then([](int& v) { return ktl::maybe<int>(v + 1); }), 6);
-    KTEST_EXPECT_FALSE(empty.and_then([](int& v) { return ktl::maybe<int>(v + 1); }).has_value());
-
-    KTEST_EXPECT_ALL(ref.filter([](int& v) { return v == 5; }).has_value(),
-                     !ref.filter([](int& v) { return v != 5; }).has_value());
-
     int seen = 0;
     ref.inspect([&](int& v) { seen = v; });
     KTEST_EXPECT_EQUAL(seen, 5);
@@ -139,18 +114,6 @@ KTEST_CASE(ktl_maybe_ref_combinators) {
     auto recovered = empty.or_else([&]() -> ktl::maybe<int&> { return ktl::maybe<int&>(y); });
     KTEST_REQUIRE_TRUE(recovered.has_value());
     KTEST_EXPECT_TRUE(&recovered.value() == &y);
-}
-
-KTEST_CASE(ktl_from_ptr_bridges_nullable_pointers) {
-    int x        = 3;
-    auto present = ktl::from_ptr(&x);
-    KTEST_REQUIRE_TRUE(present.has_value());
-
-    present.value() = 4;
-    KTEST_EXPECT_EQUAL(x, 4);
-
-    int* null_ptr = nullptr;
-    KTEST_EXPECT_FALSE(ktl::from_ptr(null_ptr).has_value());
 }
 
 namespace {

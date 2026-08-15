@@ -14,8 +14,8 @@ struct item {
     ktl::rb_node hook;
 };
 
-// Heterogeneous "less": orders items by key and also answers item-vs-key probes so find/lower_bound/
-// upper_bound can be driven by a bare int.
+// Heterogeneous "less": orders items by key and also answers item-vs-key probes so find/lower_bound
+// can be driven by a bare int.
 struct item_less {
     bool operator()(const item& a, const item& b) const { return a.key < b.key; }
     bool operator()(const item& a, int b) const { return a.key < b; }
@@ -83,9 +83,6 @@ KTEST_CASE(ktl_rb_tree_find_and_bounds) {
     // lower_bound: first key >= probe.
     KTEST_EXPECT_ALL(t.lower_bound(30)->key == 30, t.lower_bound(31)->key == 40, t.lower_bound(0)->key == 0,
                      t.lower_bound(90) != t.end(), t.lower_bound(91) == t.end());
-
-    // upper_bound: first key > probe.
-    KTEST_EXPECT_ALL(t.upper_bound(30)->key == 40, t.upper_bound(29)->key == 30, t.upper_bound(90) == t.end());
 
     // find_le: last key <= probe.
     KTEST_EXPECT_ALL(t.find_le(30)->key == 30, t.find_le(35)->key == 30, t.find_le(95)->key == 90,

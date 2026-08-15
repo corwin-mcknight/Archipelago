@@ -163,21 +163,6 @@ ktl::result<VerifiedHandle> HandleTable::verify(HandleId id, Rights required_rig
     return ktl::result<VerifiedHandle>::ok(VerifiedHandle{entry->object.promote(), entry->rights});
 }
 
-ktl::maybe<HandleInfo> HandleTable::info(HandleId id) {
-    kernel::synchronization::lock_guard guard(m_lock);
-
-    HandleEntry* entry = lookup_entry(id);
-    if (!entry) { return ktl::nothing; }
-
-    HandleInfo result;
-    result.id        = id;
-    result.rights    = entry->rights;
-    result.type_id   = entry->object->type_id();
-    result.object_id = entry->object->id();
-
-    return result;
-}
-
 size_t HandleTable::count() {
     kernel::synchronization::lock_guard guard(m_lock);
     return m_count;

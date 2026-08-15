@@ -25,7 +25,7 @@ class Object {
     void signal_set(uint32_t bits);
     void signal_clear(uint32_t bits);
 
-    /// Waiters parked on this object's signals (and, for Semaphore, its counter).
+    /// Waiters parked on this object's signals.
     kernel::sched::wait_queue& waiters() { return m_waiters; }
 
     /// Block the calling thread until any signal bit in mask is set; returns the signals

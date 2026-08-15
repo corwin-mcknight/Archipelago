@@ -5,10 +5,24 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/shell/output.h>
+#include <stdint.h>
 
+#include <ktl/maybe>
 #include <ktl/string_view>
 
 namespace kernel::shell {
+
+// Decimal parse for command arguments; argv entries are string_views over the
+// input line, not null-terminated, so parse by hand.
+inline ktl::maybe<uint64_t> parse_u64(ktl::string_view sv) {
+    if (sv.size() == 0) { return ktl::nothing; }
+    uint64_t v = 0;
+    for (size_t i = 0; i < sv.size(); ++i) {
+        if (sv[i] < '0' || sv[i] > '9') { return ktl::nothing; }
+        v = v * 10 + static_cast<uint64_t>(sv[i] - '0');
+    }
+    return v;
+}
 
 using shell_handler_fn = void (*)(int argc, const ktl::string_view argv[], ShellOutput& output);
 

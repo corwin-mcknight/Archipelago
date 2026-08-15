@@ -27,7 +27,6 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
                     .inspect([this](vm_paddr_t p) {
                         --m_free_pages;
                         ++m_alloc_count;
-                        if (m_free_pages < m_low_water) { m_low_water = m_free_pages; }
                         g_page_descriptors.set_state(p, page_state::ACTIVE);
                     });
     if (!page.has_value()) { ++m_alloc_failures; }
@@ -91,8 +90,6 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {
                 g_page_descriptors.set_state(base + p * PAGE_SIZE, page_state::ACTIVE);
             }
             m_free_pages -= count;
-            ++m_contig_count;
-            if (m_free_pages < m_low_water) { m_low_water = m_free_pages; }
             carved = true;
             break;
         }
@@ -140,7 +137,6 @@ bool page_frame_allocator::zero_one_page() {
     // circulating, so the pool never grows past what free() handed back.
     if (auto page = m_dirty.pop()) {
         zero_page(page.value());
-        ++m_zeroer_pages;
         m_zeroed.push(page.value());
         g_page_descriptors.set_state(page.value(), page_state::ZEROED);
         return true;
@@ -154,7 +150,6 @@ bool page_frame_allocator::zero_one_page() {
         if (region.zeroed_count == region.count) { continue; }
         vm_paddr_t addr = region.start + (region.count - region.zeroed_count - 1) * PAGE_SIZE;
         zero_page(addr);
-        ++m_zeroer_pages;
         ++region.zeroed_count;
         ++m_region_zeroed;
         g_page_descriptors.set_state(addr, page_state::ZEROED);
@@ -172,13 +167,9 @@ pmm_stats page_frame_allocator::stats() {
         .zeroed_pooled      = m_zeroed.size(),
         .zeroed_region_tail = m_region_zeroed,
         .dirty              = m_dirty.size(),
-        .regions            = m_regions.size(),
-        .low_water          = m_low_water,
         .alloc_count        = m_alloc_count,
         .free_count         = m_free_count,
-        .contig_count       = m_contig_count,
         .alloc_failures     = m_alloc_failures,
-        .zeroer_pages       = m_zeroer_pages,
     };
 }
 

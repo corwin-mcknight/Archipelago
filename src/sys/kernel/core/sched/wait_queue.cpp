@@ -3,7 +3,6 @@
 #include <kernel/assert.h>
 #include <kernel/log.h>
 #include <kernel/obj/object.h>
-#include <kernel/obj/semaphore.h>
 #include <kernel/sched/internal.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/thread.h>
@@ -103,30 +102,6 @@ void wait_queue::wake_one() {
     if (woken) { make_ready(ktl::move(woken)); }
 }
 
-void wait_queue::wake_all() {
-    while (true) {
-        ktl::static_vector<ktl::ref<Thread>, WAKE_BATCH> batch;
-        bool scanned_all = false;
-        {
-            kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-            wait_node* node = m_waiters;
-            while (node != nullptr && batch.size() < batch.capacity()) {
-                wait_node* next = node->next;
-                if (node->mask == 0) {
-                    (void)batch.push_back(ktl::move(node->thread));
-                    unlink(node);
-                }
-                node = next;
-            }
-            scanned_all = node == nullptr;
-        }
-        for (auto woken = batch.pop_back(); woken.has_value(); woken = batch.pop_back()) {
-            make_ready(ktl::move(*woken));
-        }
-        if (scanned_all) { return; }
-    }
-}
-
 size_t wait_queue::wake_matching(uint32_t signals) {
     size_t woken_count = 0;
     while (true) {
@@ -219,24 +194,6 @@ uint32_t Object::wait_signals_deadline(uint32_t mask, ktime_t deadline) {
         cur = signals();
     }
     return cur;
-}
-
-void Semaphore::acquire() {
-    // A killed thread gives up instead of re-parking: block_if lets mask-0 waits park even when
-    // killed because a mutex holder's unlock always comes, but a semaphore's release() has no
-    // obligated sender, so re-parking here would leave the thread unwakeable and its task
-    // unkillable. The caller gets no unit in that case; the thread is on its way to the exit
-    // boundary.
-    while (!try_acquire()) {
-        if (kernel::sched::current()->killed()) { return; }
-        // mask 0: woken by release()'s wake_one, never by signal waiters' wake_matching.
-        waiters().block_if(0, [](void* p) { return static_cast<Semaphore*>(p)->count() == 0; }, this);
-    }
-}
-
-void Semaphore::release() {
-    m_count.fetch_add(1, ktl::memory_order::release);
-    waiters().wake_one();
 }
 
 }  // namespace kernel::obj

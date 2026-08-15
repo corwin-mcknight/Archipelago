@@ -13,15 +13,13 @@ class vmo;  // owner back-references are wired up in the VMO phase
 // ranges, and device windows -- not memory, never allocatable, excluded from
 // usage accounting. WIRED frames are permanently pinned RAM (kernel image,
 // descriptor array, zero page); ACTIVE frames are allocated and in use; FREE
-// frames belong to the PMM; ZEROED frames are free and known-zero. INACTIVE
-// is defined for the eviction era and unused this milestone.
+// frames belong to the PMM; ZEROED frames are free and known-zero.
 enum class page_state : uint8_t {
     MMIO = 0,  // zero so the freshly zeroed array starts unallocatable
     WIRED,
     FREE,
     ZEROED,
     ACTIVE,
-    INACTIVE,
 };
 
 // Per-frame metadata. Residency and CoW truth live here and in the VMO

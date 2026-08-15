@@ -19,13 +19,9 @@ struct pmm_stats {
     size_t zeroed_pooled;
     size_t zeroed_region_tail;
     size_t dirty;
-    size_t regions;
-    size_t low_water;  // lowest free_pages ever observed
     uint64_t alloc_count;
     uint64_t free_count;
-    uint64_t contig_count;
     uint64_t alloc_failures;
-    uint64_t zeroer_pages;  // pages zeroed by zero_one_page over all time
 };
 
 class page_frame_allocator {
@@ -60,7 +56,6 @@ class page_frame_allocator {
         if (!m_regions.push_back(region)) { return; }  // drop region on OOM rather than corrupt page accounting
         m_free_pages += region.count;
         m_total_pages += region.count;
-        m_low_water = m_free_pages;
     }
 
     void add_reserved(size_t pages) {
@@ -77,13 +72,10 @@ class page_frame_allocator {
     size_t m_free_pages       = 0;
     size_t m_reserved_pages   = 0;
     size_t m_region_zeroed    = 0;  // sum of all regions' zeroed_count
-    size_t m_low_water        = 0;
 
     uint64_t m_alloc_count    = 0;
     uint64_t m_free_count     = 0;
-    uint64_t m_contig_count   = 0;
     uint64_t m_alloc_failures = 0;
-    uint64_t m_zeroer_pages   = 0;
 
     // The page pools are intrusive: each free frame's first word holds the next frame's address,
     // written and read through the physmap, so the pools own no storage and pushing can never

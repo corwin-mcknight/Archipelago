@@ -12,7 +12,7 @@ class Thread;
 // A parked waiter, living on the parked thread's own stack inside block_if: the frame stays alive
 // exactly as long as the thread is parked, so the queue owns no storage and parking can never
 // allocate or fail -- the same self-sufficiency rule the PMM's frame stacks follow. mask carries
-// the signal bits an object waiter wants; plain wake_one()/wake_all() waiters use mask 0. The ref
+// the signal bits an object waiter wants; plain wake_one() waiters use mask 0. The ref
 // pins the thread while it is parked; the waker moves it out when it unlinks the node.
 struct wait_node {
     ktl::ref<Thread> thread;
@@ -59,7 +59,6 @@ class wait_queue {
     ktl::ref<Thread> claim(wait_node* node);
 
     void wake_one();
-    void wake_all();
     // Wake every waiter whose nonzero mask intersects signals. Returns the number woken.
     size_t wake_matching(uint32_t signals);
     bool has_waiters();

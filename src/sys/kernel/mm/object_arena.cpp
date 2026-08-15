@@ -14,15 +14,7 @@ namespace {
 constexpr size_t PAGE          = KERNEL_MINIMUM_PAGE_SIZE;
 constexpr uint32_t ARENA_MAGIC = 0x41524E41;  // 'ARNA'
 
-// Same rule as the slab heap, and a hard check for the same reason: arena invariants must not
-// compile out.
-void check_not_interrupt() {
-    if (kernel::synchronization::current_execution_context().interrupt_depth != 0) {
-        panic("arena: allocation from interrupt context");
-    }
-}
-
-object_arena* g_arena_list = nullptr;  // zero-initialized POD: safe before any constructor runs
+object_arena* g_arena_list     = nullptr;  // zero-initialized POD: safe before any constructor runs
 
 size_t align_up(size_t value, size_t align) { return (value + align - 1) & ~(align - 1); }
 
@@ -91,6 +83,14 @@ object_arena::arena_slab* object_arena::new_slab() {
     return slab;
 }
 
+void object_arena::unlink_partial(arena_slab* slab) {
+    if (slab->prev != nullptr) { slab->prev->next = slab->next; }
+    if (slab->next != nullptr) { slab->next->prev = slab->prev; }
+    if (m_partial == slab) { m_partial = slab->next; }
+    slab->next = nullptr;
+    slab->prev = nullptr;
+}
+
 void* object_arena::take_slot(arena_slab* slab) {
     for (size_t word = 0; word < m_bitmap_words; word++) {
         uint64_t bits = slab->bits()[word];
@@ -100,13 +100,7 @@ void* object_arena::take_slot(arena_slab* slab) {
         slab->mark_live(slot);
         slab->live++;
         m_live++;
-        if (slab->live == m_slots_per_slab) {
-            if (slab->prev != nullptr) { slab->prev->next = slab->next; }
-            if (slab->next != nullptr) { slab->next->prev = slab->prev; }
-            if (m_partial == slab) { m_partial = slab->next; }
-            slab->next = nullptr;
-            slab->prev = nullptr;
-        }
+        if (slab->live == m_slots_per_slab) { unlink_partial(slab); }
         return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(slab) + m_slots_offset + slot * m_slot_size);
     }
     panic("arena: partial slab had no free slot");
@@ -167,10 +161,8 @@ void object_arena::free(void* ptr) {
             m_partial = slab;
         } else if (slab->live == 0) {
             // Empty: give the page back. Unlink from partial (a one-slot slab can go full ->
-            // empty without ever sitting on the list; the null checks cover that).
-            if (slab->prev != nullptr) { slab->prev->next = slab->next; }
-            if (slab->next != nullptr) { slab->next->prev = slab->prev; }
-            if (m_partial == slab) { m_partial = slab->next; }
+            // empty without ever sitting on the list; unlink_partial's null checks cover that).
+            unlink_partial(slab);
             m_slab_count--;
             release_page = true;
         }

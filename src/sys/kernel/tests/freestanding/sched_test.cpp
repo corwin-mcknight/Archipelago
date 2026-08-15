@@ -1,6 +1,5 @@
 #include <kernel/arch.h>
 #include <kernel/obj/event.h>
-#include <kernel/obj/semaphore.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
@@ -114,8 +113,7 @@ KTEST_CASE(sched_join_via_terminated_signal) {
 
 namespace { constexpr uint32_t TEST_SIGNAL = 1u << 3; }  // namespace
 
-// wake_matching (driven here via signal_set) must never wake a mask==0 waiter -- only wake_one/
-// wake_all may.
+// wake_matching (driven here via signal_set) must never wake a mask==0 waiter -- only wake_one may.
 KTEST_CASE(sched_mask_zero_ignores_signal_wake) {
     kernel::obj::Event ev;
     volatile int phase = 0;
@@ -135,7 +133,7 @@ KTEST_CASE(sched_mask_zero_ignores_signal_wake) {
     KTEST_YIELD_UNTIL(phase == 2);
 }
 
-// wake_one/wake_all must never wake a signal (nonzero-mask) waiter -- only wake_matching may.
+// wake_one must never wake a signal (nonzero-mask) waiter -- only wake_matching may.
 KTEST_CASE(sched_signal_waiter_ignores_wake_one) {
     kernel::obj::Event ev;
     volatile int phase = 0;
@@ -153,25 +151,6 @@ KTEST_CASE(sched_signal_waiter_ignores_wake_one) {
     KTEST_EXPECT_TRUE(t->state() == thread_state::BLOCKED);
     ev.signal_set(TEST_SIGNAL);
     KTEST_YIELD_UNTIL(phase == 2);
-}
-
-KTEST_CASE(sched_semaphore_blocks_and_wakes) {
-    auto sem           = ktl::make_ref<kernel::obj::Semaphore>(0u);
-    volatile int phase = 0;
-    auto body          = [&] {
-        phase = 1;
-        sem->acquire();
-        phase = 2;
-    };
-    KTEST_UNWRAP(t, spawn_fn("acquirer", body));
-    KTEST_YIELD_UNTIL(phase == 1);
-    KTEST_YIELD_UNTIL(t->state() == thread_state::BLOCKED);
-    sleep_ticks(3);  // must stay blocked across slices
-    KTEST_EXPECT_EQUAL(phase, 1);
-    sem->release();
-    KTEST_YIELD_UNTIL(phase == 2);
-    uint32_t sig = t->wait_signals(kernel::sched::Thread::SIGNAL_TERMINATED);
-    KTEST_EXPECT_TRUE((sig & kernel::sched::Thread::SIGNAL_TERMINATED) != 0);
 }
 
 KTEST_CASE(sched_mutex_blocks_and_wakes) {

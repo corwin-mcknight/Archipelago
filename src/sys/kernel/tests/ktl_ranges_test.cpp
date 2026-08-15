@@ -4,7 +4,6 @@
 
 #include <ktl/ranges>
 #include <ktl/span>
-#include <ktl/tuple>
 #include <ktl/utility>
 
 using namespace kernel::testing;
@@ -71,79 +70,6 @@ KTEST_CASE(ktl_views_filter) {
     int none = 0;
     for (int v : ktl::span(arr) | ktl::views::filter([](int) { return false; })) { none += v; }
     KTEST_EXPECT_EQUAL(none, 0);
-}
-
-KTEST_CASE(ktl_views_transform) {
-    int arr[3] = {1, 2, 3};
-    int sum    = 0;
-    for (int v : ktl::span(arr) | ktl::views::transform([](int x) { return x * 10; })) { sum += v; }
-    KTEST_EXPECT_EQUAL(sum, 60);
-}
-
-KTEST_CASE(ktl_views_take_drop) {
-    int arr[5] = {1, 2, 3, 4, 5};
-
-    int sum    = 0;
-    for (int v : ktl::span(arr) | ktl::views::take(2)) { sum += v; }
-    KTEST_EXPECT_EQUAL(sum, 3);
-
-    // take beyond size is clamped by the underlying end.
-    sum = 0;
-    for (int v : ktl::span(arr) | ktl::views::take(99)) { sum += v; }
-    KTEST_EXPECT_EQUAL(sum, 15);
-
-    sum = 0;
-    for (int v : ktl::span(arr) | ktl::views::drop(3)) { sum += v; }
-    KTEST_EXPECT_EQUAL(sum, 9);
-
-    // drop beyond size -> empty.
-    sum = 0;
-    for (int v : ktl::span(arr) | ktl::views::drop(99)) { sum += v; }
-    KTEST_EXPECT_EQUAL(sum, 0);
-}
-
-KTEST_CASE(ktl_views_for_each) {
-    int arr[6] = {1, 2, 3, 4, 5, 6};
-
-    // Plain range.
-    int sum    = 0;
-    ktl::for_each(ktl::span(arr), [&](int v) { sum += v; });
-    KTEST_EXPECT_EQUAL(sum, 21);
-
-    // filter (internal iteration: same result as the external-iterator form).
-    sum = 0;
-    ktl::for_each(ktl::span(arr) | ktl::views::filter([](int v) { return v % 2 == 0; }), [&](int v) { sum += v; });
-    KTEST_EXPECT_EQUAL(sum, 12);
-
-    // transform.
-    sum = 0;
-    ktl::for_each(ktl::span(arr) | ktl::views::transform([](int v) { return v * 10; }), [&](int v) { sum += v; });
-    KTEST_EXPECT_EQUAL(sum, 210);
-
-    // enumerate | filter -- index preserved through the chain.
-    int seen_i = -1, seen_v = -1, count = 0;
-    ktl::for_each(
-        ktl::span(arr) | ktl::views::enumerate | ktl::views::filter([](const auto& e) { return e.second == 5; }),
-        [&](const auto& e) {
-            seen_i = (int)e.first;
-            seen_v = e.second;
-            ++count;
-        });
-    KTEST_EXPECT_ALL(count == 1, seen_i == 4, seen_v == 5);
-
-    // drop skips the first N.
-    sum = 0;
-    ktl::for_each(ktl::span(arr) | ktl::views::drop(4), [&](int v) { sum += v; });
-    KTEST_EXPECT_EQUAL(sum, 11);  // 5 + 6
-
-    // take falls back to external iteration but stays correct.
-    sum = 0;
-    ktl::for_each(ktl::span(arr) | ktl::views::take(2), [&](int v) { sum += v; });
-    KTEST_EXPECT_EQUAL(sum, 3);  // 1 + 2
-
-    // Write-through: enumerate yields a reference, for_each can mutate the source.
-    ktl::for_each(ktl::span(arr) | ktl::views::enumerate, [](auto&& e) { e.second = (int)e.first; });
-    KTEST_EXPECT_ALL(arr[0] == 0, arr[5] == 5);
 }
 
 KTEST_CASE(ktl_views_enumerate_then_filter_keeps_index) {

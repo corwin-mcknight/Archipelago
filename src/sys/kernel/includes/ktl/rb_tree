@@ -12,7 +12,7 @@
 // pointer-to-member locating the hook inside the element, and a key comparator.
 //
 // The comparator provides a strict-weak "less" ordering. For homogeneous work it is called with two
-// const T&; heterogeneous lookups (find/lower_bound/upper_bound by a bare key) call it with (const T&,
+// const T&; heterogeneous lookups (find/lower_bound by a bare key) call it with (const T&,
 // const K&) and (const K&, const T&), so a comparator that only ever compares whole elements is fine
 // as long as the caller looks up by T. Duplicate keys are rejected on insert -- region intervals are
 // unique by base, which is the only consumer.
@@ -40,16 +40,8 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
             m_node = successor(m_node);
             return *this;
         }
-        iterator operator++(int) {
-            iterator prev = *this;
-            ++(*this);
-            return prev;
-        }
 
-        bool operator==(const iterator& other) const { return m_node == other.m_node; }
-        bool operator!=(const iterator& other) const { return m_node != other.m_node; }
-
-        rb_node* node() const { return m_node; }
+        bool operator==(const iterator& other) const = default;
 
        private:
         rb_node* m_node = nullptr;
@@ -73,28 +65,17 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
         rb_node* node   = hook_of(element);
         rb_node* parent = nullptr;
         int side        = 0;
-        for (rb_node* cur = m_root; cur != nullptr;) {
-            T& cur_elem = *element_of(cur);
-            if (m_comp(element, cur_elem)) {
+        for (rb_node* cur = m_root; cur != nullptr; parent = cur, cur = cur->child[side]) {
+            if (m_comp(element, *element_of(cur))) {
                 side = 0;
-            } else if (m_comp(cur_elem, element)) {
+            } else if (m_comp(*element_of(cur), element)) {
                 side = 1;
             } else {
                 return false;  // duplicate key
             }
-            parent = cur;
-            cur    = cur->child[side];
         }
-
-        node->parent   = parent;
-        node->child[0] = nullptr;
-        node->child[1] = nullptr;
-        node->red      = true;
-        if (parent == nullptr) {
-            m_root = node;
-        } else {
-            parent->child[side] = node;
-        }
+        *node = {parent, {nullptr, nullptr}, true};
+        (parent ? parent->child[side] : m_root) = node;
         insert_fixup(node);
         ++m_size;
         return true;
@@ -103,81 +84,29 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
     // Removes element from the tree. The element must currently be a member; its embedded hook holds
     // the location, so no search is performed.
     void erase(T& element) { erase_node(hook_of(element)); }
-    void erase(iterator it) { erase_node(it.node()); }
 
     template <typename K> iterator find(const K& key) const {
-        for (rb_node* cur = m_root; cur != nullptr;) {
-            T& cur_elem = *element_of(cur);
-            if (m_comp(key, cur_elem)) {
-                cur = cur->child[0];
-            } else if (m_comp(cur_elem, key)) {
-                cur = cur->child[1];
-            } else {
-                return iterator(cur);
-            }
-        }
-        return end();
+        iterator it = lower_bound(key);
+        return (it != end() && !m_comp(key, *it)) ? it : end();
     }
 
     // First element whose key is not less than key.
-    template <typename K> iterator lower_bound(const K& key) const {
-        rb_node* result = nullptr;
-        for (rb_node* cur = m_root; cur != nullptr;) {
-            if (m_comp(*element_of(cur), key)) {
-                cur = cur->child[1];
-            } else {
-                result = cur;
-                cur    = cur->child[0];
-            }
-        }
-        return iterator(result);
-    }
+    template <typename K> iterator lower_bound(const K& key) const { return bound(key, 0); }
 
     // Last element whose key is not greater than key -- the interval-query
     // primitive: for disjoint [base, base+size) entries keyed by base, the
     // only candidate containing key is find_le(key).
-    template <typename K> iterator find_le(const K& key) const {
-        rb_node* result = nullptr;
-        for (rb_node* cur = m_root; cur != nullptr;) {
-            if (m_comp(key, *element_of(cur))) {
-                cur = cur->child[0];
-            } else {
-                result = cur;
-                cur    = cur->child[1];
-            }
-        }
-        return iterator(result);
-    }
-
-    // First element whose key is greater than key.
-    template <typename K> iterator upper_bound(const K& key) const {
-        rb_node* result = nullptr;
-        for (rb_node* cur = m_root; cur != nullptr;) {
-            if (m_comp(key, *element_of(cur))) {
-                result = cur;
-                cur    = cur->child[0];
-            } else {
-                cur = cur->child[1];
-            }
-        }
-        return iterator(result);
-    }
-
-    void clear() {
-        m_root = nullptr;
-        m_size = 0;
-    }
+    template <typename K> iterator find_le(const K& key) const { return bound(key, 1); }
 
     // Debug invariant check: root black, no red node has a red child, every root-to-leaf path has the
     // same black height, and the in-order sequence is strictly increasing per the comparator. Returns
     // true when all hold. O(n); intended for tests and assertions, not the hot path.
     bool validate() const {
-        if (m_root == nullptr) { return m_size == 0; }
-        if (m_root->red) { return false; }
-        if (m_root->parent != nullptr) { return false; }
-
         int black_height = 0;
         size_t counted   = 0;
+
+        if (m_root == nullptr) { return m_size == 0; }
+        if (m_root->red || (m_root->parent != nullptr)) { return false; }
         if (!validate_node(m_root, black_height, counted)) { return false; }
         if (counted != m_size) { return false; }
 
@@ -228,19 +157,28 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
     // side of node within its parent (0 = left child, 1 = right child).
     static int child_side(rb_node* node) { return node == node->parent->child[1] ? 1 : 0; }
 
+    // Descend toward child[dir], recording the last node whose key is not past key in that
+    // direction: dir 0 = lower_bound, dir 1 = find_le.
+    template <typename K> iterator bound(const K& key, int dir) const {
+        rb_node* result = nullptr;
+        for (rb_node* cur = m_root; cur != nullptr;) {
+            if (dir ? m_comp(key, *element_of(cur)) : m_comp(*element_of(cur), key)) {
+                cur = cur->child[1 - dir];
+            } else {
+                result = cur;
+                cur    = cur->child[dir];
+            }
+        }
+        return iterator(result);
+    }
+
     // Rotate around node in direction dir (0 = left rotation, 1 = right rotation). The opposite child
     // takes node's place.
     void rotate(rb_node* node, int dir) {
-        int opp        = 1 - dir;
-        rb_node* pivot = node->child[opp];
-        node->child[opp] = pivot->child[dir];
+        rb_node* pivot       = node->child[1 - dir];
+        node->child[1 - dir] = pivot->child[dir];
         if (pivot->child[dir] != nullptr) { pivot->child[dir]->parent = node; }
-        pivot->parent = node->parent;
-        if (node->parent == nullptr) {
-            m_root = pivot;
-        } else {
-            node->parent->child[child_side(node)] = pivot;
-        }
+        transplant(node, pivot);
         pivot->child[dir] = node;
         node->parent      = pivot;
     }
@@ -268,12 +206,9 @@ template <typename T, rb_node T::*Hook, typename Compare> class rb_tree {
         m_root->red = false;
     }
 
+    // Replace target with replacement (may be null) in target's parent slot.
     void transplant(rb_node* target, rb_node* replacement) {
-        if (target->parent == nullptr) {
-            m_root = replacement;
-        } else {
-            target->parent->child[child_side(target)] = replacement;
-        }
+        (target->parent ? target->parent->child[child_side(target)] : m_root) = replacement;
         if (replacement != nullptr) { replacement->parent = target->parent; }
     }
 

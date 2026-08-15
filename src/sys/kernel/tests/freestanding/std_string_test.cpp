@@ -72,38 +72,3 @@ KTEST_CASE(std_strlen) {
     KTEST_EXPECT_EQUAL(strlen(""), static_cast<size_t>(0));
     KTEST_EXPECT_EQUAL(strlen("archipelago"), static_cast<size_t>(11));
 }
-
-KTEST_CASE(std_strcpy_and_strncpy) {
-    // strcpy copies through the terminator and returns dest.
-    char destination[16];
-    char* result = strcpy(destination, "kernel");
-    KTEST_EXPECT_TRUE(result == destination);
-    KTEST_EXPECT_ALL(destination[0] == 'k', destination[5] == 'l', destination[6] == '\0');
-
-    // strncpy zero-pads the remainder of the destination.
-    char padded[8];
-    result = strncpy(padded, "os", sizeof(padded));
-    KTEST_EXPECT_TRUE(result == padded);
-    KTEST_EXPECT_ALL(padded[0] == 'o', padded[1] == 's');
-    for (size_t i = 2; i < sizeof(padded); ++i) { KTEST_EXPECT_EQUAL(padded[i], '\0'); }
-}
-
-KTEST_CASE(std_strlcpy) {
-    // Truncating copy: returns the full source length, dest stays NUL-terminated.
-    char truncated[5];
-    size_t copied = strlcpy(truncated, "abcdef", sizeof(truncated));
-    KTEST_EXPECT_EQUAL(copied, static_cast<size_t>(6));
-    KTEST_EXPECT_ALL(truncated[0] == 'a', truncated[3] == 'd', truncated[4] == '\0');
-
-    // Source fits: full copy, length reported.
-    char whole[16];
-    copied = strlcpy(whole, "arch", sizeof(whole));
-    KTEST_EXPECT_EQUAL(copied, static_cast<size_t>(4));
-    KTEST_EXPECT_ALL(whole[0] == 'a', whole[3] == 'h', whole[4] == '\0');
-
-    // Zero-sized destination: nothing written, source length still reported.
-    char guard = 'Z';
-    copied     = strlcpy(&guard, "secure", 0);
-    KTEST_EXPECT_EQUAL(copied, static_cast<size_t>(6));
-    KTEST_EXPECT_EQUAL(guard, 'Z');
-}
