@@ -4,5 +4,6 @@ boot/edk2-riscv-1.0
 sys/kernel-headers-0.0.1
 sys/kernel-0.0.1
 sys/init-0.0.1
+sys/selftest-0.0.1
 srv/echo-0.0.1
 sys/kernel-src-0.0.1
