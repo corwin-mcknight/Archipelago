@@ -127,6 +127,36 @@
 #define ABI_TASK_EXIT_KILLED 1ull
 #define ABI_TASK_EXIT_FAULTED 2ull
 
+// User-controlled memory: anonymous VMOs a task creates, maps into its own address space, and
+// unmaps. Sizes, offsets, and addresses are in bytes and must be multiples of VM_PAGE_SIZE --
+// rejected when they are not, never rounded, so an unaligned argument is a caller bug surfaced
+// rather than absorbed.
+//
+// Pages materialize on first touch (zero-filled), so create is cheap and memory is consumed as
+// used. A mapping holds its own reference: closing the VMO handle does not unmap, and the memory
+// lives until the last handle and the last mapping are both gone -- a heap may map, close the
+// handle, and keep the memory.
+#define ABI_VM_PAGE_SIZE 4096ull
+
+// Mapping protections. Mapping READ requires the read right on the VMO handle, WRITE the write
+// right. EXEC is installed ABI but every map requesting it is rejected -- user-minted executable
+// mappings wait for the userspace-loader milestone, which is also what keeps W^X trivially true.
+#define ABI_VM_PROT_READ (1ull << 0)
+#define ABI_VM_PROT_WRITE (1ull << 1)
+#define ABI_VM_PROT_EXEC (1ull << 2)
+
+#define ABI_SYS_VMO_CREATE 18ull /* arg0 = size in bytes. Returns the new VMO handle. */
+// Returns the mapped base address, which can never look negative: user addresses live in the low
+// canonical half, so bit 63 of a mapped base is always clear.
+#define ABI_SYS_VMO_MAP                                             \
+    19ull /* arg0 = VMO handle (rights per prot, above), arg1 =     \
+             address (0 = kernel picks; nonzero is honored exactly  \
+             or fails on overlap), arg2 = byte offset into the VMO, \
+             arg3 = length, arg4 = prot. Returns the mapped base. */
+#define ABI_SYS_VMO_UNMAP                                     \
+    20ull /* arg0 = any address inside a mapping. Removes the \
+             whole mapping containing it. Returns 0. */
+
 // Spawn a task from an executable image. Holding the image VMO is the whole authority -- there is
 // no ambient spawn privilege and no kernel-side list of programs; images arrive as IMAGE messages
 // (<abi/message.h>) or wherever else a VMO handle travels. The kernel parses the image (static
@@ -192,6 +222,13 @@ constexpr uint64_t SYS_TASK_SPAWN              = ABI_SYS_TASK_SPAWN;
 constexpr uint64_t TASK_EXIT_EXITED            = ABI_TASK_EXIT_EXITED;
 constexpr uint64_t TASK_EXIT_KILLED            = ABI_TASK_EXIT_KILLED;
 constexpr uint64_t TASK_EXIT_FAULTED           = ABI_TASK_EXIT_FAULTED;
+constexpr uint64_t VM_PAGE_SIZE                = ABI_VM_PAGE_SIZE;
+constexpr uint64_t VM_PROT_READ                = ABI_VM_PROT_READ;
+constexpr uint64_t VM_PROT_WRITE               = ABI_VM_PROT_WRITE;
+constexpr uint64_t VM_PROT_EXEC                = ABI_VM_PROT_EXEC;
+constexpr uint64_t SYS_VMO_CREATE              = ABI_SYS_VMO_CREATE;
+constexpr uint64_t SYS_VMO_MAP                 = ABI_SYS_VMO_MAP;
+constexpr uint64_t SYS_VMO_UNMAP               = ABI_SYS_VMO_UNMAP;
 constexpr uint64_t TASK_SIGNAL_TERMINATED      = ABI_TASK_SIGNAL_TERMINATED;
 constexpr uint64_t CHANNEL_SIGNAL_READABLE     = ABI_CHANNEL_SIGNAL_READABLE;
 constexpr uint64_t CHANNEL_SIGNAL_WRITABLE     = ABI_CHANNEL_SIGNAL_WRITABLE;

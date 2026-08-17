@@ -62,10 +62,20 @@ class Region : public obj::Object {
     // child max-prot a subset of the parent's.
     ktl::result<ktl::ref<Region>> create_child(uintptr_t base, size_t size, vm_prot_t max_prot);
 
-    // Bind a VMO range at an explicit vaddr (first-fit search is a later
-    // nicety). Pages populate on fault or commit, never here.
+    // Bind a VMO range at an explicit vaddr. Pages populate on fault or
+    // commit, never here.
     ktl::result<void> map(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset, vm_prot_t prot,
                           vm_cache_mode cache = vm_cache_mode::CACHED);
+
+    // Bind at the lowest gap between direct children that fits, at or above
+    // `floor` (a search hint, not a reservation). Search and insert happen
+    // under one lock hold, so the returned base is the mapped base.
+    ktl::result<uintptr_t> map_anywhere(uintptr_t floor, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset,
+                                        vm_prot_t prot, vm_cache_mode cache = vm_cache_mode::CACHED);
+
+    // Remove the direct-child binding containing vaddr, whatever its extent.
+    // Sub-regions are not descended into and not removable this way.
+    ktl::result<void> unmap_binding(uintptr_t vaddr);
 
     // Remove every child slot fully contained in [base, base+size), zapping
     // any installed translations. A range that partially overlaps a slot is an
@@ -93,6 +103,10 @@ class Region : public obj::Object {
     }
 
    private:
+    // map() minus the lock acquisition; map_anywhere() calls it under its own
+    // search-and-insert hold.
+    ktl::result<void> map_locked(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset,
+                                 vm_prot_t prot, vm_cache_mode cache);
     // Validates bounds/overlap/prot and links an empty slot into the tree.
     ktl::result<region_child*> insert_slot(uintptr_t base, size_t size, vm_prot_t prot);
     // Unlinks a slot, tears down its contents (recursively for sub-regions,

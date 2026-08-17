@@ -147,3 +147,63 @@ KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
         kernel::mm::g_page_frame_allocator.free(frame);
     }
 }
+
+// Story: kernel-placed bindings. First-fit lands in the lowest gap at or
+// above the floor under the same lock hold that inserts, and unmap-by-address
+// removes exactly the direct-child binding containing the address.
+KTEST_CASE_INTEGRATION(region_first_fit_and_unmap_binding) {
+    // Phase 1: first-fit walks gaps in address order inside a bounded child
+    // region, where exhaustion is reachable.
+    {
+        vm_aspace aspace;
+        KTEST_REQUIRE_TRUE(aspace.init());
+        KTEST_UNWRAP(a, aspace.root().create_child(A_BASE, 4 * 0x1000, RW));
+
+        // Empty region: the floor itself wins; a floor below the region base
+        // clamps up to it.
+        KTEST_UNWRAP(first, a->map_anywhere(A_BASE + 0x1000, 0x1000, ktl::ref<vmo>{}, 0, RW));
+        KTEST_EXPECT_EQUAL(first, A_BASE + 0x1000);
+        KTEST_UNWRAP(second, a->map_anywhere(0, 0x1000, ktl::ref<vmo>{}, 0, RW));
+        KTEST_EXPECT_EQUAL(second, A_BASE);
+
+        // [base, base+2 pages) is now solid; the next fit is past it.
+        KTEST_UNWRAP(third, a->map_anywhere(0, 0x2000, ktl::ref<vmo>{}, 0, RW));
+        KTEST_EXPECT_EQUAL(third, A_BASE + 0x2000);
+
+        // Full region: no gap anywhere, and no gap above a floor past the end.
+        KTEST_EXPECT_ERR(a->map_anywhere(0, 0x1000, ktl::ref<vmo>{}, 0, RW), ktl::errc::capacity_exhausted);
+        KTEST_EXPECT_ERR(a->map_anywhere(A_BASE + A_SIZE, 0x1000, ktl::ref<vmo>{}, 0, RW),
+                         ktl::errc::capacity_exhausted);
+
+        // A freed hole is found again, and an unaligned floor is rejected.
+        KTEST_REQUIRE_TRUE(a->unmap_binding(A_BASE + 0x1000).is_ok());
+        KTEST_UNWRAP(again, a->map_anywhere(0, 0x1000, ktl::ref<vmo>{}, 0, RW));
+        KTEST_EXPECT_EQUAL(again, A_BASE + 0x1000);
+        KTEST_EXPECT_ERR(a->map_anywhere(0x123, 0x1000, ktl::ref<vmo>{}, 0, RW), ktl::errc::invalid_operation);
+    }
+
+    // Phase 2: unmap_binding takes any interior address, zaps translations,
+    // and refuses addresses naming nothing or naming a sub-region.
+    {
+        vm_aspace aspace;
+        KTEST_REQUIRE_TRUE(aspace.init());
+        KTEST_REQUIRE_TRUE(aspace.root().map(MAP_BASE, MAP_SIZE, ktl::ref<vmo>{}, 0, RW).is_ok());
+
+        KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
+        KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame, RW));
+
+        // The last byte of the binding names it as well as the first.
+        KTEST_REQUIRE_TRUE(aspace.root().unmap_binding(MAP_BASE + MAP_SIZE - 1).is_ok());
+        KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
+        KTEST_EXPECT_TRUE(aspace.root().find_binding(MAP_BASE) == nullptr);
+
+        // Nothing there anymore; one past a live binding is nothing too.
+        KTEST_EXPECT_ERR(aspace.root().unmap_binding(MAP_BASE), ktl::errc::out_of_range);
+
+        // A sub-region child is not a binding and is not removable this way.
+        KTEST_REQUIRE_TRUE(aspace.root().create_child(A_BASE, A_SIZE, RW).is_ok());
+        KTEST_EXPECT_ERR(aspace.root().unmap_binding(A_BASE), ktl::errc::out_of_range);
+
+        kernel::mm::g_page_frame_allocator.free(frame);
+    }
+}

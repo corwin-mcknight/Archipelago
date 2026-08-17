@@ -4,8 +4,9 @@
 #include <stdint.h>
 
 // The user-program runtime surface: thin C wrappers over the raw syscalls in <abi/syscall.h>,
-// plus the IPC buffer the kernel handed this thread at entry. Deliberately not a libc -- there is
-// no malloc, stdio, string, or locale here, and nothing needs them yet.
+// plus the IPC buffer the kernel handed this thread at entry and a minimal heap over anonymous
+// VMOs. Deliberately not a libc -- there is no stdio, string, or locale here, and nothing needs
+// them yet.
 //
 // No syscall takes a pointer. Data a syscall reads comes from this thread's IPC buffer, whose
 // base and size the kernel delivered in registers at thread entry -- so a syscall argument is an
@@ -94,6 +95,19 @@ uint64_t sys_task_kill(uint64_t task);
 uint64_t sys_task_status(uint64_t task);
 uint64_t sys_task_spawn(uint64_t image, uint64_t offset);
 uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns);
+
+// User-controlled memory: create an anonymous VMO, map it (vaddr 0 = kernel picks; map returns
+// the mapped base), unmap the whole mapping containing an address. Sizes, offsets, and addresses
+// are in bytes and must be multiples of ABI_VM_PAGE_SIZE -- rejected, never rounded. A mapping
+// keeps its VMO alive, so the handle may be closed as soon as the map returns.
+uint64_t sys_vmo_create(uint64_t size);
+uint64_t sys_vmo_map(uint64_t vmo, uint64_t vaddr, uint64_t vmo_offset, uint64_t length, uint64_t prot);
+uint64_t sys_vmo_unmap(uint64_t vaddr);
+
+// The heap, first-fit over VMO-backed arenas the runtime maps as needed. Arenas are never
+// returned to the kernel; free() recycles blocks within them.
+void* malloc(size_t size);
+void free(void* ptr);
 
 #ifdef __cplusplus
 }

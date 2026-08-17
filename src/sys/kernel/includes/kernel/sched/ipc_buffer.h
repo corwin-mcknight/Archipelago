@@ -29,10 +29,10 @@ namespace kernel::sched {
 constexpr size_t IPC_BUFFER_MAX_PAGES      = 16;
 constexpr size_t IPC_BUFFER_DEFAULT_PAGES  = 1;
 
-// Buffers live in slots of a reserved address-space region, one per thread, because the VMM has no
-// first-fit search yet and every thread in a task needs a distinct address. Placed well clear of
-// where images load and where the stack sits. The address never reaches user space as a constant --
-// it arrives in a register at thread entry -- so this is free to change when first-fit lands.
+// Buffers live in slots of a reserved address-space region, one per thread -- fixed slots predate
+// the VMM's first-fit search. Placed well clear of where images load and where the stack sits.
+// The address never reaches user space as a constant -- it arrives in a register at thread
+// entry -- so this is free to move onto first-fit.
 constexpr uintptr_t IPC_BUFFER_REGION_BASE = 0x10000000;
 constexpr size_t IPC_BUFFER_SLOT_BYTES     = IPC_BUFFER_MAX_PAGES * KERNEL_MINIMUM_PAGE_SIZE;
 // ponytail: 64 slots is one bitmap word per task; widen the bitmap if a task needs more threads.

@@ -287,6 +287,78 @@ extern "C" int main() {
         report(ok, "selftest: port ok\n", "selftest: PORT BROKEN\n");
     }
 
+    // User-controlled memory: a VMO becomes usable memory and dies on schedule. Kernel-placed
+    // and caller-placed maps, zero-fill, the mapping-outlives-handle rule, whole-mapping unmap,
+    // and each rejection the ABI promises.
+    {
+        constexpr uint64_t PAGE  = ABI_VM_PAGE_SIZE;
+        constexpr uint64_t RW    = ABI_VM_PROT_READ | ABI_VM_PROT_WRITE;
+        constexpr uint64_t FIXED = 0x40000000;  // far above the kernel's first-fit floor
+
+        uint64_t vmo  = sys_vmo_create(2 * PAGE);
+        bool ok       = !sys_is_error(vmo);
+        uint64_t addr = ok ? sys_vmo_map(vmo, 0, 0, 2 * PAGE, RW) : 0;
+        ok            = ok && !sys_is_error(addr);
+
+        volatile char* mem = reinterpret_cast<volatile char*>(static_cast<uintptr_t>(addr));
+        if (ok) {
+            // Pages arrive zero-filled on first touch; writes stick across both pages.
+            ok               = mem[0] == 0 && mem[2 * PAGE - 1] == 0;
+            mem[0]           = 'A';
+            mem[PAGE]        = 'B';
+            mem[2 * PAGE - 1] = 'C';
+            ok = ok && mem[0] == 'A' && mem[PAGE] == 'B' && mem[2 * PAGE - 1] == 'C';
+        }
+
+        // The mapping keeps the VMO alive: close the handle, the memory still reads back.
+        ok = ok && !sys_is_error(sys_handle_close(vmo));
+        ok = ok && mem[PAGE] == 'B';
+
+        // Caller-placed map is honored exactly; a second map overlapping it is refused.
+        uint64_t vmo2 = sys_vmo_create(PAGE);
+        ok            = ok && !sys_is_error(vmo2);
+        ok            = ok && sys_vmo_map(vmo2, FIXED, 0, PAGE, RW) == FIXED;
+        ok            = ok && sys_is_error(sys_vmo_map(vmo2, FIXED, 0, PAGE, RW));
+
+        // Rejections: unaligned size, EXEC prot, unmap where nothing is mapped.
+        ok = ok && sys_is_error(sys_vmo_create(PAGE + 1));
+        ok = ok && sys_is_error(sys_vmo_map(vmo2, 0, 0, PAGE, ABI_VM_PROT_READ | ABI_VM_PROT_EXEC));
+        ok = ok && sys_is_error(sys_vmo_unmap(FIXED + PAGE));
+
+        // An interior address names the whole mapping; once unmapped, the address is gone.
+        ok = ok && !sys_is_error(sys_vmo_unmap(addr + PAGE));
+        ok = ok && sys_is_error(sys_vmo_unmap(addr));
+        ok = ok && !sys_is_error(sys_vmo_unmap(FIXED));
+        ok = ok && !sys_is_error(sys_handle_close(vmo2));
+        report(ok, "selftest: vmo ok\n", "selftest: VMO BROKEN\n");
+    }
+
+    // The heap over those syscalls: blocks are distinct and writable, survive their patterns,
+    // and freed space is recycled into later allocations.
+    {
+        char* a = static_cast<char*>(malloc(24));
+        char* b = static_cast<char*>(malloc(4000));   // crosses a page inside one arena
+        char* c = static_cast<char*>(malloc(70000));  // larger than an arena quantum
+        bool ok = a != nullptr && b != nullptr && c != nullptr && a != b && b != c;
+        for (size_t i = 0; ok && i < 24; i++) { a[i] = 'a'; }
+        for (size_t i = 0; ok && i < 4000; i++) { b[i] = 'b'; }
+        for (size_t i = 0; ok && i < 70000; i += 512) { c[i] = 'c'; }
+        ok = ok && a[23] == 'a' && b[3999] == 'b' && c[69632] == 'c';
+
+        free(b);
+        char* d = static_cast<char*>(malloc(1000));
+        ok      = ok && d != nullptr;
+        if (ok) { d[999] = 'd'; }
+
+        free(a);
+        free(c);
+        free(d);
+        char* e = static_cast<char*>(malloc(48));  // the list survives the frees
+        ok      = ok && e != nullptr;
+        free(e);
+        report(ok, "selftest: heap ok\n", "selftest: HEAP BROKEN\n");
+    }
+
     // The service layer, end to end: connect to "echo" by name through the coordinator (our
     // parent, on the bootstrap channel), then prove the minted channel reaches a live server in
     // another task. Spawned without a coordinator -- a kernel test driving this program directly --

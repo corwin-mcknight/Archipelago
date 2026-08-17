@@ -90,6 +90,43 @@ ktl::result<ktl::ref<Region>> Region::create_child(uintptr_t base, size_t size, 
 ktl::result<void> Region::map(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset, vm_prot_t prot,
                               vm_cache_mode cache) {
     kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
+    return map_locked(vaddr, size, ktl::move(vmo_ref), vmo_offset, prot, cache);
+}
+
+ktl::result<uintptr_t> Region::map_anywhere(uintptr_t floor, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset,
+                                            vm_prot_t prot, vm_cache_mode cache) {
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
+    if (size == 0 || !page_aligned(size) || !page_aligned(floor)) { return ktl::err(ktl::errc::invalid_operation); }
+
+    // Children are visited in address order, so `cursor` is always past every
+    // slot already seen; the first gap that fits wins.
+    uintptr_t cursor = floor > m_base ? floor : m_base;
+    for (auto it = m_children.begin(); it != m_children.end(); ++it) {
+        uintptr_t slot_end = it->base + it->size;
+        if (slot_end <= cursor) { continue; }
+        if (it->base >= cursor && it->base - cursor >= size) { break; }
+        cursor = slot_end;
+    }
+    uintptr_t end = m_base + m_size;
+    if (cursor > end || end - cursor < size) { return ktl::err(ktl::errc::capacity_exhausted); }
+
+    auto mapped = map_locked(cursor, size, ktl::move(vmo_ref), vmo_offset, prot, cache);
+    if (mapped.is_err()) { return ktl::err(mapped.unwrap_err()); }
+    return ktl::result<uintptr_t>::ok(cursor);
+}
+
+ktl::result<void> Region::unmap_binding(uintptr_t vaddr) {
+    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
+    auto it = m_children.find_le(vaddr);
+    if (it == m_children.end() || vaddr >= it->base + it->size || !it->is_binding()) {
+        return ktl::err(ktl::errc::out_of_range);
+    }
+    remove_slot(*it);
+    return ktl::result<void>::ok();
+}
+
+ktl::result<void> Region::map_locked(uintptr_t vaddr, size_t size, ktl::ref<vmo> vmo_ref, uint64_t vmo_offset,
+                                     vm_prot_t prot, vm_cache_mode cache) {
     if (vmo_ref.get() != nullptr) {
         if (!page_aligned(vmo_offset)) { return ktl::err(ktl::errc::invalid_operation); }
         uint64_t end_page = (vmo_offset + size) / PAGE_SIZE;

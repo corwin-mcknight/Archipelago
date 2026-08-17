@@ -140,6 +140,12 @@ uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns) {
     return syscall3(ABI_SYS_PORT_WAIT, port, offset, timeout_ns);
 }
 
+uint64_t sys_vmo_create(uint64_t size) { return syscall1(ABI_SYS_VMO_CREATE, size); }
+uint64_t sys_vmo_map(uint64_t vmo, uint64_t vaddr, uint64_t vmo_offset, uint64_t length, uint64_t prot) {
+    return syscall6(ABI_SYS_VMO_MAP, vmo, vaddr, vmo_offset, length, prot, 0);
+}
+uint64_t sys_vmo_unmap(uint64_t vaddr) { return syscall1(ABI_SYS_VMO_UNMAP, vaddr); }
+
 uint64_t sys_task_kill(uint64_t task) { return syscall1(ABI_SYS_TASK_KILL, task); }
 uint64_t sys_task_status(uint64_t task) { return syscall1(ABI_SYS_TASK_STATUS, task); }
 uint64_t sys_task_spawn(uint64_t image, uint64_t offset) { return syscall2(ABI_SYS_TASK_SPAWN, image, offset); }

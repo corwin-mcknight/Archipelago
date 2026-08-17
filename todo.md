@@ -54,7 +54,6 @@
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - Memory-pressure signal userspace can wait on: a kernel Event with level bits (low, critical) sampled where the zeroer already runs, so servers drop caches before allocations start failing -- the kernel cannot reclaim server-held memory itself and anonymous memory is never swapped. Open questions: hysteresis at the boundary, global level versus per-task, and whether ignoring it has a consequence.
 - VMM follow-ups:
-    - First-fit virtual address search for VMO bindings (map takes an explicit vaddr today).
     - Binding splitting for partial unmap/protect (whole-slot ranges only).
     - Region handle exposure + detached-state machine (task/IPC milestone).
     - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone).
@@ -105,7 +104,7 @@
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
     - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
-    - Buffers occupy fixed slots in a reserved address-space region because the VMM has no first-fit search; 64 slots per task, one bitmap word. Revisit with first-fit.
+    - Buffers occupy fixed slots in a reserved address-space region (64 slots per task, one bitmap word), predating the VMM's first-fit search; moving them onto `map_anywhere` retires the slot bitmap.
     - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
 - Post-Milestone-1 review findings, syscall and handle pipeline:
     - `syscall.cpp` reaches a task through `static_ref_cast<Task>(self->owner())` with no type check; `Thread` accepts any `Object` owner, so a non-Task owner is silent type confusion. Same pattern in `scheduler.cpp` and `reaper.cpp`.
@@ -119,6 +118,7 @@
     - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
     - An unknown syscall number returns raw `-1` while an unknown handle op returns `invalid_operation`; pick one.
     - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `TypeRegistry::lookup_by_name`, `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
+- User memory syscall surface is create/map/unmap only (SYS_VMO_*); resize, protect, commit/decommit, EXEC mappings, and per-task memory quotas each wait for a consumer that names them (growable arenas, guard pages, the userspace loader, real quota policy). Absurd VMO sizes succeed at create and fail lazily at touch -- the accepted no-cap stance until quotas land.
 - Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
 
@@ -129,7 +129,7 @@
     - No `ET_DYN`/PIE support, which is the prerequisite for user-space ASLR; relocation processing is a milestone of its own.
     - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.
     - `MAX_SEGMENTS` is a fixed 8, chosen for static binaries; a real toolchain image with more loadable segments would be refused.
-    - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image; first-fit virtual address search is a VMM to-do.
+    - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image.
     - `task_spawn` checks the ELF magic on page 0 before committing the whole image, but an image that then fails contiguity or full parsing keeps its frames committed until the VMO dies -- bounded and idempotent, and free for today's wired VMOs, but a VMO decommit path belongs with the first userspace-supplied VMO reaching spawn.
     - `PT_GNU_STACK` is ignored -- the stack is mapped `READ|WRITE` unconditionally.
     - `e_phentsize` is accepted at any value at or above `sizeof(Elf64_Phdr)`, but only entry 0's alignment is checked, so a stride that is not a multiple of 8 misaligns every later header -- the UB the existing alignment check exists to prevent, and invisible to ASan. Require the stride to be a multiple of the alignment.
