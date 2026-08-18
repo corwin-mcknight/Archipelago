@@ -140,6 +140,14 @@ uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns) {
     return syscall3(ABI_SYS_PORT_WAIT, port, offset, timeout_ns);
 }
 
+uint64_t sys_socket_create(uint64_t offset) { return syscall1(ABI_SYS_SOCKET_CREATE, offset); }
+uint64_t sys_socket_write(uint64_t handle, uint64_t offset, uint64_t length) {
+    return syscall3(ABI_SYS_SOCKET_WRITE, handle, offset, length);
+}
+uint64_t sys_socket_read(uint64_t handle, uint64_t offset, uint64_t capacity) {
+    return syscall3(ABI_SYS_SOCKET_READ, handle, offset, capacity);
+}
+
 uint64_t sys_vmo_create(uint64_t size) { return syscall1(ABI_SYS_VMO_CREATE, size); }
 uint64_t sys_vmo_map(uint64_t vmo, uint64_t vaddr, uint64_t vmo_offset, uint64_t length, uint64_t prot) {
     return syscall6(ABI_SYS_VMO_MAP, vmo, vaddr, vmo_offset, length, prot, 0);

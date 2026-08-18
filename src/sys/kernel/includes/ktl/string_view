@@ -16,6 +16,7 @@ class string_view {
     constexpr string_view& operator=(const string_view& other) = default;
     constexpr const char* data() const { return m_ptr; }
     constexpr size_t size() const { return m_size; }
+    constexpr bool empty() const { return m_size == 0; }
 
     constexpr const char* begin() const { return m_ptr; }
     constexpr const char* end() const { return m_ptr + m_size; }
@@ -91,8 +92,6 @@ class string_view {
         }
         return true;
     }
-
-    constexpr bool empty() const { return m_size == 0; }
 
     // Constants
     static const size_t npos = (size_t)-1;

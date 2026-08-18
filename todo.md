@@ -1,7 +1,7 @@
 # TODO
 
 ## Next Up
-- Standard streams (`docs/Design/Standard Streams.md`): the socket primitive (kernel byte-stream pair, rights-directional, port-bindable, no handle slots), the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. Natural slices: kernel socket object + syscalls + tests; coordinator/crt stdio wiring; the console server program with selftest coverage.
+- Standard streams (`docs/Design/Standard Streams.md`), remaining slices now that the socket primitive landed (SYS_SOCKET_*): the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. The endowment slice needs a rights-stripping mechanism first -- socket ends are move-only (no DUPLICATE, so PEER_CLOSED stays readable as hangup), so making an end unidirectional takes an in-place rights-narrowing handle op (a restrict/replace) that does not mint a second handle.
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).

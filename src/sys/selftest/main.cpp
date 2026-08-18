@@ -359,6 +359,72 @@ extern "C" int main() {
         report(ok, "selftest: heap ok\n", "selftest: HEAP BROKEN\n");
     }
 
+    // Sockets end to end: bytes cross the pair with no boundaries, backpressure shortens and
+    // then fails rather than blocking, signals track the transitions, and hangup lets buffered
+    // bytes drain before the stream reports itself gone.
+    {
+        constexpr size_t DATA_AT = 0;    // staging for writes (also the fill pattern)
+        constexpr size_t ENDS_AT = 512;  // where create lands the two handles
+        constexpr size_t OUT_AT  = 768;  // where reads land
+
+        bool ok = !sys_is_error(sys_socket_create(ENDS_AT));
+        uint64_t ends[2];
+        sys_copy_in(ends, ENDS_AT, sizeof(ends));
+
+        // Fresh pair: writable, nothing to read, and a premature read says so without blocking.
+        uint64_t sig = sys_object_wait(ends[0], 0, 0);
+        ok           = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) != 0 &&
+             (sig & abi::syscall::SOCKET_SIGNAL_READABLE) == 0;
+        ok = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_WOULD_BLOCK;
+
+        // Two writes, one read: a stream has no boundaries.
+        const char* joined = "hello stream";
+        size_t first       = sys_stage(DATA_AT, "hello ");
+        ok                 = ok && sys_socket_write(ends[0], DATA_AT, first) == first;
+        size_t second      = sys_stage(DATA_AT, "stream");
+        ok                 = ok && sys_socket_write(ends[0], DATA_AT, second) == second;
+        ok                 = ok && sys_socket_read(ends[1], OUT_AT, 64) == first + second;
+        for (size_t i = 0; ok && i < first + second; i++) { ok = ipc[OUT_AT + i] == joined[i]; }
+
+        // Fill to backpressure: writes accept until the buffer is full, then fail; WRITABLE
+        // clears, and draining everything brings it back. The drained byte count must match
+        // what the writes reported accepted.
+        for (size_t i = 0; i < 512; i++) { ipc[DATA_AT + i] = static_cast<char>(i & 0x7F); }
+        uint64_t accepted = 0;
+        for (;;) {
+            uint64_t wrote = sys_socket_write(ends[0], DATA_AT, 512);
+            if (sys_is_error(wrote)) { break; }
+            accepted += wrote;
+        }
+        ok  = ok && accepted != 0;
+        sig = sys_object_wait(ends[0], 0, 0);
+        ok  = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) == 0;
+
+        uint64_t drained = 0;
+        for (;;) {
+            uint64_t got = sys_socket_read(ends[1], OUT_AT, 256);
+            if (sys_is_error(got)) {
+                ok = ok && static_cast<int64_t>(got) == ABI_ERR_WOULD_BLOCK;
+                break;
+            }
+            drained += got;
+        }
+        ok  = ok && drained == accepted;
+        sig = sys_object_wait(ends[0], 0, 0);
+        ok  = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) != 0;
+
+        // Hangup: buffered bytes outlive the writer; only then is the stream gone for good.
+        size_t last = sys_stage(DATA_AT, "last words");
+        ok          = ok && sys_socket_write(ends[0], DATA_AT, last) == last;
+        ok          = ok && !sys_is_error(sys_handle_close(ends[0]));
+        sig         = sys_object_wait(ends[1], abi::syscall::SOCKET_SIGNAL_PEER_CLOSED, 0);
+        ok          = ok && (sig & abi::syscall::SOCKET_SIGNAL_PEER_CLOSED) != 0;
+        ok          = ok && sys_socket_read(ends[1], OUT_AT, 64) == last;
+        ok          = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_PEER_CLOSED;
+        ok          = ok && !sys_is_error(sys_handle_close(ends[1]));
+        report(ok, "selftest: socket ok\n", "selftest: SOCKET BROKEN\n");
+    }
+
     // The service layer, end to end: connect to "echo" by name through the coordinator (our
     // parent, on the bootstrap channel), then prove the minted channel reaches a live server in
     // another task. Spawned without a coordinator -- a kernel test driving this program directly --

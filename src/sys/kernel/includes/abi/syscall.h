@@ -77,8 +77,10 @@
 // Error returns a user program must branch on, as signed values of the negative band described at
 // SYS_HANDLE_CLOSE. The full band is still kernel-internal; codes are installed here one by one
 // as programs first need them, and the kernel static_asserts each against its internal value.
-#define ABI_ERR_TRUNCATED (-12ll) /* recv: the front message exceeded a capacity and was discarded */
-#define ABI_ERR_TIMED_OUT (-15ll) /* a bounded wait lapsed */
+#define ABI_ERR_TRUNCATED (-12ll)   /* recv: the front message exceeded a capacity and was discarded */
+#define ABI_ERR_WOULD_BLOCK (-13ll) /* nothing to take right now; wait on READABLE and retry */
+#define ABI_ERR_PEER_CLOSED (-14ll) /* the opposite endpoint is gone and nothing is left to take */
+#define ABI_ERR_TIMED_OUT (-15ll)   /* a bounded wait lapsed */
 
 // arg0 = handle (needs the wait right), arg1 = signal mask, arg2 = timeout in nanoseconds. A
 // nonzero mask blocks the calling thread until any bit in it is asserted on the object and returns
@@ -145,6 +147,36 @@
 #define ABI_VM_PROT_WRITE (1ull << 1)
 #define ABI_VM_PROT_EXEC (1ull << 2)
 
+// Sockets: a bidirectional, point-to-point byte-stream pair -- the streaming counterpart to a
+// channel (docs/Design/IPC Primitives.md). Bytes only: no message boundaries, no handle slots.
+// A read returns whatever bytes are available up to the caller's capacity, independent of how
+// they were written; a write appends as much as the peer's bounded buffer can take and returns
+// the count, so a short write is backpressure, not an error. Only a write finding zero room
+// fails (capacity_exhausted -- wait on WRITABLE and retry), and only a read finding zero bytes
+// fails: would_block while the peer lives, peer_closed once it is gone. Bytes buffered when the
+// peer closes remain readable; peer_closed is the empty-and-never-again condition.
+//
+// Direction is a property of the handle, not the object: an end without the write right is a
+// read-only stream, so a pipe is this same pair with the opposing right stripped from each side.
+// Data moves only through the IPC buffer, like every other syscall.
+#define ABI_SYS_SOCKET_CREATE                                     \
+    21ull /* arg0 = IPC-buffer offset where the kernel writes the \
+             two endpoint handles as two uint64s. Returns 0. */
+#define ABI_SYS_SOCKET_WRITE                                 \
+    22ull /* arg0 = handle (needs the write right), arg1 =   \
+             IPC-buffer offset, arg2 = length. Returns bytes \
+             accepted, possibly short of length. */
+#define ABI_SYS_SOCKET_READ                               \
+    23ull /* arg0 = handle (needs the read right), arg1 = \
+             IPC-buffer offset, arg2 = capacity. Returns bytes read. */
+
+// Socket endpoint signals: the same shape as the channel bits. READABLE while bytes are
+// buffered, WRITABLE while the peer's buffer has room, PEER_CLOSED once the opposite endpoint
+// is destroyed.
+#define ABI_SOCKET_SIGNAL_READABLE (1ull << 0)
+#define ABI_SOCKET_SIGNAL_WRITABLE (1ull << 1)
+#define ABI_SOCKET_SIGNAL_PEER_CLOSED (1ull << 2)
+
 #define ABI_SYS_VMO_CREATE 18ull /* arg0 = size in bytes. Returns the new VMO handle. */
 // Returns the mapped base address, which can never look negative: user addresses live in the low
 // canonical half, so bit 63 of a mapped base is always clear.
@@ -210,6 +242,8 @@ constexpr uint64_t SYS_CHANNEL_SEND            = ABI_SYS_CHANNEL_SEND;
 constexpr uint64_t SYS_CHANNEL_RECV            = ABI_SYS_CHANNEL_RECV;
 constexpr uint64_t CHANNEL_MAX_MESSAGE_HANDLES = ABI_CHANNEL_MAX_MESSAGE_HANDLES;
 constexpr int64_t ERR_TRUNCATED                = ABI_ERR_TRUNCATED;
+constexpr int64_t ERR_WOULD_BLOCK              = ABI_ERR_WOULD_BLOCK;
+constexpr int64_t ERR_PEER_CLOSED              = ABI_ERR_PEER_CLOSED;
 constexpr int64_t ERR_TIMED_OUT                = ABI_ERR_TIMED_OUT;
 constexpr uint64_t SYS_OBJECT_WAIT             = ABI_SYS_OBJECT_WAIT;
 constexpr uint64_t SYS_PORT_CREATE             = ABI_SYS_PORT_CREATE;
@@ -229,6 +263,12 @@ constexpr uint64_t VM_PROT_EXEC                = ABI_VM_PROT_EXEC;
 constexpr uint64_t SYS_VMO_CREATE              = ABI_SYS_VMO_CREATE;
 constexpr uint64_t SYS_VMO_MAP                 = ABI_SYS_VMO_MAP;
 constexpr uint64_t SYS_VMO_UNMAP               = ABI_SYS_VMO_UNMAP;
+constexpr uint64_t SYS_SOCKET_CREATE           = ABI_SYS_SOCKET_CREATE;
+constexpr uint64_t SYS_SOCKET_WRITE            = ABI_SYS_SOCKET_WRITE;
+constexpr uint64_t SYS_SOCKET_READ             = ABI_SYS_SOCKET_READ;
+constexpr uint64_t SOCKET_SIGNAL_READABLE      = ABI_SOCKET_SIGNAL_READABLE;
+constexpr uint64_t SOCKET_SIGNAL_WRITABLE      = ABI_SOCKET_SIGNAL_WRITABLE;
+constexpr uint64_t SOCKET_SIGNAL_PEER_CLOSED   = ABI_SOCKET_SIGNAL_PEER_CLOSED;
 constexpr uint64_t TASK_SIGNAL_TERMINATED      = ABI_TASK_SIGNAL_TERMINATED;
 constexpr uint64_t CHANNEL_SIGNAL_READABLE     = ABI_CHANNEL_SIGNAL_READABLE;
 constexpr uint64_t CHANNEL_SIGNAL_WRITABLE     = ABI_CHANNEL_SIGNAL_WRITABLE;

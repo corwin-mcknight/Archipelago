@@ -30,9 +30,6 @@ template <class T> constexpr void swap(T& a, T& b) noexcept {
     b      = ktl::move(temp);
 }
 
-// Monadic searches: absence is a typed empty maybe instead of an end-iterator sentinel. For pointer
-// ranges the result is maybe<T&>, aliasing the found element.
-
 /// Returns a reference to the first element satisfying the predicate, or nothing.
 template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pred) -> maybe<decltype(*first)> {
     for (It it = first; it != last; ++it) {

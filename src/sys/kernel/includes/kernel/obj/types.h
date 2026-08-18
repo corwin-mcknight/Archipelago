@@ -19,6 +19,7 @@ constexpr TypeId TASK    = 6;
 // 7 was SEMAPHORE, removed.
 constexpr TypeId CHANNEL = 8;
 constexpr TypeId PORT    = 9;
+constexpr TypeId SOCKET  = 10;
 }  // namespace type_ids
 
 constexpr Rights RIGHT_READ      = 1 << 0;

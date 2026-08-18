@@ -96,6 +96,15 @@ uint64_t sys_task_status(uint64_t task);
 uint64_t sys_task_spawn(uint64_t image, uint64_t offset);
 uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns);
 
+// Sockets: a byte-stream pair with no message boundaries. create writes the two endpoint handles
+// at `offset`; write appends up to `length` bytes from the IPC buffer and returns how many the
+// peer's buffer took (short = backpressure, ABI_ERR_WOULD_BLOCK-style only when zero fit --
+// capacity_exhausted); read takes up to `capacity` buffered bytes into the IPC buffer and
+// returns the count, ABI_ERR_WOULD_BLOCK when empty, ABI_ERR_PEER_CLOSED when empty for good.
+uint64_t sys_socket_create(uint64_t offset);
+uint64_t sys_socket_write(uint64_t handle, uint64_t offset, uint64_t length);
+uint64_t sys_socket_read(uint64_t handle, uint64_t offset, uint64_t capacity);
+
 // User-controlled memory: create an anonymous VMO, map it (vaddr 0 = kernel picks; map returns
 // the mapped base), unmap the whole mapping containing an address. Sizes, offsets, and addresses
 // are in bytes and must be multiples of ABI_VM_PAGE_SIZE -- rejected, never rounded. A mapping

@@ -15,14 +15,11 @@ template <typename T> class deque {
 
     struct block {
         ktl::vector<T> values;
-        // First live element; slots below it are consumed (moved-from). Advancing it makes
-        // pop_front O(1) instead of shifting the block.
         size_t head = 0;
 
         size_t size() const { return values.size() - head; }
         bool empty() const { return size() == 0; }
 
-        // Destroys the consumed slots and makes the whole block reusable.
         void reset() {
             values.clear();
             head = 0;
