@@ -15,9 +15,6 @@ Supports `push_back`, `pop_back`, `operator[]`, iterators, `size`, `capacity`, `
 Block-based queue. `push_back`, `pop_front`, `pop_back`, `back`, `reserve` (pushes within reserved
 capacity never allocate).
 
-### `ktl::stack<T>`
-LIFO container. Used by the [[Memory Subsystem#Physical Memory Manager|PMM]] to track free pages.
-
 ### `ktl::string`
 Mutable, heap-allocated string. Concatenation, comparison, substring operations.
 
@@ -50,13 +47,12 @@ Printf-style formatting. Custom types specialize `kfmt_printer<T>`. Used through
 
 ### Type Support
 `ktl::type_traits`, `ktl::algorithm`, `ktl::utility` provide metaprogramming and algorithm foundations
-(`move`, `forward`, `swap`, `min`, `max`, etc.).
+(`move`, `forward`, `min`, `max`, etc.).
 
 ## Views & Non-owning Types
 ### `ktl::span<T>`
-Non-owning `{ptr, size}` view over contiguous memory. Constructed from raw pointers, C-arrays, or any container
-with `.data()` and `.size()`. Supports slicing via `first(n)`, `last(n)`, `subspan(offset, count)`, all of which
-clamp to the actual span size (forgiving style).
+Non-owning `{ptr, size}` view over contiguous memory. Constructed from raw pointers or C-arrays.
+Supports prefix slicing via `first(n)`, which clamps to the actual span size (forgiving style).
 
 ### Lazy ranges (`ktl::views`)
 CRTP-based closure framework for zero-cost lazy view pipelines:

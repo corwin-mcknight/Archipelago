@@ -13,9 +13,8 @@ namespace kernel::testing {
 using test_fn = void (*)();
 
 enum : unsigned {
-    KTEST_FLAG_NONE               = 0u,
-    KTEST_FLAG_REQUIRES_CLEAN_ENV = 1u << 0,
-    KTEST_FLAG_EXPECTS_CRASH      = 1u << 1,
+    KTEST_FLAG_NONE          = 0u,
+    KTEST_FLAG_EXPECTS_CRASH = 1u << 0,
 };
 
 struct alignas(alignof(void*)) ktest {

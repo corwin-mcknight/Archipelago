@@ -14,7 +14,7 @@ Runs on the Bootstrap Processor (BSP) before any other core is started.
    This provides `new`/`delete` before the page allocator is available.
    See [[Memory Subsystem#Early Heap]].
 2. **Global constructors** -- C++ global objects are initialized via the `.init_array` section.
-3. **UART** -- The serial port (COM1, 38400 baud, 8-N-1) is initialized and registered as a logging device.
+3. **UART** -- The serial port (COM1, 38400 baud, 8-N-1) is initialized; the log flushes to it directly.
    All kernel log output goes here.
    See [[Device Drivers]].
 4. **Core discovery** -- The BSP reads Limine's MP (multiprocessor) response to discover available CPU cores.

@@ -28,20 +28,6 @@ class string_view {
         return npos;
     }
 
-    constexpr size_t rfind(char c) const {
-        if (m_size == 0) { return npos; }
-        for (size_t i = m_size; i-- > 0;) {
-            if (m_ptr[i] == c) { return i; }
-        }
-        return npos;
-    }
-
-    // Bounds-checked element access; out-of-range indices are a kernel bug and panic.
-    constexpr char at(size_t idx) const {
-        if (idx >= m_size) { panic("string_view::at index out of range"); }
-        return m_ptr[idx];
-    }
-
     constexpr char operator[](size_t idx) const { return m_ptr[idx]; }
 
     string_view substr(size_t start, size_t count = npos) const {

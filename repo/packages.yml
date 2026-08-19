@@ -70,11 +70,6 @@ srv/echo:
     - "sys/kernel-headers"
     - "lib/crt"
 
-sys/kernel-src:
-  description: "Kernel source archive"
-  supports_live_sources: true
-  live_source_path: "sys/kernel"
-
 test/kernel-testrunner:
   description: "Host-tier kernel test runner"
   is_build_tool: true

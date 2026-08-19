@@ -10,7 +10,7 @@ KTEST_MODULE("shell/handle");
 
 // `handle all` walks every task and prints every handle. Running from kernel context, task zero is
 // always present; a channel endpoint parked in its table must show up with its type name.
-KTEST_CASE_INTEGRATION(shell_handle_all_lists_tables) {
+KTEST_CASE(shell_handle_all_lists_tables) {
     using namespace kernel::obj;
     auto& table = kernel::sched::kernel_task()->handles();
     KTEST_UNWRAP(pair, Channel::create());

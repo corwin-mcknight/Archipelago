@@ -16,10 +16,10 @@ KTEST_CASE(ktl_string_view_default_safe_accessors) {
 KTEST_CASE(ktl_string_view_element_access_and_iteration) {
     ktl::string_view view("kernel");
 
-    KTEST_EXPECT_ALL(view.at(0) == 'k', view.at(3) == 'n', view.at(view.size() - 1) == 'l', view.at(2) == view[2]);
+    KTEST_EXPECT_ALL(view[0] == 'k', view[3] == 'n', view[view.size() - 1] == 'l');
 
-    // The in-range path stays constant-evaluable.
-    static_assert(ktl::string_view("abc").at(1) == 'b');
+    // Element access stays constant-evaluable.
+    static_assert(ktl::string_view("abc")[1] == 'b');
 
     // begin()/end() drive range-for.
     ktl::string_view sv("abc");
@@ -32,15 +32,13 @@ KTEST_CASE(ktl_string_view_element_access_and_iteration) {
     KTEST_EXPECT_ALL(n == 3, last == 'c');
 }
 
-KTEST_CASE(ktl_string_view_find_and_rfind) {
+KTEST_CASE(ktl_string_view_find) {
     ktl::string_view view("safety");
 
     KTEST_EXPECT_TRUE(view.find('f') == 2);
     // A start position at or past size() finds nothing, even for a present character.
     KTEST_EXPECT_TRUE(view.find('s', view.size()) == ktl::string_view::npos);
     KTEST_EXPECT_TRUE(ktl::string_view("abc").find('z', 0) == ktl::string_view::npos);
-
-    KTEST_EXPECT_TRUE(ktl::string_view("a").rfind('a') == 0);
 }
 
 KTEST_CASE(ktl_string_view_copy_and_substr_clamp) {

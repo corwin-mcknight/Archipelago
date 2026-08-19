@@ -29,10 +29,6 @@ ktl::maybe<const TypeDescriptor&> TypeRegistry::lookup(TypeId id) const {
     return ktl::find_if(m_types, m_types + m_count, [&](const TypeDescriptor& t) { return t.id == id; });
 }
 
-ktl::maybe<const TypeDescriptor&> TypeRegistry::lookup_by_name(ktl::string_view name) const {
-    return ktl::find_if(m_types, m_types + m_count, [&](const TypeDescriptor& t) { return t.name == name; });
-}
-
 void TypeRegistry::on_object_created(TypeId id) {
     index_for_id(id).inspect([&](size_t idx) { m_instance_counts[idx].fetch_add(1, ktl::memory_order::relaxed); });
 }

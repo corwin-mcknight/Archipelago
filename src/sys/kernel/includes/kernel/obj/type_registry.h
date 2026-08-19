@@ -15,7 +15,6 @@ class TypeRegistry {
    public:
     ktl::result<void> register_type(TypeId id, ktl::string_view name, Rights valid_rights, Rights default_rights);
     ktl::maybe<const TypeDescriptor&> lookup(TypeId id) const;
-    ktl::maybe<const TypeDescriptor&> lookup_by_name(ktl::string_view name) const;
     size_t count() const;
 
     void on_object_created(TypeId id);

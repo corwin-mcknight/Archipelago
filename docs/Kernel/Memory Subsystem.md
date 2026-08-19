@@ -87,7 +87,7 @@ Handle exposure, the detached-region state machine, and delegation semantics arr
 
 A VMO is a range of memory backed by a pager source.
 It tracks resident pages, size, statistics, and back-references to every mapping of it.
-VMOs are resizable: growth extends the residency index lazily, and shrinking wins over mappings -- the tail is unmapped from every address space through the mapping back-references, its frames are freed, and later access past the new size faults to an error.
+VMOs are fixed-size; the back-references exist so eviction and writeback can find every translation of a page when those land.
 Residency is tracked in a chunked index whose chunks are whole page frames allocated directly from the PMM, arriving pre-zeroed from the zeroed pool.
 
 Pages are physical frames with lifecycle states ranging from wired through active, inactive, free, and zeroed.

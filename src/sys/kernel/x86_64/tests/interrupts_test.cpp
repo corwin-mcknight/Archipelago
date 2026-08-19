@@ -37,7 +37,7 @@ static void interrupt_manager_test_init() {
 
 // Function-handler lifecycle over one vector: register routes dispatch to the handler with the
 // right frame, and clear_handler stops further delivery.
-KTEST_CASE_INTEGRATION(interrupt_manager_function_handler_dispatch_and_clear) {
+KTEST_CASE(interrupt_manager_function_handler_dispatch_and_clear) {
     register_frame_t frame{};
     frame.int_no = kernel_test_interrupt_no;
 
@@ -53,7 +53,7 @@ KTEST_CASE_INTEGRATION(interrupt_manager_function_handler_dispatch_and_clear) {
     KTEST_EXPECT_EQUAL(g_function_handler_calls, 1);
 }
 
-KTEST_CASE_INTEGRATION(interrupt_manager_dispatches_object_handler) {
+KTEST_CASE(interrupt_manager_dispatches_object_handler) {
     counting_handler handler{};
     register_frame_t frame{};
     frame.int_no = kernel_test_interrupt_no;

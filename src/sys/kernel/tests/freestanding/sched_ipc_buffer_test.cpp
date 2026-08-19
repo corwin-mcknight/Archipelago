@@ -16,7 +16,7 @@ KTEST_MODULE("sched/ipc_buffer");
 
 namespace { using namespace kernel::sched; }  // namespace
 
-KTEST_CASE_INTEGRATION(ipc_buffer_maps_and_reads_back) {
+KTEST_CASE(ipc_buffer_maps_and_reads_back) {
     kernel::mm::vm_aspace aspace;
     KTEST_REQUIRE_TRUE(aspace.init());
 
@@ -43,7 +43,7 @@ KTEST_CASE_INTEGRATION(ipc_buffer_maps_and_reads_back) {
     KTEST_EXPECT_EQUAL(tail_run, size_t{KERNEL_MINIMUM_PAGE_SIZE - 41});
 }
 
-KTEST_CASE_INTEGRATION(ipc_buffer_bounds_reject_bad_ranges) {
+KTEST_CASE(ipc_buffer_bounds_reject_bad_ranges) {
     kernel::mm::vm_aspace aspace;
     KTEST_REQUIRE_TRUE(aspace.init());
 
@@ -66,7 +66,7 @@ KTEST_CASE_INTEGRATION(ipc_buffer_bounds_reject_bad_ranges) {
     KTEST_EXPECT_FALSE(buffer.contains(0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull));
 }
 
-KTEST_CASE_INTEGRATION(ipc_buffer_multi_page_and_slots) {
+KTEST_CASE(ipc_buffer_multi_page_and_slots) {
     kernel::mm::vm_aspace aspace;
     KTEST_REQUIRE_TRUE(aspace.init());
 
@@ -104,7 +104,7 @@ KTEST_CASE_INTEGRATION(ipc_buffer_multi_page_and_slots) {
 // returning the slot to the task's bitmap for exactly this reason: a task that spawns and reaps
 // workers hands the same slot out repeatedly, and without the unmap the second thread to hold it
 // would fail to map over the first one's buffer.
-KTEST_CASE_INTEGRATION(ipc_buffer_slot_is_reusable_only_after_unmap) {
+KTEST_CASE(ipc_buffer_slot_is_reusable_only_after_unmap) {
     kernel::mm::vm_aspace aspace;
     KTEST_REQUIRE_TRUE(aspace.init());
 
@@ -122,7 +122,7 @@ KTEST_CASE_INTEGRATION(ipc_buffer_slot_is_reusable_only_after_unmap) {
     KTEST_EXPECT_TRUE(reused.is_ok());
 }
 
-KTEST_CASE_INTEGRATION(ipc_buffer_rejects_oversized_requests) {
+KTEST_CASE(ipc_buffer_rejects_oversized_requests) {
     kernel::mm::vm_aspace aspace;
     KTEST_REQUIRE_TRUE(aspace.init());
 

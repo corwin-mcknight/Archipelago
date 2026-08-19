@@ -48,5 +48,4 @@ KTEST_CASE(obj_object_refcount_and_destruction) {
 KTEST(obj_init_registers_builtin_types, "obj/object") {
     kernel::obj::obj_init();
     KTEST_EXPECT_TRUE(g_type_registry.lookup(Event::TYPE_ID).has_value());
-    KTEST_EXPECT_TRUE(g_type_registry.lookup(Counter::TYPE_ID).has_value());
 }

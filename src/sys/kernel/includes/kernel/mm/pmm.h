@@ -41,13 +41,6 @@ class page_frame_allocator {
 
     pmm_stats stats();
 
-    // In-order visit of the remaining regions (shell observability). Runs
-    // under the lock; fn must not allocate or re-enter the allocator.
-    template <typename F> void for_each_region(F&& fn) {
-        kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-        for (size_t i = 0; i < m_regions.size(); ++i) { fn(m_regions[i]); }
-    }
-
     size_t free_pages() const { return m_free_pages; }
     // Total pages ready to serve without a memset: pooled plus region tails.
     size_t zeroed_pages() const { return m_zeroed.size() + m_region_zeroed; }

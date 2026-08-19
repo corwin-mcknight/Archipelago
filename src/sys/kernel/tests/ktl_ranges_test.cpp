@@ -19,7 +19,7 @@ KTEST(ktl_span_basics, "ktl/span") {
     int arr[5] = {10, 20, 30, 40, 50};
 
     ktl::span<int> s(arr);  // C-array ctor + class arg
-    KTEST_EXPECT_ALL(s.size() == (size_t)5, !s.empty(), s[0] == 10, s.front() == 10, s.back() == 50);
+    KTEST_EXPECT_ALL(s.size() == (size_t)5, !s.empty(), s[0] == 10, s[4] == 50);
 
     // CTAD from pointer + length.
     auto s2 = ktl::span(arr, 3);
@@ -31,9 +31,7 @@ KTEST(ktl_span_basics, "ktl/span") {
     KTEST_EXPECT_EQUAL(sum, 150);
 
     // Slicing clamps.
-    KTEST_EXPECT_ALL(s.first(2).size() == (size_t)2, s.first(99).size() == (size_t)5, s.last(2)[0] == 40,
-                     s.subspan(1, 2).size() == (size_t)2, s.subspan(1, 2)[0] == 20,
-                     s.subspan(3, 99).size() == (size_t)2, s.subspan(99).size() == (size_t)0);
+    KTEST_EXPECT_ALL(s.first(2).size() == (size_t)2, s.first(2)[1] == 20, s.first(99).size() == (size_t)5);
 }
 
 // ============================================================

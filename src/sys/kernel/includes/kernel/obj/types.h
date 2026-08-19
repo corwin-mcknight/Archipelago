@@ -11,7 +11,7 @@ using Rights   = uint32_t;
 namespace type_ids {
 constexpr TypeId INVALID = 0;
 constexpr TypeId EVENT   = 1;
-constexpr TypeId COUNTER = 2;
+// 2 was COUNTER, removed.
 constexpr TypeId REGION  = 3;
 constexpr TypeId VMO     = 4;
 constexpr TypeId THREAD  = 5;

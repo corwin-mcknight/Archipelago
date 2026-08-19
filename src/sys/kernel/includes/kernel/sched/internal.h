@@ -59,6 +59,5 @@ class wait_queue;
 void timed_wait_register(wait_queue* queue, wait_node* node, ktime_t wake_at);
 void timed_wait_unregister(wait_node* node);
 void wake_due_timed_waits();
-size_t timed_wait_count();
 
 }  // namespace kernel::sched

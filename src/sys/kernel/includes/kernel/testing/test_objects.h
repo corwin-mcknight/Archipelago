@@ -1,6 +1,5 @@
 #pragma once
 
-#include <kernel/obj/counter.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/handle_table.h>
 #include <kernel/obj/object.h>
@@ -53,14 +52,14 @@ class TestObjUnregistered : public kernel::obj::Object {
     TestObjUnregistered() : Object(TYPE_ID) {}
 };
 
-// already_registered is expected here: obj_init() registers Event/Counter at boot, and tests
+// already_registered is expected here: obj_init() registers Event at boot, and tests
 // re-enter this function freely. Any other registration failure is a real test-environment bug.
 inline void expect_registered(ktl::result<void> result, const char* msg) {
     if (result.is_err() && result.unwrap_err() == ktl::errc::already_registered) { return; }
     result.expect(msg);
 }
 
-// One-shot init that registers TestObjA/TestObjB plus Event/Counter.
+// One-shot init that registers TestObjA/TestObjB plus Event.
 inline void register_all_test_types() {
     static bool done = false;
     if (done) return;
@@ -73,7 +72,6 @@ inline void register_all_test_types() {
                                                     TEST_RESTRICTED_VALID_RIGHTS, RIGHT_READ),
                       "restricted test type registration failed");
     expect_registered(Event::register_type(g_type_registry), "Event test registration failed");
-    expect_registered(Counter::register_type(g_type_registry), "Counter test registration failed");
     done = true;
 }
 

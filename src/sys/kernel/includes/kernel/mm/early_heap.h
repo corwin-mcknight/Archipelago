@@ -31,13 +31,10 @@ class early_heap {
 
     early_heap_stats stats();
 
-    template <typename T> T* alloc_object() { return static_cast<T*>(alloc(sizeof(T), alignof(T))); }
-
    private:
     early_heap_block* m_head;
     uintptr_t heap_start;
     uintptr_t heap_end;
-    size_t m_used_bytes    = 0;
     uint64_t m_alloc_calls = 0;
     uint64_t m_free_calls  = 0;
 };

@@ -82,7 +82,7 @@ void heap_hammer_thread(void* arg) {
 // Three workers hammer the heap concurrently under timer preemption, with per-allocation content
 // tags as the corruption oracle. Afterwards the heap must be back to its idle shape and the
 // borrowed PMM pages returned.
-KTEST_CASE_INTEGRATION(slab_heap_concurrent_hammer) {
+KTEST_CASE(slab_heap_concurrent_hammer) {
     size_t free_before = g_page_frame_allocator.free_pages();
     ktl::atomic<uint32_t> errors{0};
 

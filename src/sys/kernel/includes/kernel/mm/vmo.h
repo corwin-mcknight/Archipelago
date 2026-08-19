@@ -19,7 +19,7 @@ namespace kernel::mm {
 class vm_aspace;
 struct region_child;
 
-// Virtual memory object: a resizable, page-granular container of memory whose
+// Virtual memory object: a page-granular container of memory whose
 // pages materialize through a pager. Residency truth lives here (chunked
 // frame index) and in the page descriptors -- never in PTE software bits.
 class vmo : public obj::Object {
@@ -41,23 +41,15 @@ class vmo : public obj::Object {
     // absent. The fault path's core; caller holds the VMM lock.
     ktl::result<vm_paddr_t> get_or_fill_page(uint64_t page);
 
-    // Eager population / release without faulting. Range is [page, page+count).
-    // Decommit zaps installed translations through the mapping back-refs and
-    // returns pager-owned frames to the PMM.
+    // Eager population without faulting. Range is [page, page+count).
     ktl::result<void> commit(uint64_t page, size_t count);
-    ktl::result<void> decommit(uint64_t page, size_t count);
-
-    // Resize. Growth extends the chunk index lazily (no allocation until
-    // touch). Shrink wins over mappings: every translation past the new size
-    // is zapped in every aspace, frames return to the PMM, and stale accesses
-    // fault to an out-of-range error. Device VMOs reject resize.
-    ktl::result<void> set_size(size_t new_pages);
 
     // Mapping back-refs, maintained by Region::map/unmap under the VMM lock.
-    // Consumed by decommit and resize to find every translation of a page.
-    // A back-ref that failed to record is a mapping decommit and shrink cannot
-    // see, so they would free its frames while its translation stayed live;
-    // the caller must undo the binding rather than keep an untracked one.
+    // They record every translation of a page so eviction and writeback can
+    // find them when those land; today only the destructor's no-mappings
+    // assert consumes them. A back-ref that failed to record is a translation
+    // those walks cannot see, so the caller must undo the binding rather than
+    // keep an untracked one.
     [[nodiscard]] bool add_mapping(vm_aspace& aspace, region_child& binding);
     void remove_mapping(region_child& binding);
     size_t mapping_count() const { return m_mappings.size(); }
@@ -80,8 +72,6 @@ class vmo : public obj::Object {
 
     uint64_t* chunk_for(uint64_t page, bool allocate);
     ktl::result<void> fill_page(uint64_t page);
-    void decommit_page(uint64_t page);
-    void zap_page_mappings(uint64_t page);
 
     size_t m_pages;
     ktl::ref<pager> m_pager;
@@ -95,7 +85,7 @@ class vmo : public obj::Object {
 ktl::ref<vmo> create_anonymous_vmo(size_t pages);
 
 // VMO wrapping a fixed physical window (MMIO or wired scratch) with the given
-// cache mode. Never resizable; frames are never PMM-owned.
+// cache mode. Frames are never PMM-owned.
 ktl::ref<vmo> create_device_vmo(vm_paddr_t base, size_t pages, vm_cache_mode mode);
 
 // VMO wrapping already-wired cached RAM (boot module bytes today). Like a device

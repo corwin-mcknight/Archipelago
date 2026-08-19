@@ -30,7 +30,6 @@ A package that compiles board facts in declares `varies_by: ["board"]` and build
 | `sys/kernel`         | The Archipelago kernel                    |
 | `sys/kernel-headers` | Public kernel headers (user/kernel ABI)   |
 | `sys/init`           | The first user program                    |
-| `sys/kernel-src`     | Kernel source archive                     |
 
 ### Package Structure
 Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implementing four stages:

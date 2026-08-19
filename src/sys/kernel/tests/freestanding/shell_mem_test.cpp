@@ -8,7 +8,7 @@
 
 KTEST_MODULE("shell/mem");
 
-KTEST_CASE_INTEGRATION(shell_mem_summary) {
+KTEST_CASE(shell_mem_summary) {
     ktl::string_view out = run_shell("mem");
     KTEST_EXPECT_TRUE(contains(out, "physical:"));
     KTEST_EXPECT_TRUE(contains(out, "pages:"));
@@ -16,7 +16,7 @@ KTEST_CASE_INTEGRATION(shell_mem_summary) {
     KTEST_EXPECT_TRUE(contains(out, "kernel aspace:"));
 }
 
-KTEST_CASE_INTEGRATION(shell_mem_protocol_mode_escape_hygiene) {
+KTEST_CASE(shell_mem_protocol_mode_escape_hygiene) {
     ktl::string_view out = run_shell("mem", true);
     KTEST_EXPECT_TRUE(out.size() > 0);
     bool clean = true;

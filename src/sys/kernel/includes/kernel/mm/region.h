@@ -83,20 +83,9 @@ class Region : public obj::Object {
     // consumer needs partial unmaps.
     ktl::result<void> unmap(uintptr_t base, size_t size);
 
-    // Narrow the protection of bindings fully contained in the range.
-    // Escalation past the current binding prot is rejected; installed
-    // translations are zapped and refill through the fault path with the
-    // narrowed protection.
-    ktl::result<void> protect(uintptr_t base, size_t size, vm_prot_t prot);
-
     // Deepest binding slot containing vaddr, descending through sub-regions.
     // Pointer is valid only under the VMM lock.
     region_child* find_binding(uintptr_t vaddr);
-
-    // In-key-order visit of the direct children (shell observability).
-    template <typename F> void for_each_child(F&& fn) const {
-        for (auto it = m_children.begin(); it != m_children.end(); ++it) { fn(*it); }
-    }
 
     static ktl::result<void> register_type(obj::TypeRegistry& registry) {
         return registry.register_type(TYPE_ID, "region", obj::RIGHT_READ | obj::RIGHT_WRITE, obj::RIGHT_READ);

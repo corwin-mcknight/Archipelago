@@ -70,15 +70,9 @@ KTEST_CASE(ktl_fmt_integer_bases_and_char) {
     KTEST_EXPECT_FMT("-9223372036854775808", "{0}", -9223372036854775807LL - 1);
 }
 
-KTEST_CASE(ktl_fmt_maybe_argument) {
-    KTEST_EXPECT_FMT("42", "{0}", ktl::maybe<int>(42));
-
-    KTEST_EXPECT_FMT("<<ktl::nothing_t>>", "{0}", ktl::maybe<int>(ktl::nothing));
-}
-
 KTEST_CASE(ktl_fmt_buffer_bounds) {
-    // An empty maybe renders "<<ktl::nothing_t>>"; a small buffer must clip it, not overrun.
-    KTEST_EXPECT_FMT_N(8, "<<ktl::", "{0}", ktl::maybe<int>(ktl::nothing));
+    // A small buffer must clip the output, not overrun.
+    KTEST_EXPECT_FMT_N(8, "clipped", "{0}", "clipped string");
 
     // buffer_max == 0 must be a no-op, not a wrapped bound.
     char canary = 'x';

@@ -11,15 +11,11 @@ struct lock_record {
     const char* name      = nullptr;
     size_t owner_cpu      = 0;
     uint64_t owner_thread = 0;
-    const char* file      = nullptr;
-    uint32_t line         = 0;
     bool owned            = false;
 };
 struct edge_record {
-    uint32_t from    = 0;
-    uint32_t to      = 0;
-    const char* file = nullptr;
-    uint32_t line    = 0;
+    uint32_t from = 0;
+    uint32_t to   = 0;
 };
 
 lock_record g_locks[CONFIG_LOCKDEP_MAX_LOCKS];
@@ -46,7 +42,7 @@ bool path_exists(uint32_t from, uint32_t to, bool* visited) {
     return false;
 }
 
-void learn_edge(uint32_t from, uint32_t to, const char* file, uint32_t line) {
+void learn_edge(uint32_t from, uint32_t to) {
     if (from == 0 || to == 0) { return; }
     for (size_t i = 0; i < g_edge_count; ++i) {
         if (g_edges[i].from == from && g_edges[i].to == to) { return; }
@@ -54,7 +50,7 @@ void learn_edge(uint32_t from, uint32_t to, const char* file, uint32_t line) {
     bool visited[CONFIG_LOCKDEP_MAX_LOCKS] = {};
     if (path_exists(to, from, visited)) { panic("lockdep: dependency cycle detected"); }
     if (g_edge_count == CONFIG_LOCKDEP_MAX_EDGES) { panic("lockdep: dependency edge capacity exhausted"); }
-    g_edges[g_edge_count++] = edge_record{from, to, file, line};
+    g_edges[g_edge_count++] = edge_record{from, to};
 }
 }  // namespace
 #endif
@@ -103,29 +99,25 @@ void release_identity(uint32_t identity) {
 #endif
 }
 
-void acquired(const void* address, uint32_t identity, const char* file, uint32_t line) {
+void acquired(const void* address, uint32_t identity) {
 #ifndef NDEBUG
     auto& context = current_execution_context();
     for (size_t i = 0; i < context.held_count; ++i) {
         if (context.held[i].address == address) { panic("lockdep: recursive lock acquisition"); }
-        learn_edge(context.held[i].identity, identity, file, line);
+        learn_edge(context.held[i].identity, identity);
     }
     if (context.held_count == CONFIG_LOCKDEP_MAX_HELD) { panic("lockdep: held-lock capacity exhausted"); }
-    context.held[context.held_count++] = held_lock{address, identity, file, line};
+    context.held[context.held_count++] = held_lock{address, identity};
     if (identity != 0) {
         auto& lock = record(identity);
         if (lock.owned) { panic("lockdep: lock already owned"); }
         lock.owner_cpu    = context.cpu_index;
         lock.owner_thread = context.thread_id;
-        lock.file         = file;
-        lock.line         = line;
         lock.owned        = true;
     }
 #else
     (void)address;
     (void)identity;
-    (void)file;
-    (void)line;
 #endif
 }
 

@@ -69,7 +69,6 @@ DEPS := $(OBJS:.o=.d)
 
 override ASFLAGS += -g -f elf64
 
-override CFLAGS += -g -DLIMINE_API_REVISION=3 $(ARCH_DEFINES)
 
 
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
@@ -147,12 +146,6 @@ $(OBJ_DIR)/%.S.o: %.S
 	@echo -n "A"
 	@$(MKDIR_P) $(dir $@)
 	@$(CC) $(ARCH_CXXFLAGS) $(ARCH_DEFINES) -g -c $< -o $@
-
-# c source
-$(OBJ_DIR)/%.c.o: %.c
-	@echo -n "C"
-	@$(MKDIR_P) $(dir $@)
-	@$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 # c++ source
 $(OBJ_DIR)/%.cpp.o: %.cpp

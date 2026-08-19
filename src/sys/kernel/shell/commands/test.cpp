@@ -89,12 +89,9 @@ void execute_test(kernel::shell::ShellOutput& output, kernel::testing::ktest& te
 void list_tests(kernel::shell::ShellOutput& output) {
     for (auto* test = tests_begin(); test != tests_end(); ++test) {
         const char* module    = test->submodule ? test->submodule : "";
-        bool clean_env        = (test->flags & kernel::testing::KTEST_FLAG_REQUIRES_CLEAN_ENV) != 0;
         bool expects_crash    = (test->flags & kernel::testing::KTEST_FLAG_EXPECTS_CRASH) != 0;
-        const char* clean_str = clean_env ? ",\"requires_clean_env\":true" : "";
         const char* crash_str = expects_crash ? ",\"expects_crash\":true" : "";
-        output.event("{{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}{3}}}", test->name, module, clean_str,
-                     crash_str);
+        output.event("{{\"event\":\"test\",\"name\":\"{0}\",\"module\":\"{1}\"{2}}}", test->name, module, crash_str);
     }
 }
 

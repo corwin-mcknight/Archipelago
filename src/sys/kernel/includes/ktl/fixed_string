@@ -23,7 +23,6 @@ template <size_t N> class fixed_string {
 
     operator ktl::string_view() const { return ktl::string_view(m_buffer, length()); }
 
-    operator const char*() const { return m_buffer; }
 
     // Bounded scan: an unterminated buffer must not be over-read.
     size_t length() const {

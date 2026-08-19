@@ -10,12 +10,10 @@ using namespace kernel::testing;
 KTEST_MODULE("ktl/bit");
 
 KTEST_CASE(ktl_bit_power_of_two_queries) {
-    EXPECT(ktl::has_single_bit(uint32_t{1}));
-    EXPECT(ktl::has_single_bit(uint32_t{0x4000}));
-    EXPECT(!ktl::has_single_bit(uint32_t{0}));
-    EXPECT(!ktl::has_single_bit(uint32_t{3}));
-
-    // is_power_of_two is the same predicate under the kernel's preferred name.
+    EXPECT(ktl::is_power_of_two(uint32_t{1}));
+    EXPECT(ktl::is_power_of_two(uint32_t{0x4000}));
+    EXPECT(!ktl::is_power_of_two(uint32_t{0}));
+    EXPECT(!ktl::is_power_of_two(uint32_t{3}));
     EXPECT(ktl::is_power_of_two(size_t{4096}));
     EXPECT(!ktl::is_power_of_two(size_t{4095}));
     static_assert(ktl::is_power_of_two(uint64_t{1} << 47));

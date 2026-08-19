@@ -6,7 +6,6 @@ namespace ktl {
 
 /// Unified kernel error codes.
 enum class errc : intptr_t {
-    unknown            = -1,
     null_argument      = -2,
     invalid_operation  = -3,
     oom                = -4,

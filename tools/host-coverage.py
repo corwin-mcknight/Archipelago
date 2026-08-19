@@ -16,6 +16,7 @@ Usage:
 
 import glob
 import json
+import argparse
 import os
 import shutil
 import subprocess
@@ -53,17 +54,12 @@ def run(cmd, **kw):
 
 
 def main(argv):
-    min_pct = os.environ.get("COV_MIN")
-    names = []
-    i = 0
-    while i < len(argv):
-        if argv[i] == "--min":
-            min_pct = argv[i + 1]
-            i += 2
-        else:
-            names.append(argv[i])
-            i += 1
-    min_pct = float(min_pct) if min_pct not in (None, "") else None
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--min", dest="min_pct", default=os.environ.get("COV_MIN"))
+    parser.add_argument("names", nargs="*")
+    args = parser.parse_args(argv)
+    names = args.names
+    min_pct = float(args.min_pct) if args.min_pct not in (None, "") else None
 
     profdata = find_tool("llvm-profdata")
     cov = find_tool("llvm-cov")

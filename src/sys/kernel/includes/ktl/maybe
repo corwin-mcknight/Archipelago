@@ -1,8 +1,6 @@
 #pragma once
 
 #include <kernel/panic.h>
-#include <ktl/fmt>
-#include <ktl/string_view>
 #include <ktl/type_traits>
 #include <ktl/utility>
 
@@ -57,14 +55,6 @@ template <typename T> class [[nodiscard]] maybe {
         m_value     = T{};
     }
 
-    /// Moves the value out (leaving this maybe empty), or returns nothing if already empty.
-    maybe<T> take() {
-        if (!m_has_value) { return nothing; }
-        maybe<T> out(ktl::move(m_value));
-        reset();
-        return out;
-    }
-
     T& operator*() {
         if (!m_has_value) { panic("maybe::operator* on empty maybe"); }
         return m_value;
@@ -82,14 +72,6 @@ template <typename T> class [[nodiscard]] maybe {
         if (!m_has_value) { panic("maybe::operator-> on empty maybe"); }
         return &m_value;
     }
-
-    bool operator==(const maybe<T>& other) const {
-        if (m_has_value != other.m_has_value) { return false; }
-        if (!m_has_value) { return true; }
-        return m_value == other.m_value;
-    }
-
-    bool operator!=(const maybe<T>& other) const { return !(*this == other); }
 
     // Monadic operations
 
@@ -184,20 +166,3 @@ template <typename T> class [[nodiscard]] maybe<T&> {
 };
 
 };  // namespace ktl
-
-template <> struct ktl::format::kfmt_printer<ktl::nothing_t> {
-    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, ktl::nothing_t) {
-        args.zero_padded = false;
-        format_args::print_string(args, buffer, buffer_max, index, "<<ktl::nothing_t>>");
-    }
-};
-
-template <typename T> struct ktl::format::kfmt_printer<ktl::maybe<T>> {
-    static void print(format_args args, char* buffer, size_t buffer_max, size_t& index, const ktl::maybe<T>& arg) {
-        if (arg.has_value()) {
-            kfmt_printer<T>::print(args, buffer, buffer_max, index, arg.value());
-        } else {
-            kfmt_printer<ktl::nothing_t>::print(args, buffer, buffer_max, index, ktl::nothing);
-        }
-    }
-};

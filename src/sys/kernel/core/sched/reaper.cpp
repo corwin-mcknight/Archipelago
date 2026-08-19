@@ -12,7 +12,6 @@
 
 #include <ktl/deque>
 #include <ktl/ref>
-#include <ktl/stack>
 
 namespace kernel::sched {
 
@@ -22,7 +21,7 @@ namespace {
 // has no contiguous free -- the pool recycles them among threads instead; it is bounded by the peak
 // live thread count.
 ktl::deque<ktl::ref<Thread>> g_zombies;
-ktl::stack<kernel::mm::vm_paddr_t> g_stack_cache;
+ktl::deque<kernel::mm::vm_paddr_t> g_stack_cache;
 wait_queue g_reaper_wq;
 uint64_t g_reaped = 0;
 
@@ -97,14 +96,14 @@ uint64_t reaper_reaped_count() {
 
 ktl::maybe<kernel::mm::vm_paddr_t> stack_pool_acquire() {
     uint64_t flags                          = kernel::arch::save_and_disable_interrupts();
-    ktl::maybe<kernel::mm::vm_paddr_t> phys = g_stack_cache.pop();
+    ktl::maybe<kernel::mm::vm_paddr_t> phys = g_stack_cache.pop_back();
     kernel::arch::restore_interrupts(flags);
     return phys;
 }
 
 void stack_pool_release(kernel::mm::vm_paddr_t phys) {
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    bool ok        = g_stack_cache.push(phys);
+    bool ok        = g_stack_cache.push_back(phys);
     kernel::arch::restore_interrupts(flags);
     if (!ok) { g_log.warn("sched: stack cache full; leaking a thread stack"); }
 }

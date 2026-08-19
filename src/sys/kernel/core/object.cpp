@@ -1,5 +1,4 @@
 #include <kernel/obj/channel.h>
-#include <kernel/obj/counter.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/object.h>
 #include <kernel/obj/port.h>
@@ -14,7 +13,6 @@ namespace kernel::obj {
 // the host-tier build.
 void obj_init() {
     Event::register_type(g_type_registry).expect("obj_init: Event type registration failed");
-    Counter::register_type(g_type_registry).expect("obj_init: Counter type registration failed");
     Channel::register_type(g_type_registry).expect("obj_init: Channel type registration failed");
     Socket::register_type(g_type_registry).expect("obj_init: Socket type registration failed");
     Port::register_type(g_type_registry).expect("obj_init: Port type registration failed");

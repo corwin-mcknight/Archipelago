@@ -17,7 +17,6 @@
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/slab_heap.h"
 #include "kernel/mm/vm_aspace.h"
-#include "kernel/obj/event.h"
 #include "kernel/panic.h"
 #include "kernel/symbols.h"
 
@@ -219,12 +218,6 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 [[noreturn]] void late_boot(uint32_t boot_core_index) {
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
-
-    auto kernel_task = kernel::sched::kernel_task();
-    auto evt_id      = kernel_task->handles()
-                           .emplace<kernel::obj::Event>(kernel::obj::RIGHT_READ | kernel::obj::RIGHT_SIGNAL)
-                           .unwrap();
-    kernel_task->handles().get<kernel::obj::Event>(evt_id).unwrap()->signal_set(0x1);
 
     kernel::platform::timestamp_calibrate();
     kernel::time::use_timestamp_clock();

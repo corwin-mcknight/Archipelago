@@ -85,12 +85,6 @@ class Aggregator:
                 if k not in ("event", "name"):
                     r.diagnostics[k] = v
 
-    def feed_line(self, line):
-        ev = parse_line(line)
-        if ev is not None:
-            self.feed_event(ev)
-        return ev
-
     def finalize(self):
         """A test_start with no matching test_end means the test crashed or hung; mark it failed."""
         for r in self.results:

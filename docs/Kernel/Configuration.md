@@ -10,7 +10,6 @@ Compile-time constants in `kernel/config.h` control kernel behavior and limits.
 | `KERNEL_MINIMUM_PAGE_SIZE` | `0x1000` | 4K pages |
 | `CONFIG_MAX_CORES` | 16 | Maximum CPU cores |
 | `CONFIG_KERNEL_VERSION` | `"0.0.1"` | Kernel version string |
-| `CONFIG_LOG_MAX_DEVICES` | 8 | Max registered logging devices |
 | `CONFIG_KERNEL_LOG_COLORS` | 1 | Color output for log messages (disabled during testing) |
 | `KERNEL_ASSERT_HANG` | 1 | Hang on assertion failure |
 | `KERNEL_ASSERT` | 1 | Enable assertions |

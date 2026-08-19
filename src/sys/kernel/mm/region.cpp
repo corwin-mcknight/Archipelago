@@ -174,27 +174,6 @@ ktl::result<void> Region::unmap(uintptr_t base, size_t size) {
     return ktl::result<void>::ok();
 }
 
-ktl::result<void> Region::protect(uintptr_t base, size_t size, vm_prot_t prot) {
-    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
-    uintptr_t end = base + size;
-    if (end < base || base < m_base || end > m_base + m_size) { return ktl::err(ktl::errc::out_of_range); }
-
-    // Validate first: narrowing only, bindings only, no partial coverage.
-    for (auto it = m_children.lower_bound(base); it != m_children.end() && it->base < end; ++it) {
-        if (!it->is_binding()) { return ktl::err(ktl::errc::invalid_operation); }
-        if (it->base + it->size > end) { return ktl::err(ktl::errc::invalid_operation); }
-        if (!prot_within(prot, it->prot)) { return ktl::err(ktl::errc::rights_violation); }
-    }
-
-    for (auto it = m_children.lower_bound(base); it != m_children.end() && it->base < end; ++it) {
-        it->prot = prot;
-        // Installed translations refill through the fault path with the
-        // narrowed protection.
-        zap_range(it->base, it->size);
-    }
-    return ktl::result<void>::ok();
-}
-
 region_child* Region::find_binding(uintptr_t vaddr) {
     auto it = m_children.find_le(vaddr);
     if (it == m_children.end() || vaddr >= it->base + it->size) { return nullptr; }

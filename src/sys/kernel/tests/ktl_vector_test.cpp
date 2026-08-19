@@ -19,7 +19,6 @@ KTEST_CASE(ktl_vector_push_and_index) {
     KTEST_EXPECT_ALL(vec.size() == 3, vec.capacity() >= vec.size());
     KTEST_EXPECT_ALL(vec[0] == 1, vec[1] == 2, vec[2] == 3);
 
-    KTEST_EXPECT_VALUE(vec.front(), 1);
     KTEST_EXPECT_VALUE(vec.back(), 3);
     KTEST_EXPECT_FALSE(vec.at(10).has_value());
 }
@@ -95,7 +94,6 @@ KTEST_CASE(ktl_vector_iterators) {
     const auto& const_ref = vec;
     KTEST_EXPECT_EQUAL(static_cast<size_t>(const_ref.end() - const_ref.begin()), const_ref.size());
     KTEST_EXPECT_EQUAL(*(const_ref.begin() + 3), 3);
-    KTEST_EXPECT_ALL(const_ref.cbegin() == const_ref.begin(), const_ref.cend() == const_ref.end());
 }
 
 KTEST_CASE(ktl_vector_range_for) {

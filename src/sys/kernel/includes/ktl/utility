@@ -31,10 +31,6 @@ template <typename T1, typename T2> struct pair {
 
     constexpr pair(const pair&) = default;
     constexpr pair(pair&&)      = default;
-    template <typename U1, typename U2>
-    constexpr pair(const pair<U1, U2>& other) : first(other.first), second(other.second) {}
-    template <typename U1, typename U2>
-    constexpr pair(pair<U1, U2>&& other) : first(move(other.first)), second(move(other.second)) {}
 
     constexpr pair& operator=(const pair&) = default;
     constexpr pair& operator=(pair&&)      = default;

@@ -60,7 +60,6 @@ class AttemptLog:
     attempt: int
     outcome: str  # pass, fail, error, timeout, infra
     reason: Optional[str]
-    requires_clean_env: bool = False
     events: List[Event] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
     crash: Optional[Crash] = None
@@ -72,7 +71,6 @@ class TestResult:
     name: str
     outcome: str
     module: Optional[str] = None
-    requires_clean_env: bool = False
     expects_crash: bool = False
     attempts: List[AttemptLog] = field(default_factory=list)
     duration_ns: Optional[int] = None
@@ -82,7 +80,6 @@ class TestResult:
 class TestDescriptor:
     name: str
     module: Optional[str] = None
-    requires_clean_env: bool = False
     expects_crash: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -106,7 +103,6 @@ class KernelHarness:
         boot_timeout: float,
         extra_args: Optional[Sequence[str]] = None,
         verbose: bool = False,
-        add_exit_device: bool = True,
         arch: str = "x86_64",
         firmware: Optional[Path] = None,
     ) -> None:
@@ -116,7 +112,6 @@ class KernelHarness:
         self.boot_timeout = boot_timeout
         self.extra_args = list(extra_args or [])
         self.verbose = verbose
-        self.add_exit_device = add_exit_device
         self.arch = arch
         self.firmware = firmware
 
@@ -138,7 +133,7 @@ class KernelHarness:
             "-serial", "stdio", "-display", "none", "-no-reboot",
             "-m", str(self.memory),
         ]
-        args.extend(machine_args(self.arch, self.iso, self.firmware, exit_device=self.add_exit_device))
+        args.extend(machine_args(self.arch, self.iso, self.firmware, exit_device=True))
         args.extend(self.extra_args)
         if self.verbose:
             print(f"[harness] launching: {' '.join(args)}")
@@ -337,7 +332,6 @@ class KernelHarness:
             return TestDescriptor(
                 name=payload.get("name", ""),
                 module=payload.get("module"),
-                requires_clean_env=bool(payload.get("requires_clean_env")),
                 expects_crash=bool(payload.get("expects_crash")),
                 metadata=payload,
             )
@@ -360,61 +354,32 @@ class KernelHarness:
         self,
         test_name: str,
         timeout: float,
-        retries: int,
-        requires_clean_env: bool = False,
         expects_crash: bool = False,
         module: Optional[str] = None,
     ) -> TestResult:
-        attempts: List[AttemptLog] = []
-        max_attempts = 1 + max(0, retries)
-
-        if requires_clean_env:
-            self.restart()
-
-        for attempt_idx in range(1, max_attempts + 1):
-            attempt = self._run_single_attempt(test_name, timeout, attempt_idx, requires_clean_env)
-            if expects_crash:
-                attempt = _invert_for_expected_crash(attempt)
-            attempts.append(attempt)
-
-            if attempt.outcome in ("pass", "skipped", "fail", "error"):
-                break
-            # Infrastructure/timeout: restart and retry
-            self.restart()
-        else:
-            attempt = None  # all attempts exhausted via loop
-
-        if requires_clean_env:
-            try:
-                self.restart()
-            except HarnessError:
-                pass
-
-        final_outcome = attempts[-1].outcome if attempts else "infra"
+        attempt = self._run_single_attempt(test_name, timeout)
+        if expects_crash:
+            attempt = _invert_for_expected_crash(attempt)
         return TestResult(
             name=test_name,
-            outcome=final_outcome,
+            outcome=attempt.outcome,
             module=module,
-            requires_clean_env=requires_clean_env,
             expects_crash=expects_crash,
-            attempts=attempts,
-            duration_ns=attempts[-1].duration_ns if attempts else None,
+            attempts=[attempt],
+            duration_ns=attempt.duration_ns,
         )
 
-    def _run_single_attempt(
-        self, test_name: str, timeout: float, attempt_idx: int, requires_clean_env: bool
-    ) -> AttemptLog:
-        clean_flag = requires_clean_env and attempt_idx == 1
+    def _run_single_attempt(self, test_name: str, timeout: float, attempt_idx: int = 1) -> AttemptLog:
         try:
             self.wait_for_prompt(timeout)
         except HarnessError as exc:
-            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc), requires_clean_env=clean_flag)
+            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc))
 
         self.send_command(f"test run {test_name}")
         try:
             events, raw_lines = self.gather_until_waiting(timeout)
         except HarnessError as exc:
-            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc), requires_clean_env=clean_flag)
+            return AttemptLog(attempt=attempt_idx, outcome="infra", reason=str(exc))
 
         outcome, reason, filtered = self._interpret_test_events(events)
         crash = self._aggregate_crash(events)
@@ -439,7 +404,7 @@ class KernelHarness:
 
         return AttemptLog(
             attempt=attempt_idx, outcome=outcome, reason=reason,
-            requires_clean_env=clean_flag, events=filtered, lines=raw_lines,
+            events=filtered, lines=raw_lines,
             crash=crash, duration_ns=self._extract_duration(events),
         )
 
@@ -661,9 +626,8 @@ def write_artifacts(base_dir: Optional[Path], result: TestResult) -> None:
     )
     meta = {
         "test": result.name, "outcome": result.outcome, "module": result.module,
-        "requires_clean_env": result.requires_clean_env,
         "attempts": [
-            {"attempt": a.attempt, "outcome": a.outcome, "reason": a.reason, "requires_clean_env": a.requires_clean_env}
+            {"attempt": a.attempt, "outcome": a.outcome, "reason": a.reason}
             for a in result.attempts
         ],
         "crash": _crash_summary(final.crash) if final.crash else None,
@@ -820,7 +784,7 @@ def _make_harness(args: argparse.Namespace) -> KernelHarness:
     return KernelHarness(
         qemu=qemu, iso=args.iso, memory=memory,
         boot_timeout=boot_timeout, extra_args=args.qemu_arg,
-        verbose=args.verbose, add_exit_device=not args.no_exit_device,
+        verbose=args.verbose,
         arch=args.arch, firmware=args.firmware,
     )
 
@@ -829,7 +793,6 @@ def _infra_result(name: str, desc: Optional[TestDescriptor], reason: str) -> Tes
     return TestResult(
         name=name, outcome="infra",
         module=desc.module if desc else None,
-        requires_clean_env=desc.requires_clean_env if desc else False,
         expects_crash=desc.expects_crash if desc else False,
         attempts=[AttemptLog(attempt=1, outcome="infra", reason=reason)],
     )
@@ -853,8 +816,7 @@ def _run_one_isolated(
             continue
         # The restart above is the clean boot, so run_test does a single attempt without restarting.
         result = harness.run_test(
-            name, timeout=args.test_timeout, retries=0,
-            requires_clean_env=False,
+            name, timeout=args.test_timeout,
             expects_crash=desc.expects_crash if desc else False,
             module=desc.module if desc else None,
         )
@@ -933,7 +895,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                    help="Artifact directory (default: build/<arch>/test-artifacts)")
     p.add_argument("--qemu-arg", action="append", default=[], help="Extra QEMU argument (repeatable)")
     p.add_argument("--no-artifacts", action="store_true", help="Disable artifact generation")
-    p.add_argument("--no-exit-device", action="store_true", help="Don't attach isa-debug-exit")
     p.add_argument("--kernel-elf", type=Path, default=None,
                    help="Unstripped kernel ELF for crash symbolication (default: build/<arch>/obj/sys/kernel/kernel.elf)")
     p.add_argument("--verbose", action="store_true", help="Verbose harness logging")

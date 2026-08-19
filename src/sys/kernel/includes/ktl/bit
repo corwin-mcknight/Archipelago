@@ -10,13 +10,8 @@
 namespace ktl {
 
 /// True iff exactly one bit is set, i.e. the value is a power of two.
-template <typename T> constexpr enable_if_t<is_unsigned_v<T>, bool> has_single_bit(T x) {
-    return x != 0 && (x & (x - 1)) == 0;
-}
-
-/// Alias for has_single_bit, spelled the way the kernel's allocators ask the question.
 template <typename T> constexpr enable_if_t<is_unsigned_v<T>, bool> is_power_of_two(T x) {
-    return has_single_bit(x);
+    return x != 0 && (x & (x - 1)) == 0;
 }
 
 // Alignment helpers -- not part of std <bit>, but the most common reason kernel code does bit math.

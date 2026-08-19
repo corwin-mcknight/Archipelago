@@ -12,7 +12,7 @@ KTEST_MODULE("kernel/port");
 // The full wake chain with a real sleeper: a thread parked on the port is woken by a bound
 // object's signal -- signal_set, port_notify, the port's own READABLE, wake_matching -- and the
 // packet that arrives names the binding's key.
-KTEST_CASE_INTEGRATION(port_wait_wakes_through_binding) {
+KTEST_CASE(port_wait_wakes_through_binding) {
     auto port  = ktl::make_ref<Port>();
     auto event = ktl::make_ref<Event>();
     KTEST_REQUIRE_TRUE(port && event);

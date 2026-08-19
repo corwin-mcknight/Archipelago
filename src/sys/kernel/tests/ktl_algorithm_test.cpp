@@ -26,15 +26,6 @@ KTEST_CASE(ktl_algorithm_find_family) {
     auto missing = ktl::find_if(values, values + 4, [](int v) { return v > 100; });
     KTEST_EXPECT_FALSE(missing.has_value());
 
-    // find by value returns a reference to the matching element.
-    const int by_value[3] = {1, 2, 3};
-
-    auto hit              = ktl::find(by_value, by_value + 3, 2);
-    KTEST_REQUIRE_TRUE(hit.has_value());
-    KTEST_EXPECT_TRUE(&hit.value() == &by_value[1]);
-
-    KTEST_EXPECT_FALSE(ktl::find(by_value, by_value + 3, 99).has_value());
-
     // find_index_if yields the position, and chains through maybe.
     const uint32_t ids[4] = {10, 20, 30, 40};
 

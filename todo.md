@@ -5,23 +5,20 @@
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
-- SBI timer hardcodes QEMU virt's 10 MHz timebase; read the DTB's /cpus/timebase-frequency for real hardware (VisionFive 2 is 4 MHz).
+- Bring up the jh7110 board target (Orange Pi RV) on hardware: dd `build/riscv64/jh7110/sd.img` to a card and verify Limine over the board's SPI-flash U-Boot. `make uboot-test` already proves the chain against mainline U-Boot 2025.01 in QEMU, so a failure points at the vendor U-Boot -- update it to mainline before debugging anything else.
 - Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).
 - Grow the riscv64/tests/ suite (external interrupt claim path, more sfence/TLB behavior).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
 
 ## Boot & Platform
 - `_start` still owns the boot ordering itself: `kernel::platform::console_init()`/`timer_init()` moved device bring-up out of the arch files, but the sequence (heap, ctors, console, cores, memory, traps, timer, late boot) is written twice, once per arch, and the two orders differ in ways that are not all forced. Factor the common spine once the third arch makes the real variation visible.
-- Board device discovery is still hardcoded: `riscv64/platforms/virt/` fixes the timebase at QEMU virt's 10 MHz and the UART at 0x10000000. Real hardware needs the DTB (VisionFive 2 is 4 MHz); Limine has a DTB request, so extend `boot_info` rather than teaching shared code a second protocol.
-- No non-default board target exists yet; adding one is a short overlay config (`base:` plus the paths that differ) plus an `<arch>/platforms/<board>/` directory. It should land together so the target means something rather than aliasing the default board's kernel.
+- Board device discovery is still hardcoded: each riscv64 board directory fixes its timebase and UART address as constants. Reading the DTB's /cpus/timebase-frequency would replace the per-board constants; Limine has a DTB request, so extend `boot_info` rather than teaching shared code a second protocol.
 - Linker scripts stayed in `<arch>/`: the higher-half load address is an arch and boot-protocol fact, not a board one. Revisit only if a board needs a different load address.
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
 - Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.
 - Post-Milestone-1 review findings, architecture and boot:
-    - `fp_walk_result` is declared identically in both arch crash files and `core/crash.cpp`, and the whole `crash::arch` interface is declared in a `.cpp` rather than `kernel/crash.h`, so the implementations are never checked against it. `is_canonical`, `in_kernel_half`, and the register-format `emit()` helper are duplicated verbatim too.
     - riscv64 calls `fault_enter()` only inside the page-fault branch while x86_64 calls it for every exception, so identical faults reach the crash path with different fault depth and different `blocking_allowed()` behaviour.
     - `trap_sp_overflow` on x86_64 branches out before `isr_common`'s `cld`, so the panic and crash-dump path runs with DF in whatever state the faulting context left it.
-    - The riscv64 board timebase is defined in both `platforms/virt/platform.cpp` and `platforms/virt/timer.cpp`, and `timer.cpp` re-implements `rdtime()` instead of calling `kernel::arch::timestamp()`.
     - `enable_nxe()`'s comment claims it must run before any NX mapping is installed, but `init_memory()` clones and activates Limine's page tables (NX bits included) first; it survives only because Limine already set EFER.NXE. Fix the order or the comment. `MSR_EFER` is also defined in both `main.cpp` and `arch.cpp`.
     - The `gdts[]` array has no alignment attribute while the IDT does; `struct gdt` nests only packed members, so entries land at arbitrary alignment.
     - `.init_array` is placed in the executable `text` PHDR on both arches; the constructor pointer table belongs in `:rodata`. The unexplained `. += 0x1000;` in `.bss` also deserves a comment naming what it pads.
@@ -43,7 +40,7 @@
 - vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
 - Result/maybe monadic combinators (map/and_then/or_else) are const-only and operate on copies -- add rvalue-qualified overloads that move.
 - rb_tree has no reverse iteration or predecessor query; find_le covers the interval-lookup need for now.
-    - Zero non-test callers, candidates for deletion: `ktl::tuple` (whole header), `take_view`/`drop_view`/`views::transform`, eight of the eleven `ktl::bit` functions, `maybe`'s `filter`/`take`/`ptr_or`/`from_ptr` and its duplicate non-const `has_value()`, `static_vector::peek_back()`, and the `strcpy`/`strncpy`/`strlcpy`/`atoi`/ctype surface in the std shims.
+    - Zero non-test callers, candidates for deletion: `ktl::tuple` (whole header), `take_view`/`drop_view`/`views::transform`, eight of the eleven `ktl::bit` functions, `maybe`'s `filter`/`take`/`ptr_or`/`from_ptr` and its duplicate non-const `has_value()`, `static_vector::peek_back()`, and the `strcpy`/`strncpy`/`strlcpy`/ctype surface in the std shims.
 
 ## Memory Management
 - VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
@@ -54,7 +51,7 @@
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - Memory-pressure signal userspace can wait on: a kernel Event with level bits (low, critical) sampled where the zeroer already runs, so servers drop caches before allocations start failing -- the kernel cannot reclaim server-held memory itself and anonymous memory is never swapped. Open questions: hysteresis at the boundary, global level versus per-task, and whether ignoring it has a consequence.
 - VMM follow-ups:
-    - Binding splitting for partial unmap/protect (whole-slot ranges only).
+    - Binding splitting for partial unmap (whole-slot ranges only).
     - Region handle exposure + detached-state machine (task/IPC milestone).
     - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone).
     - Page-table frames sit in descriptor state ACTIVE, not WIRED; revisit when eviction lands.
@@ -62,12 +59,11 @@
     - Clock replacement deferred to user-pager milestone (only pager-backed pages evictable); anonymous swap ruled out permanently. OOM = allocation failure via Result.
 - Post-Milestone-1 review findings, memory management:
     - `page_frame_allocator::free` validates nothing: it accepts unaligned addresses, double frees, and frees of WIRED/MMIO frames, even though `g_page_descriptors` already knows each frame's state.
-    - `Region::protect` starts its scan at `lower_bound(base)`, so a binding straddling the range start keeps its old wider protection and the call still returns ok. `unmap` already does the partial-overlap pre-scan this needs.
     - `map_page`/`unmap_page` accept kernel-half addresses, where intermediate tables are shared across every address space, so a kernel-half map on a user aspace would mutate all of them and `arch_destroy` would leak the tables.
     - The "OOM = allocation failure via Result" contract is now real after `heap_activate()`: the nothrow `operator new` returns null on slab-heap exhaustion. The early heap still panics, but only the boot window (pre-PMM) runs on it. Remaining fallout: audit existing callers that assume allocation success now that null is actually deliverable (deferred to review).
     - `early_heap` guards its block list with interrupts off rather than a lock, which is mutual exclusion only while one core allocates. Upgrading to a spinlock needs a constant-initialised lock, because `on_boot()` runs before the global constructors.
     - The `total_consumed > block->size` rejection in `early_heap::alloc` is unreachable; the preceding `usable < size` check already guarantees it.
-    - The vmo constructor ignores chunk-index allocation failure, producing a VMO whose `size_pages()` exceeds what its index covers; the grow path in `set_size` handles the same failure correctly.
+    - The vmo constructor ignores chunk-index allocation failure, producing a VMO whose `size_pages()` exceeds what its index covers.
     - `create_device_vmo` marks its range WIRED before the vmo exists and nothing ever un-marks it, so a failed construction or a destroyed device VMO leaves the range permanently WIRED.
     - Both arch `flush_tlb_page` implementations duplicate the same active-root guard and its comment; only the invalidate instruction differs.
     - `page_descriptor.h`'s `coverage_end()` hardcodes `0x1000` instead of `KERNEL_MINIMUM_PAGE_SIZE`.
@@ -114,10 +110,10 @@
     - `dispatch_handle_op` takes the table lock in `verify` and again in each handler, re-resolving the id, so verify-then-execute is not actually held across one lock; and `unpack(handle)` is computed twice.
     - A partial `grow()` failure returns after appending some entries without chaining them, orphaning those slots permanently.
     - `create_handle` uses the free-list head without asserting `grow()` actually produced a slot; `-1` would index as `SIZE_MAX`.
-    - `TypeRegistry` writes take `m_lock` but `lookup`, `lookup_by_name`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
+    - `TypeRegistry` writes take `m_lock` but `lookup`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
     - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
     - An unknown syscall number returns raw `-1` while an unknown handle op returns `invalid_operation`; pick one.
-    - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `TypeRegistry::lookup_by_name`, `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
+    - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
 - User memory syscall surface is create/map/unmap only (SYS_VMO_*); resize, protect, commit/decommit, EXEC mappings, and per-task memory quotas each wait for a consumer that names them (growable arenas, guard pages, the userspace loader, real quota policy). Absurd VMO sizes succeed at create and fail lazily at touch -- the accepted no-cap stance until quotas land.
 - Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
 - Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
@@ -185,10 +181,10 @@
 - Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/apic.cpp` (LAPIC timer), and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
 
 ## Tooling & Developer Experience
-- Plume decides a package is installed from world membership plus an installed manifest newer than the build stamp, so files removed from the sysroot behind its back are never noticed: deleting `boot/kernel.elf` or `usr/include/abi/` leaves `plume build`/`install` reporting nothing to do, and the ISO is assembled without them. Verifying the manifest's files still exist would close it, at the cost of stat-ing every installed file on each invocation.
-- Plume does not notice deleted source files: the stale `.o` stays in the obj tree and keeps linking into the kernel until a manual `plume rebuild`, so removed code silently survives in the image (and its tests keep passing). Pruning objects with no matching source during incremental builds would close it.
+- Plume does not notice files deleted from the composed sysroot behind its back: the sysroot stamp keys on package build stamps, not sysroot contents, so a tampered sysroot images as-is until the next recompose. Deleting `build/<arch>/sysroot.stamp` (or the sysroot itself) forces one.
 - Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).
 - Expand the Debugging doc with a concrete GDB/QEMU remote-attach walkthrough (stub port, symbol loading, break-on-entry); `make clangd` already exists.
+- Fix the `make docs` lane: the kernel Doxyfile's INPUT points at `src/sys/kernel/docs/` (README.md, architecture.md, testing.md), which does not exist, and PROJECT_BRIEF still says "x86_64 kernel". Point it at the real sources and `docs/Kernel/`.
 - Kernel shell enhancements:
     - Object Inspection -- expand handle inspect and obj inspect with detailed views
     - Table Dumps -- add full handle table dump with object details

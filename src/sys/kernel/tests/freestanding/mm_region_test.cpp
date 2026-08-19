@@ -11,7 +11,7 @@
 
 // Region-tree tests drive scratch address spaces (PMM-backed page tables).
 // They are merged into two integration stories, each against one fresh VM:
-// building and validating the tree, and mutating it (unmap, protect,
+// building and validating the tree, and mutating it (unmap,
 // teardown). Every phase constructs its own scratch aspace, so no phase
 // depends on state left by another.
 
@@ -34,7 +34,7 @@ constexpr vm_prot_t RWX      = RW | vm_prot::EXECUTE;
 
 // Story: building the tree. A three-level hierarchy resolves deepest-binding
 // lookups, and structurally invalid children and bindings are rejected.
-KTEST_CASE_INTEGRATION(region_tree_construction_and_validation) {
+KTEST_CASE(region_tree_construction_and_validation) {
     // Phase 1: three-level tree, deepest-binding lookup from the root.
     {
         vm_aspace aspace;
@@ -78,10 +78,10 @@ KTEST_CASE_INTEGRATION(region_tree_construction_and_validation) {
     }
 }
 
-// Story: mutating the tree. Unmap and protect zap live translations under
-// their bindings, partial cuts are rejected, and tearing down a whole child
-// region cleans up its nested descendants.
-KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
+// Story: mutating the tree. Unmap zaps live translations under its bindings,
+// partial cuts are rejected, and tearing down a whole child region cleans up
+// its nested descendants.
+KTEST_CASE(region_unmap_and_teardown) {
     // Phase 1: unmap zaps translations; partial unmaps are rejected untouched.
     {
         vm_aspace aspace;
@@ -105,30 +105,7 @@ KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
         kernel::mm::g_page_frame_allocator.free(frame);
     }
 
-    // Phase 2: protect narrows only.
-    {
-        vm_aspace aspace;
-        KTEST_REQUIRE_TRUE(aspace.init());
-        KTEST_REQUIRE_TRUE(aspace.root().map(MAP_BASE, MAP_SIZE, ktl::ref<vmo>{}, 0, RW).is_ok());
-
-        KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
-        KTEST_REQUIRE_TRUE(aspace.map_page(MAP_BASE, frame, RW));
-
-        // Narrowing succeeds, updates the binding, and zaps translations so
-        // the fault path refills them with the new protection.
-        KTEST_REQUIRE_TRUE(aspace.root().protect(MAP_BASE, MAP_SIZE, vm_prot::READ).is_ok());
-        KTEST_EXPECT_FALSE(aspace.walk(MAP_BASE).has_value());
-        region_child* hit = aspace.root().find_binding(MAP_BASE);
-        KTEST_REQUIRE_TRUE(hit != nullptr);
-        KTEST_EXPECT_EQUAL(hit->prot, vm_prot::READ);
-
-        // Widening back is a rights violation.
-        KTEST_EXPECT_ERR(aspace.root().protect(MAP_BASE, MAP_SIZE, RW), ktl::errc::rights_violation);
-
-        kernel::mm::g_page_frame_allocator.free(frame);
-    }
-
-    // Phase 3: teardown of a whole child region leaves the space clean.
+    // Phase 2: teardown of a whole child region leaves the space clean.
     {
         vm_aspace aspace;
         KTEST_REQUIRE_TRUE(aspace.init());
@@ -151,7 +128,7 @@ KTEST_CASE_INTEGRATION(region_unmap_protect_and_teardown) {
 // Story: kernel-placed bindings. First-fit lands in the lowest gap at or
 // above the floor under the same lock hold that inserts, and unmap-by-address
 // removes exactly the direct-child binding containing the address.
-KTEST_CASE_INTEGRATION(region_first_fit_and_unmap_binding) {
+KTEST_CASE(region_first_fit_and_unmap_binding) {
     // Phase 1: first-fit walks gaps in address order inside a bounded child
     // region, where exhaustion is reachable.
     {

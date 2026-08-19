@@ -57,7 +57,6 @@ void early_heap::on_boot(uintptr_t start, uintptr_t end) {
     m_head->free         = true;
     m_head->payload_base = 0;
 
-    m_used_bytes         = 0;
     m_alloc_calls        = 0;
     m_free_calls         = 0;
 }
@@ -146,7 +145,6 @@ void* early_heap::alloc(size_t size, size_t alignment) {
         block->payload_base = payload;
 
         ++m_alloc_calls;
-        m_used_bytes += block->size - sizeof(early_heap_block);
 
         return reinterpret_cast<void*>(payload);
     }
@@ -168,7 +166,6 @@ void early_heap::free(void* ptr) {
     while (block != nullptr) {
         if (!block->free && block->payload_base == target) {
             ++m_free_calls;
-            m_used_bytes -= block->size - sizeof(early_heap_block);
             block->free         = true;
             block->payload_base = 0;
 

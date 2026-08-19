@@ -131,6 +131,4 @@ void wake_due_timed_waits() {
     }
 }
 
-size_t timed_wait_count() { return g_timed_waits.size(); }
-
 }  // namespace kernel::sched

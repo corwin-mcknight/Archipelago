@@ -15,10 +15,9 @@ template <typename Lock> uint32_t identity(const Lock& lock) {
 
 template <typename Lock> class lock_guard {
    public:
-    explicit lock_guard(Lock& lock, const char* file = __builtin_FILE(), uint32_t line = __builtin_LINE())
-        : m_lock(lock), m_identity(detail::identity(lock)) {
+    explicit lock_guard(Lock& lock) : m_lock(lock), m_identity(detail::identity(lock)) {
         m_lock.lock();
-        lockdep::acquired(&m_lock, m_identity, file, line);
+        lockdep::acquired(&m_lock, m_identity);
     }
     ~lock_guard() {
         lockdep::released(&m_lock, m_identity);
@@ -34,8 +33,7 @@ template <typename Lock> class lock_guard {
 
 template <typename Lock> class critical_lock_guard {
    public:
-    explicit critical_lock_guard(Lock& lock, const char* file = __builtin_FILE(), uint32_t line = __builtin_LINE())
-        : m_critical(), m_guard(lock, file, line) {}
+    explicit critical_lock_guard(Lock& lock) : m_critical(), m_guard(lock) {}
 
    private:
     critical_section m_critical;
@@ -44,8 +42,7 @@ template <typename Lock> class critical_lock_guard {
 
 template <typename Lock> class critical_irq_lock_guard {
    public:
-    explicit critical_irq_lock_guard(Lock& lock, const char* file = __builtin_FILE(), uint32_t line = __builtin_LINE())
-        : m_critical(), m_guard(lock, file, line) {}
+    explicit critical_irq_lock_guard(Lock& lock) : m_critical(), m_guard(lock) {}
 
    private:
     critical_irq_section m_critical;

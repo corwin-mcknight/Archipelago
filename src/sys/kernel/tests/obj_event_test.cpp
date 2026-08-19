@@ -24,7 +24,7 @@ KTEST_CASE(obj_event_handle_lifecycle) {
         KTEST_UNWRAP(evt, table.get<Event>(id));
         KTEST_EXPECT_TRUE(evt->type_id() == Event::TYPE_ID);
 
-        KTEST_EXPECT_ERR(table.get<Counter>(id), ktl::errc::wrong_type);
+        KTEST_EXPECT_ERR(table.get<TestObjA>(id), ktl::errc::wrong_type);
 
         evt->signal_set(0x05);
         KTEST_EXPECT_TRUE(evt->signals() == 0x05);

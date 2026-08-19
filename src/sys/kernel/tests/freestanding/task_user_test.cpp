@@ -29,7 +29,7 @@ constexpr uint32_t SELFTEST_STATUS_ECHO_SKIPPED = 0x100;
 // End to end over the real boot path: the selftest module is loaded from the boot image by the
 // ELF loader, runs in its own address space, and exits. A missing module fails the test loudly
 // rather than silently skipping, because an image without selftest is a broken image.
-KTEST_CASE_INTEGRATION(user_task_lifecycle) {
+KTEST_CASE(user_task_lifecycle) {
     const auto* module = kernel::boot::find_module("selftest");
     KTEST_REQUIRE_TRUE(module != nullptr);
     KTEST_REQUIRE_TRUE(module->size > 0);
@@ -153,7 +153,7 @@ ktl::ref<Task> find_task_named(ktl::string_view name) {
 // round-trips -- selftest's exit status 0 (echo NOT skipped) is the proof the brokered path ran.
 // Killing the coordinator then orphans echo, whose event loop observes PEER_CLOSED and exits
 // cleanly: the parent-death contract, demonstrated on a task the test never held a handle to.
-KTEST_CASE_INTEGRATION(coordinator_boot) {
+KTEST_CASE(coordinator_boot) {
     namespace sys = kernel::syscall;
     auto launched = launch_coordinator();
     KTEST_REQUIRE_TRUE(launched.is_ok());
@@ -191,7 +191,7 @@ KTEST_CASE_INTEGRATION(coordinator_boot) {
 // parked on the port's wait queue, claim it, and force it out through the syscall boundary; the
 // task then tears down completely and reports the killed cause. Timing-independent: a kill landing
 // before echo reaches its wait still marks the thread, which then refuses to park.
-KTEST_CASE_INTEGRATION(user_task_kill_blocked) {
+KTEST_CASE(user_task_kill_blocked) {
     using namespace kernel::obj;
     namespace sys      = kernel::syscall;
     const auto* module = kernel::boot::find_module("echo");
@@ -238,7 +238,7 @@ KTEST_CASE_INTEGRATION(user_task_kill_blocked) {
 // whole parent contract through the two returned handles -- typed handles, the child running and
 // then terminating cleanly, status readable, and the bootstrap channel's parent end reporting
 // PEER_CLOSED once the child's table is gone.
-KTEST_CASE_INTEGRATION(task_spawn_from_vmo) {
+KTEST_CASE(task_spawn_from_vmo) {
     using namespace kernel::obj;
     namespace sys      = kernel::syscall;
     const auto* module = kernel::boot::find_module("selftest");
@@ -288,7 +288,7 @@ KTEST_CASE_INTEGRATION(task_spawn_from_vmo) {
 // message -- envelope, exact byte size, role name, and a read-only wired VMO over the module's
 // bytes. Driven against a bare task with a hand-built mailbox so the test owns the child end and
 // no user program races the reads.
-KTEST_CASE_INTEGRATION(boot_module_endowment) {
+KTEST_CASE(boot_module_endowment) {
     using namespace kernel::obj;
     const auto& info = kernel::boot::collect();
     KTEST_REQUIRE_TRUE(info.module_count >= 2);  // the image ships at least init and echo
@@ -348,7 +348,7 @@ KTEST_CASE_INTEGRATION(boot_module_endowment) {
 // the genuinely-blocking wake path is sched_test's territory (wait_signals with a signaling
 // thread). What this adds is the syscall layer: poll semantics, mask validation, and the rights
 // check.
-KTEST_CASE_INTEGRATION(object_wait_syscall) {
+KTEST_CASE(object_wait_syscall) {
     using namespace kernel::obj;
     namespace sys = kernel::syscall;
 
@@ -383,7 +383,7 @@ KTEST_CASE_INTEGRATION(object_wait_syscall) {
 // of timeout, a signal that never fires returns timed_out only after the deadline has genuinely
 // elapsed, and the timed-wait registry is empty again afterwards -- the parked node was reclaimed,
 // not leaked.
-KTEST_CASE_INTEGRATION(object_wait_timeout) {
+KTEST_CASE(object_wait_timeout) {
     using namespace kernel::obj;
     namespace sys = kernel::syscall;
 
@@ -467,7 +467,7 @@ bool make_faulting_image(const kernel::boot::boot_module& module, ktl::vector<ui
 
 }  // namespace
 
-KTEST_CASE_INTEGRATION(user_task_unresolved_fault_terminates_task) {
+KTEST_CASE(user_task_unresolved_fault_terminates_task) {
     const auto* module = kernel::boot::find_module("init");
     KTEST_REQUIRE_TRUE(module != nullptr);
 

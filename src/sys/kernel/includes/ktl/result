@@ -99,12 +99,6 @@ template <typename T, typename E = errc> struct [[nodiscard]] result {
         return value.err;
     }
 
-    // Operators (!= is synthesized from ==)
-    bool operator==(const result& other) const {
-        if (m_ok != other.m_ok) { return false; }
-        if (m_ok) { return value.ok == other.value.ok; }
-        return value.err == other.value.err;
-    }
 };
 
 /// Unit-value result: a fallible operation with no success payload. The ok arm carries nothing;
@@ -181,11 +175,6 @@ template <typename E> struct [[nodiscard]] result<void, E> {
         return value.err;
     }
 
-    // Operators (!= is synthesized from ==)
-    bool operator==(const result& other) const {
-        if (m_ok != other.m_ok) { return false; }
-        return m_ok || value.err == other.value.err;
-    }
 };
 
 /// Error carrier: converts implicitly into any result whose error type is constructible from E.

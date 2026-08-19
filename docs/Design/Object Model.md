@@ -1,7 +1,7 @@
 # Object Model
 
 > [!info] Partial Implementation
-> The core object primitives are implemented: Object base class, type registry, handle table, and two debug types (Event, Counter).
+> The core object primitives are implemented: Object base class, type registry, handle table, and a debug type (Event).
 > Storage models, three-path dispatch, OTPs, IPC, and server lifecycle are not yet implemented.
 
 The kernel's object model is the foundation of the system.
@@ -30,8 +30,8 @@ Kernel-defined types include:
 - **Sync primitives** -- handle-based mutexes, semaphores, and related objects.
 - **Futex** -- kernel-assisted wait on a VMO offset for low-overhead shared memory synchronization.
 
-Event and Counter exist today as debug types for proving out the object system.
-They are not part of the planned brick set.
+Event exists today as a debug type for proving out the object system.
+It is not part of the planned brick set.
 
 All other types are defined by servers.
 The kernel does not know what a window, a socket, or a filesystem entry is.
@@ -91,7 +91,7 @@ Types are **never unregistered** -- they exist for the lifetime of the system.
 
 Registration consists of:
 
-- **Type name** -- human-readable identifier ("event", "counter", "channel")
+- **Type name** -- human-readable identifier ("event", "channel")
 - **Type ID** -- for kernel-defined types, a constexpr value declared in the type's class.
   User-defined types will receive dynamically assigned IDs.
   Used by the [[Handle Table#Type-Safe Access|type-safe access]] mechanism to validate handle types without runtime type introspection.

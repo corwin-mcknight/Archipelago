@@ -6,12 +6,6 @@ using namespace kernel::testing;
 
 KTEST_MODULE("std/stdlib");
 
-KTEST_CASE(std_atoi_positive_negative) {
-    KTEST_EXPECT_EQUAL(atoi("0"), 0);
-    KTEST_EXPECT_EQUAL(atoi("12345"), 12345);
-    KTEST_EXPECT_EQUAL(atoi("-4096"), -4096);
-}
-
 KTEST_CASE(std_itoa_zero_and_bases) {
     // Zero renders a single '0', not an empty string.
     char zero[4] = {0};

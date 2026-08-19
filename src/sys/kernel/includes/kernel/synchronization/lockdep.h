@@ -8,7 +8,7 @@ namespace kernel::synchronization::lockdep {
 
 uint32_t allocate_identity(const void* address, const char* name);
 void release_identity(uint32_t identity);
-void acquired(const void* address, uint32_t identity, const char* file, uint32_t line);
+void acquired(const void* address, uint32_t identity);
 void released(const void* address, uint32_t identity);
 void assert_not_owned(const void* address, uint32_t identity);
 

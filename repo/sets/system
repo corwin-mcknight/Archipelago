@@ -7,4 +7,3 @@ sys/kernel
 sys/init
 sys/selftest
 srv/echo
-sys/kernel-src

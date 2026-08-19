@@ -24,12 +24,6 @@ template <typename C> constexpr auto size(const C& c) -> decltype(c.size()) { re
 /// Returns the number of elements in a built-in array.
 template <typename T, size_t N> constexpr size_t size(const T (&)[N]) noexcept { return N; }
 
-template <class T> constexpr void swap(T& a, T& b) noexcept {
-    T temp = ktl::move(a);
-    a      = ktl::move(b);
-    b      = ktl::move(temp);
-}
-
 /// Returns a reference to the first element satisfying the predicate, or nothing.
 template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pred) -> maybe<decltype(*first)> {
     for (It it = first; it != last; ++it) {
@@ -37,13 +31,6 @@ template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pre
     }
     return maybe<decltype(*first)>();
 }
-
-/// Returns a reference to the first element equal to value, or nothing.
-template <typename It, typename V> auto find(It first, It last, const V& value) -> maybe<decltype(*first)> {
-    return find_if(first, last, [&](const auto& element) { return element == value; });
-}
-
-
 
 /// Returns the position of the first element satisfying the predicate, or nothing.
 /// The index type is size_t, but spelled dependently (decltype(sizeof(*first))) so this definition

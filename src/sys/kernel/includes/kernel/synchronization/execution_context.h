@@ -11,8 +11,6 @@ namespace kernel::synchronization {
 struct held_lock {
     const void* address = nullptr;
     uint32_t identity   = 0;
-    const char* file    = nullptr;
-    uint32_t line       = 0;
 };
 
 struct execution_context {

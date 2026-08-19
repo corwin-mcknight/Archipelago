@@ -24,17 +24,10 @@ template <typename T, size_t N> class static_vector {
         if (m_count == 0) { return ktl::nothing; }
         return ktl::move(m_buffer[--m_count]);
     }
-    maybe<T> peek_back() { return m_count > 0 ? m_buffer[m_count - 1] : ktl::nothing; }
 
     void clear() { m_count = 0; }
     size_t size() const { return m_count; }
     size_t capacity() const { return N; }
-
-    maybe<T> at(size_t index) {
-        if (index < m_count) { return m_buffer[index]; }
-        return ktl::nothing;
-    }
-    T operator[](size_t index) { return at(index).value_or(T()); }
 
     // iterator
     T* begin() { return m_buffer; }

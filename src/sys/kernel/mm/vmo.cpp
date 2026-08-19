@@ -1,7 +1,6 @@
 #include "kernel/mm/vmo.h"
 
 #include "kernel/assert.h"
-#include "kernel/config.h"
 #include "kernel/mm/page_descriptor.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/region.h"
@@ -10,8 +9,6 @@
 extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
-
-namespace { constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE; }
 
 vmo::vmo(size_t pages, ktl::ref<pager> pgr) : obj::Object(TYPE_ID), m_pages(pages), m_pager(ktl::move(pgr)) {
     size_t chunk_count = (pages + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES;
@@ -93,69 +90,6 @@ ktl::result<void> vmo::commit(uint64_t page, size_t count) {
         auto res = fill_page(p);
         if (res.is_err()) { return res; }
     }
-    return ktl::result<void>::ok();
-}
-
-void vmo::zap_page_mappings(uint64_t page) {
-    for (size_t i = 0; i < m_mappings.size(); ++i) {
-        const mapping& m    = m_mappings[i];
-        uint64_t first_page = m.binding->vmo_offset / PAGE_SIZE;
-        uint64_t page_span  = m.binding->size / PAGE_SIZE;
-        if (page < first_page || page >= first_page + page_span) { continue; }
-        uintptr_t vaddr = m.binding->base + (page - first_page) * PAGE_SIZE;
-        (void)m.aspace->unmap_page(vaddr);
-    }
-}
-
-void vmo::decommit_page(uint64_t page) {
-    size_t index = page / CHUNK_ENTRIES;
-    if (index >= m_chunks.size() || m_chunks[index] == nullptr) { return; }
-    uint64_t& entry = m_chunks[index][page % CHUNK_ENTRIES];
-    if (entry == 0) { return; }
-
-    zap_page_mappings(page);
-
-    if (page_descriptor* desc = g_page_descriptors.lookup(entry)) {
-        desc->owner       = nullptr;
-        desc->offset      = 0;
-        desc->share_count = 0;
-    }
-    if (m_pager->owns_frames()) { g_page_frame_allocator.free(entry); }
-    entry = 0;
-    --m_resident;
-}
-
-ktl::result<void> vmo::set_size(size_t new_pages) {
-    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
-    if (!m_pager->resizable()) { return ktl::err(ktl::errc::invalid_operation); }
-
-    if (new_pages < m_pages) {
-        for (uint64_t p = new_pages; p < m_pages; ++p) {
-            // Zap unconditionally: a non-resident page may still carry a
-            // shared zero-page translation, and stale access must fault.
-            zap_page_mappings(p);
-            decommit_page(p);
-        }
-        size_t needed_chunks = (new_pages + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES;
-        while (m_chunks.size() > needed_chunks) {
-            uint64_t* chunk = m_chunks[m_chunks.size() - 1];
-            if (chunk != nullptr) { g_page_frame_allocator.free(reinterpret_cast<uintptr_t>(chunk) - g_hhdm_offset); }
-            (void)m_chunks.pop_back();
-        }
-    } else {
-        size_t needed_chunks = (new_pages + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES;
-        while (m_chunks.size() < needed_chunks) {
-            if (!m_chunks.push_back(nullptr)) { return ktl::err(ktl::errc::oom); }
-        }
-    }
-    m_pages = new_pages;
-    return ktl::result<void>::ok();
-}
-
-ktl::result<void> vmo::decommit(uint64_t page, size_t count) {
-    if (page + count < page || page + count > m_pages) { return ktl::err(ktl::errc::out_of_range); }
-    kernel::synchronization::critical_irq_lock_guard guard(g_vmm_lock);
-    for (uint64_t p = page; p < page + count; ++p) { decommit_page(p); }
     return ktl::result<void>::ok();
 }
 

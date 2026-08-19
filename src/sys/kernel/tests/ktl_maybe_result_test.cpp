@@ -30,8 +30,6 @@ KTEST_CASE(ktl_maybe_basic_operations) {
     KTEST_EXPECT_EQUAL(empty.map_or([](int v) { return v * 3; }, 7), 7);
     KTEST_EXPECT_EQUAL(value.map_or([](int v) { return v * 3; }, 7), 15);
 
-    KTEST_EXPECT_ALL(value == ktl::maybe<int>{5}, value != empty);
-
     // expect returns a mutable reference, like value().
     KTEST_EXPECT_EQUAL(value.expect("value must be present"), 5);
     value.expect("mutable access") = 6;
@@ -48,17 +46,6 @@ KTEST_CASE(ktl_maybe_move_construction) {
 
     KTEST_REQUIRE_TRUE(moved_in.has_value());
     KTEST_EXPECT_ALL(moved_in.value().value == 7, moved_in.value().move_observed, tv.value == -1);
-}
-
-KTEST_CASE(ktl_maybe_take_moves_value_out) {
-    ktl::maybe<tracking_value> source{tracking_value{42}};
-    auto taken = source.take();
-
-    KTEST_REQUIRE_TRUE(taken.has_value());
-    KTEST_EXPECT_ALL(taken.value().value == 42, taken.value().move_observed, !source.has_value());
-
-    auto taken_again = source.take();
-    KTEST_EXPECT_FALSE(taken_again.has_value());
 }
 
 KTEST_CASE(ktl_maybe_inspect_side_effect) {
@@ -149,8 +136,6 @@ KTEST(ktl_result_ok_flow, "ktl/result") {
 
     KTEST_EXPECT_ALL(ok_result.is_ok(), !ok_result.is_err());
     KTEST_EXPECT_ALL(ok_result.unwrap() == 10, ok_result.expect("should not fail") == 10);
-
-    KTEST_EXPECT_TRUE((ok_result == ktl::result<int, const char*>::ok(10)));
 }
 
 KTEST(ktl_result_error_flow, "ktl/result") {
@@ -158,8 +143,6 @@ KTEST(ktl_result_error_flow, "ktl/result") {
 
     KTEST_EXPECT_ALL(err_result.is_err(), !err_result.is_ok());
     KTEST_EXPECT_EQUAL(ktl::string_view(err_result.unwrap_err()).compare("boom"), 0);
-
-    KTEST_EXPECT_TRUE((err_result != ktl::result<int, const char*>::err("oops")));
 }
 
 KTEST(ktl_result_void_basic, "ktl/result") {
@@ -171,9 +154,6 @@ KTEST(ktl_result_void_basic, "ktl/result") {
     auto err = ktl::result<void, int>::err(-4);
     KTEST_EXPECT_ALL(err.is_err(), !err.is_ok(), !static_cast<bool>(err));
     KTEST_EXPECT_EQUAL(err.unwrap_err(), -4);
-
-    using VoidIntResult = ktl::result<void, int>;
-    KTEST_EXPECT_ALL(ok == VoidIntResult::ok(), err == VoidIntResult::err(-4), ok != err);
 
     auto copied = err;
     KTEST_EXPECT_ALL(copied.is_err(), copied.unwrap_err() == -4);

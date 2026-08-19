@@ -23,7 +23,7 @@ namespace { using namespace kernel::mm; }
 
 // Story: the descriptor array reflects the boot memory map and tracks PMM
 // state transitions.
-KTEST_CASE_INTEGRATION(descriptor_array_tracks_boot_map_and_pmm) {
+KTEST_CASE(descriptor_array_tracks_boot_map_and_pmm) {
     // Phase 1: populated at boot, with the states the memmap implies.
     KTEST_REQUIRE_TRUE(g_page_descriptors.initialized());
     KTEST_EXPECT_NOT_EQUAL(g_page_descriptors.coverage_end(), static_cast<vm_paddr_t>(0));
@@ -72,7 +72,7 @@ KTEST_CASE_INTEGRATION(descriptor_array_tracks_boot_map_and_pmm) {
 // Story: the kernel address space was adopted from the boot tables correctly:
 // the root table is PMM-owned, the bootloader's lower half is gone, and the
 // HHDM mapping resolves through it.
-KTEST_CASE_INTEGRATION(kernel_aspace_adopted_from_boot_tables) {
+KTEST_CASE(kernel_aspace_adopted_from_boot_tables) {
     // Phase 1: the live root table must be a PMM-allocated frame (descriptor
     // ACTIVE), not a bootloader table squatting in reclaimable memory the PMM
     // could hand out as free.

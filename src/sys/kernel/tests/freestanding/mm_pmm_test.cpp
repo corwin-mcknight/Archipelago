@@ -47,7 +47,7 @@ void dirty_page(kernel::mm::vm_paddr_t addr) {
 // and aligned, an alloc/free pair balances the free-page count exactly,
 // consecutive allocations are distinct, and a dirtied-then-freed page is
 // re-zeroed before it is ever handed out again.
-KTEST_CASE_INTEGRATION(pmm_allocation_lifecycle) {
+KTEST_CASE(pmm_allocation_lifecycle) {
     auto& pmm = kernel::mm::g_page_frame_allocator;
 
     // Phase 1: a fresh allocation is a nonzero, page-aligned, zeroed frame.
@@ -116,7 +116,7 @@ KTEST_CASE_INTEGRATION(pmm_allocation_lifecycle) {
 // the half-of-free-memory target with descriptors in agreement, a dirtied
 // freed page drained through zero_one_page comes back actually clean, and the
 // stats counters track alloc/free and the low-water mark.
-KTEST_CASE_INTEGRATION(pmm_zeroer_and_stats) {
+KTEST_CASE(pmm_zeroer_and_stats) {
     auto& pmm = kernel::mm::g_page_frame_allocator;
 
     // Phase 1: drive the zeroer's work loop to quiescence; the background

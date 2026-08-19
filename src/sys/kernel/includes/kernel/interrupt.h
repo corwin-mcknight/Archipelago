@@ -24,9 +24,8 @@ struct InterruptHandlerEntry {
         Handler() : function(nullptr) {}
     } handler;
 
-    constexpr static uint64_t ENABLED_MASK      = 0b01;
-    const static uint64_t OBJECT_HANDLER_MASK   = 0b10;
-    const static uint64_t FUNCTION_HANDLER_MASK = ~OBJECT_HANDLER_MASK;
+    constexpr static uint64_t ENABLED_MASK    = 0b01;
+    const static uint64_t OBJECT_HANDLER_MASK = 0b10;
     uint64_t flags;
 };
 
