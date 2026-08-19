@@ -5,7 +5,7 @@
 KTEST_MODULE("riscv64/arch");
 
 KTEST_CASE(riscv_translation_root_active) {
-    // Sv48 is live from boot; the active root must be a real page-aligned frame.
+    // Sv39 is live from boot; the active root must be a real page-aligned frame.
     KTEST_REQUIRE_TRUE(kernel::arch::active_translation_root() != 0);
     KTEST_EXPECT_EQUAL(kernel::arch::active_translation_root() & 0xFFFull, 0ull);
 }

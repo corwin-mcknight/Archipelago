@@ -1,12 +1,14 @@
 #include "kernel/mm/arch_paging.h"
 
-// riscv64 (Sv48) PTE codec and MMU primitives behind the shared page-walk
-// machinery in mm/paging.cpp.
+// riscv64 (Sv39) PTE codec and MMU primitives behind the shared page-walk
+// machinery in mm/paging.cpp. Sv39 is the one mode the kernel uses: it is the
+// deepest mode the JH7110's U74 cores implement, and every riscv64 machine
+// with an MMU has it, so QEMU and real boards run the same tables.
 namespace kernel::mm::arch {
 
 namespace {
 
-// Sv48 page-table entry bits. Private to this file: portable code speaks
+// Sv39 page-table entry bits. Private to this file: portable code speaks
 // arch-neutral prot/cache and never reasons about these bit positions. An
 // entry with any of R/W/X set is a leaf at that level; a valid entry with
 // none is a pointer to the next-level table.
@@ -20,7 +22,7 @@ constexpr uint64_t ACCESSED  = 1ull << 6;
 constexpr uint64_t DIRTY     = 1ull << 7;
 constexpr uint64_t RWX       = READ | WRITE | EXECUTE;
 
-// Sv48 reserves bits 9:8 for software (RSW). The installed vm_cache_mode is
+// Sv39 reserves bits 9:8 for software (RSW). The installed vm_cache_mode is
 // stashed there so walk_ext can report it faithfully -- without Svpbmt the
 // hardware has no cache-attribute bits at all, and PMAs decide the actual
 // behavior. Bootloader-installed leaves carry RSW=0, which decodes to CACHED.
@@ -33,8 +35,8 @@ constexpr uint64_t ppn_encode(uint64_t paddr) { return ((paddr >> 12) << 10) & P
 constexpr uint64_t ppn_decode(uint64_t entry) { return ((entry & PPN_MASK) >> 10) << 12; }
 }  // namespace pte
 
-// satp: mode 9 (Sv48) in bits 63:60, root table PPN in bits 43:0.
-constexpr uint64_t SATP_MODE_SV48 = 9ull << 60;
+// satp: mode 8 (Sv39) in bits 63:60, root table PPN in bits 43:0.
+constexpr uint64_t SATP_MODE_SV39 = 8ull << 60;
 constexpr uint64_t SATP_PPN_MASK  = (1ull << 44) - 1;
 
 }  // namespace
@@ -46,16 +48,16 @@ bool pte_leaf_bottom(uint64_t entry) { return (entry & pte::RWX) != 0; }
 vm_paddr_t pte_addr(uint64_t entry) { return pte::ppn_decode(entry); }
 uint64_t pte_set_addr(uint64_t entry, vm_paddr_t paddr) { return (entry & ~pte::PPN_MASK) | pte::ppn_encode(paddr); }
 
-// Sv48 intermediate entries are pure pointers: permissions live at the leaf,
+// Sv39 intermediate entries are pure pointers: permissions live at the leaf,
 // so the installed mapping's flags are irrelevant here.
 uint64_t make_table_ptr(vm_paddr_t child, uint64_t) { return pte::ppn_encode(child) | pte::VALID; }
 void widen_table_ptr(uint64_t&, uint64_t) {}
 
 uint64_t make_leaf(vm_paddr_t paddr, uint64_t flags) { return pte::ppn_encode(paddr) | flags | pte::VALID; }
 
-// Translate arch-neutral leaf attributes into Sv48 PTE permission bits.
+// Translate arch-neutral leaf attributes into Sv39 PTE permission bits.
 // A/D are pre-set so implementations that trap on hardware A/D update
-// (Svade behavior) never fault on first touch. Sv48 has no cache-mode bits
+// (Svade behavior) never fault on first touch. Sv39 has no cache-mode bits
 // without the Svpbmt extension, so DEVICE/WRITE_COMBINING degrade to the
 // platform default; QEMU virt's MMIO regions are unaffected by PMAs here.
 uint64_t leaf_flags(vm_prot_t prot, vm_cache_mode cache) {
@@ -86,7 +88,7 @@ vm_paddr_t current_root() {
 }
 
 void set_root(vm_paddr_t root) {
-    uint64_t satp = SATP_MODE_SV48 | ((root >> 12) & SATP_PPN_MASK);
+    uint64_t satp = SATP_MODE_SV39 | ((root >> 12) & SATP_PPN_MASK);
     asm volatile("csrw satp, %0\n\tsfence.vma zero, zero" ::"r"(satp) : "memory");
 }
 

@@ -7,12 +7,10 @@
 #include <ktl/atomic>
 #include <ktl/fixed_string>
 #include <ktl/fmt>
-#include <ktl/static_vector>
 #include <ktl/string_view>
 #include <ktl/utility>
 
 #include "kernel/config.h"
-#include "kernel/drivers/logging_device.h"
 #include "kernel/log_ring.h"
 #include "kernel/time.h"
 
@@ -100,8 +98,9 @@ class system_log {
         m_ring.crash_scan([&visit](const log_message& message, bool in_progress) { visit(&message, in_progress); });
     }
 
+    // Drains the ring to the boot UART; writes before uart.init() are dropped
+    // by its health gate.
     void flush();
-    ktl::static_vector<kernel::driver::logging_device*, CONFIG_LOG_MAX_DEVICES> devices;
 
     uint64_t dropped() const { return m_ring.dropped(); }
 

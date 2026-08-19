@@ -16,11 +16,13 @@ using kernel::mm::vm_aspace;
 using kernel::mm::vm_cache_mode;
 using kernel::mm::vm_paddr_t;
 using kernel::mm::vm_prot_t;
-namespace vm_prot              = kernel::mm::vm_prot;
+namespace vm_prot             = kernel::mm::vm_prot;
 
-constexpr uintptr_t low_vaddr  = 0x100000;       // 1 MiB -- user half, empty in a fresh space
-constexpr uintptr_t mid_vaddr  = 0x40000000;     // 1 GiB -- different PDPT entry
-constexpr uintptr_t high_vaddr = 0x10000000000;  // 1 TiB -- different PML4 entry
+constexpr uintptr_t low_vaddr = 0x100000;    // 1 MiB -- user half, empty in a fresh space
+constexpr uintptr_t mid_vaddr = 0x40000000;  // 1 GiB -- different second-level entry
+// Halfway up the low half: a different top-level entry on both arches (bit 46
+// on x86_64, bit 37 on riscv64 Sv39) while staying canonical on each.
+const uintptr_t high_vaddr    = vm_aspace::low_limit() / 2;
 
 }  // namespace
 
@@ -220,7 +222,7 @@ KTEST_CASE(paging_user_half_is_isolated) {
 // Full activation round-trip: create a second space, map into it, activate it,
 // touch the mapping through its virtual address, then reactivate the kernel space.
 // Requires a clean VM because it switches the live address space.
-KTEST_CASE_INTEGRATION(paging_activate_and_touch) {
+KTEST_CASE(paging_activate_and_touch) {
     vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());

@@ -31,4 +31,7 @@ void uart_reg_write(uint16_t offset, uint8_t value) {
     *reg(offset) = value;
 }
 
+// QEMU models the standard 1.8432 MHz reference clock: divisor 1 is 115200.
+uint16_t uart_divisor() { return 1; }
+
 }  // namespace kernel::driver

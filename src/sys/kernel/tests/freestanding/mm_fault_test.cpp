@@ -29,11 +29,11 @@ constexpr size_t PAGE        = 0x1000;
 // The kernel aspace's low half is empty (the bootloader identity map is not
 // carried over), so any low-half address works; 1 TiB keeps clear of
 // anything historical.
-constexpr uintptr_t MAP_BASE = 0x10000000000;  // 1 TiB
+constexpr uintptr_t MAP_BASE = 0x2000000000;  // 128 GiB -- canonical on both arches (Sv39 low half ends at 256 GiB)
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace
 
-KTEST_CASE_INTEGRATION(fault_demand_paging_story) {
+KTEST_CASE(fault_demand_paging_story) {
     // Phase 1: a read demand-maps the shared zero page read-only; no frame is
     // committed to the VMO.
     {
@@ -148,6 +148,6 @@ KTEST_CASE_INTEGRATION(fault_demand_paging_story) {
 // A fault outside any binding must not be resolved by the demand-paging path --
 // it must still crash-dump (the harness inverts the outcome: crash = pass).
 KTEST_CASE_CRASH(fault_outside_binding_still_crashes) {
-    volatile int* p = reinterpret_cast<int*>(0x20000000000);  // 2 TiB: canonical, unmapped, no binding
+    volatile int* p = reinterpret_cast<int*>(0x3800000000);  // 224 GiB: canonical on both arches, unmapped, no binding
     *p              = 0;
 }

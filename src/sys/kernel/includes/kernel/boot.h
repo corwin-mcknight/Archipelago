@@ -49,7 +49,7 @@ struct boot_info {
     const boot_module* modules;
     size_t module_count;
     // True when the paging mode the port's paging code assumes is in effect
-    // (Sv48 on riscv64; always true on x86_64, where long mode fixes the walk).
+    // (Sv39 on riscv64; always true on x86_64, where long mode fixes the walk).
     bool paging_mode_ok;
     // UNIX time in seconds when the machine booted, as reported by the boot
     // protocol (Limine reads the firmware RTC). Zero when the protocol

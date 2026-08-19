@@ -220,19 +220,6 @@ KTEST(log_message_copy_and_move, "kernel/log") {
                      from_fixed.sequence() == 8);
 }
 
-// The default write_string falls back to byte-at-a-time output.
-KTEST(logging_device_write_string_default, "kernel/log") {
-    struct capture_device : kernel::driver::logging_device {
-        char buf[16] = {};
-        int n        = 0;
-        const char* name() const override { return "capture"; }
-        void init() override {}
-        void write_byte(char c) override { buf[n++] = c; }
-    } dev;
-    dev.write_string("abc");
-    KTEST_EXPECT_ALL(dev.n == 3, ktl::string_view(dev.buf) == "abc");
-}
-
 // A fresh log has dropped nothing.
 KTEST(system_log_dropped_starts_zero, "kernel/log") {
     static kernel::system_log log;

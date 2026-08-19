@@ -1,11 +1,13 @@
 #include "kernel/log.h"
 
 #include "kernel/config.h"
+#include "kernel/drivers/uart.h"
 #include "kernel/time.h"
 #include "ktl/algorithm"
 #include "ktl/fixed_string"
 
 kernel::system_log g_log;
+extern kernel::driver::uart uart;
 
 struct loglevel_config_static {
     const char status;
@@ -42,15 +44,13 @@ void kernel::system_log::flush() {
             ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:03d}.{1:03d} {2:1c} | ", time_seconds,
                                               time_ms, status);
         }
-        for (auto dev : devices) {
-            dev->write_string(front);
-            message.text.for_each([&](char c) {
-                dev->write_byte(c);
-                if (c == '\n') { dev->write_string("..........| "); }
-            });
+        uart.write_string(front);
+        message.text.for_each([&](char c) {
+            uart.write_byte(c);
+            if (c == '\n') { uart.write_string("..........| "); }
+        });
 
-            if (m_colors) { dev->write_string("\033[0m"); }
-            dev->write_byte('\n');
-        }
+        if (m_colors) { uart.write_string("\033[0m"); }
+        uart.write_byte('\n');
     });
 }

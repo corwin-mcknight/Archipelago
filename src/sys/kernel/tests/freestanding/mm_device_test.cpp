@@ -27,11 +27,11 @@ using namespace kernel::mm;
 
 constexpr size_t PAGES       = 2;
 constexpr size_t PAGE        = 0x1000;
-constexpr uintptr_t MAP_BASE = 0x10000000000;  // in the kernel aspace's empty low half
+constexpr uintptr_t MAP_BASE = 0x2000000000;  // 128 GiB: in the kernel aspace's empty low half on both arches
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace
 
-KTEST_CASE_INTEGRATION(device_vmo_window_and_cache_mode) {
+KTEST_CASE(device_vmo_window_and_cache_mode) {
     // Phase 1: a device VMO maps its window uncached, allocating no data frames.
     {
         // A wired scratch window standing in for MMIO.

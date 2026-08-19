@@ -10,5 +10,7 @@ namespace { constexpr uint16_t UART0_PORT = 0x3f8; }
 bool uart_present() { return true; }
 uint8_t uart_reg_read(uint16_t offset) { return inb(UART0_PORT + offset); }
 void uart_reg_write(uint16_t offset, uint8_t value) { outb(UART0_PORT + offset, value); }
+// 1.8432 MHz reference clock: divisor 1 is 115200 baud.
+uint16_t uart_divisor() { return 1; }
 
 }  // namespace kernel::driver

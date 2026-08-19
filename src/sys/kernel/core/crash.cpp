@@ -17,27 +17,48 @@
 
 extern kernel::driver::uart uart;
 
-namespace kernel::crash::arch {
-struct fp_walk_result {
-    static constexpr size_t max_frames = 32;
-    size_t depth                       = 0;
-    uintptr_t frames[max_frames]       = {};
-};
-fp_walk_result walk_frame_pointers(uintptr_t start_fp);
-void read_control_registers(uint64_t out[4]);
-const char* exception_name(uint32_t vec);
-// Trap frame accessors: the trap/error identifiers the header reports, the
-// frame pointer the backtrace starts from, the stack pointer the stack dump
-// reads. Register rendering is fully per-arch; regs is never null.
-uint64_t frame_vec(register_frame_t* regs);
-uint64_t frame_err(register_frame_t* regs);
-uintptr_t frame_fp(register_frame_t* regs);
-uintptr_t frame_sp(register_frame_t* regs);
-void emit_registers_harness(register_frame_t* regs, const uint64_t cr[4]);
-void emit_registers_prose(register_frame_t* regs, const uint64_t cr[4]);
-}  // namespace kernel::crash::arch
-
 namespace kernel::crash {
+
+namespace {
+
+bool in_kernel_half(uintptr_t p) {
+    // Coarse: any canonical higher-half address. Rejects null/userspace/garbage.
+    return p >= 0xffff800000000000ULL;
+}
+
+bool plausible_fp(uintptr_t p) {
+    // fp points at 8-byte frame-record slots -- must be 8-aligned.
+    return in_kernel_half(p) && (p & 0x7) == 0;
+}
+
+}  // namespace
+
+fp_walk_result walk_frame_pointers(uintptr_t start_fp) {
+    fp_walk_result out{};
+    uintptr_t fp      = start_fp;
+    uintptr_t prev_fp = 0;
+
+    for (size_t i = 0; i < fp_walk_result::max_frames; i++) {
+        if (!plausible_fp(fp)) break;
+        if (fp > UINTPTR_MAX - 16) break;          // slot reads near the top would wrap
+        if (fp == prev_fp) break;                  // self-loop
+        if (prev_fp != 0 && fp <= prev_fp) break;  // chain must climb the stack
+
+        // Both slots must sit on mapped pages -- a corrupt fp must not page-fault
+        // inside the dump. Each 8-aligned uint64 lies within a single page.
+        uintptr_t ret_slot  = fp + static_cast<uintptr_t>(arch::frame_ret_slot);
+        uintptr_t next_slot = fp + static_cast<uintptr_t>(arch::frame_next_slot);
+        if (!arch::probe_readable(ret_slot) || !arch::probe_readable(next_slot)) break;
+
+        uintptr_t ret = *reinterpret_cast<uintptr_t*>(ret_slot);
+        if (!in_kernel_half(ret)) break;  // return addresses are byte-aligned
+
+        out.frames[out.depth++] = ret;
+        prev_fp                 = fp;
+        fp                      = *reinterpret_cast<uintptr_t*>(next_slot);
+    }
+    return out;
+}
 
 namespace {
 
@@ -58,11 +79,6 @@ const char* trigger_name(trigger_kind kind) {
         case trigger_kind::watchdog: return "watchdog";
         default: return "unknown";
     }
-}
-
-template <typename... Args> void crash_emit(const char* fmt, const Args&... args) {
-    ktl::format::format_to_buffer_raw(g_fmt_buf, sizeof(g_fmt_buf), fmt, args...);
-    crash_write(g_fmt_buf);
 }
 
 const char* level_letter(kernel::log_level lvl) {
@@ -116,7 +132,7 @@ const char* display_name(const char* mangled, char* scratch, size_t scratch_size
     return mangled;
 }
 
-void emit_backtrace(const arch::fp_walk_result& bt, bool harness) {
+void emit_backtrace(const fp_walk_result& bt, bool harness) {
     char name_buf[256];
     if (harness) {
         for (auto [i, frame] : ktl::views::enumerate(ktl::span(bt.frames, bt.depth))) {
@@ -227,15 +243,16 @@ void emit_log_drain(bool harness) {
 
 }  // namespace
 
+char* crash_fmt_buf(size_t& size) {
+    size = sizeof(g_fmt_buf);
+    return g_fmt_buf;
+}
+
 void set_harness_enabled(bool enabled) { g_harness_enabled = enabled; }
 void set_test_name(const char* name) { g_test_name = name; }
 
 void crash_write(const char* s) {
     while (*s) { uart.write_byte(*s++); }
-}
-
-void crash_write_n(const char* s, size_t n) {
-    for (char c : ktl::span(s, n)) { uart.write_byte(c); }
 }
 
 [[noreturn]] void dispatch(trigger_kind kind, register_frame_t* regs, const char* message, const char* file, int line) {
@@ -257,8 +274,8 @@ void crash_write_n(const char* s, size_t n) {
     uint64_t cr[4];
     arch::read_control_registers(cr);
 
-    arch::fp_walk_result bt;
-    if (regs) { bt = arch::walk_frame_pointers(arch::frame_fp(regs)); }
+    fp_walk_result bt;
+    if (regs) { bt = walk_frame_pointers(arch::frame_fp(regs)); }
 
     if (harness) {
         emit_header_harness(kind, regs, message, file, line);

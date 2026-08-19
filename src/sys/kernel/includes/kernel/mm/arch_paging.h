@@ -3,11 +3,23 @@
 #include <kernel/mm/vm_aspace.h>
 #include <stdint.h>
 
-// Per-arch PTE codec and MMU primitives behind the shared 4-level walk in
-// mm/paging.cpp. Both supported architectures use 512-entry tables, four
-// levels, and bit-47 canonical addresses; only the entry encoding and the
-// TLB/root instructions differ. Implemented in <arch>/paging.cpp.
+// Per-arch PTE codec and MMU primitives behind the shared page walk in
+// mm/paging.cpp. Both supported architectures use 512-entry tables and radix-9
+// levels; only the walk depth, the entry encoding, and the TLB/root
+// instructions differ. Implemented in <arch>/paging.cpp.
 namespace kernel::mm::arch {
+
+// Walk depth: 4 levels on x86_64 (bit-47 canonical), 3 on riscv64 (Sv39,
+// bit-38 canonical -- the deepest mode the JH7110's U74 cores implement, and
+// the one mode the kernel uses everywhere so QEMU exercises the same tables
+// as real boards).
+#ifdef ARCH_RISCV64
+constexpr int PT_LEVELS = 3;
+#else
+constexpr int PT_LEVELS = 4;
+#endif
+// Virtual-address bits the walk consumes: 12-bit page offset plus 9 per level.
+constexpr int VA_BITS = 12 + 9 * PT_LEVELS;
 
 bool pte_present(uint64_t entry);
 // Terminal data mapping by encoding alone (huge/RWX); the deepest level is

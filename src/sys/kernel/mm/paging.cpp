@@ -4,7 +4,7 @@
 
 extern uintptr_t g_hhdm_offset;
 
-// Arch-neutral 4-level page-walk machinery and the vm_aspace paging methods.
+// Arch-neutral page-walk machinery and the vm_aspace paging methods.
 // Everything that depends on the PTE encoding or MMU instructions goes
 // through the kernel::mm::arch hooks (see arch_paging.h).
 namespace kernel::mm {
@@ -18,21 +18,20 @@ vm_aspace* g_active_space = nullptr;
 
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
-constexpr size_t level_index(uintptr_t vaddr, int level) { return (vaddr >> (39 - 9 * level)) & 0x1FF; }
+constexpr size_t level_index(uintptr_t vaddr, int level) { return (vaddr >> (arch::VA_BITS - 9 - 9 * level)) & 0x1FF; }
 
-// The index helpers only consume bits 12..47. An address is canonical iff
-// sign-extending bit 47 reproduces bits 48..63 (the same shape on both
-// supported arches); reject non-canonical addresses rather than silently
-// aliasing.
+// The index helpers only consume bits 12..VA_BITS-1. An address is canonical
+// iff sign-extending the top consumed bit reproduces the bits above it;
+// reject non-canonical addresses rather than silently aliasing.
 constexpr bool is_canonical(uintptr_t vaddr) {
-    int64_t s = static_cast<int64_t>(vaddr) >> 47;
+    int64_t s = static_cast<int64_t>(vaddr) >> (arch::VA_BITS - 1);
     return s == 0 || s == -1;
 }
 
 ktl::maybe<vm_paddr_t> alloc_table() { return g_page_frame_allocator.alloc(); }
 
 // Recursively free intermediate page-table pages owned by an entry. Levels go
-// 4 (root) down to 1 (leaf table). Leaf-table entries point at user data
+// PT_LEVELS (root) down to 1 (leaf table). Leaf-table entries point at user data
 // pages and are not freed here -- ownership of leaf pages stays with the
 // caller.
 void free_subtree(uint64_t entry, int level) {
@@ -54,10 +53,10 @@ uint64_t* ensure_leaf_slot(vm_paddr_t root_phys, uintptr_t vaddr, uint64_t leaf_
 
     // Slots filled in by this walk, so a deeper allocation failure can unwind
     // them and leave no leaf-less subtree behind.
-    uint64_t* new_slots[3];
+    uint64_t* new_slots[arch::PT_LEVELS - 1];
     int new_count = 0;
 
-    for (int level = 0; level < 3; ++level) {
+    for (int level = 0; level < arch::PT_LEVELS - 1; ++level) {
         uint64_t& slot = table[level_index(vaddr, level)];
         if (!arch::pte_present(slot)) {
             auto child = alloc_table();
@@ -77,7 +76,7 @@ uint64_t* ensure_leaf_slot(vm_paddr_t root_phys, uintptr_t vaddr, uint64_t leaf_
         }
         table = table_at(arch::pte_addr(slot));
     }
-    return &table[level_index(vaddr, 3)];
+    return &table[level_index(vaddr, arch::PT_LEVELS - 1)];
 }
 
 // Walk down the tree without allocating. Returns a pointer to the leaf-table
@@ -85,35 +84,35 @@ uint64_t* ensure_leaf_slot(vm_paddr_t root_phys, uintptr_t vaddr, uint64_t leaf_
 uint64_t* find_leaf_slot(vm_paddr_t root_phys, uintptr_t vaddr) {
     uint64_t* table = table_at(root_phys);
 
-    for (int level = 0; level < 3; ++level) {
+    for (int level = 0; level < arch::PT_LEVELS - 1; ++level) {
         uint64_t entry = table[level_index(vaddr, level)];
         if (!arch::pte_present(entry)) { return nullptr; }
         if (arch::pte_leaf(entry)) { return nullptr; }
         table = table_at(arch::pte_addr(entry));
     }
-    return &table[level_index(vaddr, 3)];
+    return &table[level_index(vaddr, arch::PT_LEVELS - 1)];
 }
 
-// Resolve vaddr to its terminal PTE, transparently handling 512G/1G/2M large
-// pages installed by the bootloader in the kernel half. Returns the entry and
-// the intra-page offset mask, or nothing if unmapped.
+// Resolve vaddr to its terminal PTE, transparently handling the large pages
+// the bootloader installs in the kernel half at any level. Returns the entry
+// and the intra-page offset mask, or nothing if unmapped.
 struct terminal_pte {
     uint64_t entry;
     uintptr_t offset_mask;
 };
 ktl::maybe<terminal_pte> resolve(vm_paddr_t root_phys, uintptr_t vaddr) {
-    uint64_t* table    = table_at(root_phys);
-    // Offset masks per level a large/leaf mapping can terminate at.
-    uintptr_t masks[4] = {(1ull << 39) - 1, (1ull << 30) - 1, (1ull << 21) - 1, (1ull << 12) - 1};
+    uint64_t* table = table_at(root_phys);
 
-    for (int level = 0; level < 4; ++level) {
+    for (int level = 0; level < arch::PT_LEVELS; ++level) {
         uint64_t entry = table[level_index(vaddr, level)];
+        // Intra-page offset mask of a leaf terminating at this level.
+        uintptr_t mask = (1ull << (arch::VA_BITS - 9 * (level + 1))) - 1;
         if (!arch::pte_present(entry)) { return ktl::nothing; }
-        if (level == 3) {
+        if (level == arch::PT_LEVELS - 1) {
             if (!arch::pte_leaf_bottom(entry)) { return ktl::nothing; }  // malformed pointer at leaf level
-            return terminal_pte{entry, masks[3]};
+            return terminal_pte{entry, mask};
         }
-        if (arch::pte_leaf(entry)) { return terminal_pte{entry, masks[level]}; }
+        if (arch::pte_leaf(entry)) { return terminal_pte{entry, mask}; }
         table = table_at(arch::pte_addr(entry));
     }
     return ktl::nothing;
@@ -178,7 +177,7 @@ bool vm_aspace::arch_init_kernel() {
     for (size_t i = 256; i < 512; ++i) {
         uint64_t entry = src[i];
         if (arch::pte_present(entry) && !arch::pte_leaf(entry)) {
-            auto child = deep_copy_table(arch::pte_addr(entry), 3);
+            auto child = deep_copy_table(arch::pte_addr(entry), arch::PT_LEVELS - 1);
             if (!child.has_value()) { return false; }
             entry = arch::pte_set_addr(entry, child.value());
         }
@@ -193,7 +192,7 @@ void vm_aspace::arch_destroy() {
     // and its subtrees are shared with every other space -- freeing them would
     // corrupt the kernel mapping.
     uint64_t* root = table_at(m_arch.root_phys);
-    for (size_t i = 0; i < 256; ++i) { free_subtree(root[i], 4); }
+    for (size_t i = 0; i < 256; ++i) { free_subtree(root[i], arch::PT_LEVELS); }
     g_page_frame_allocator.free(m_arch.root_phys);
     m_arch.root_phys = 0;
     if (g_active_space == this) { g_active_space = nullptr; }
@@ -265,7 +264,8 @@ void vm_aspace::activate() {
 
 vm_aspace* vm_aspace::active() { return g_active_space; }
 
-// End of the canonical low half: bit 47 sign-extension boundary.
-uintptr_t vm_aspace::low_limit() { return 0x0000800000000000ull; }
+// End of the canonical low half: the sign-extension boundary of the walk's
+// top consumed bit (bit 47 on x86_64, bit 38 on riscv64 Sv39).
+uintptr_t vm_aspace::low_limit() { return 1ull << (arch::VA_BITS - 1); }
 
 }  // namespace kernel::mm

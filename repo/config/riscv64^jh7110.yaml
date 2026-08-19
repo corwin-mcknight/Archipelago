@@ -1,0 +1,13 @@
+config:
+  # StarFive JH7110 board target (Orange Pi RV, VisionFive 2). Inherits the
+  # riscv64 toolchain and build tree; only the board and its output paths
+  # differ, so the kernel builds with jh7110 board facts while every other
+  # package is shared with the virt target.
+  base: riscv64
+  board: jh7110
+  sysroot: ./build/riscv64/jh7110/sysroot
+  # The board boots from SD via U-Boot's EFI loader, so the image is an
+  # MBR+FAT card image (dd it to a card), not an ISO.
+  image:
+    format: sd
+  image_output: ./build/riscv64/jh7110/sd.img

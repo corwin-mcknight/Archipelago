@@ -26,9 +26,9 @@ extern "C" [[noreturn]] void _start(void) {
 
     // The HHDM offset must be known before any MMIO device (including the
     // UART) is reachable, so it is resolved before the first log line. The
-    // paging code assumes Sv48, so an ungranted mode is fatal -- and the panic
+    // paging code assumes Sv39, so an ungranted mode is fatal -- and the panic
     // is silent, because there is no mapped device to report through.
-    if (!kernel::boot::collect().paging_mode_ok) { panic("Boot protocol did not grant Sv48 paging"); }
+    if (!kernel::boot::collect().paging_mode_ok) { panic("Boot protocol did not grant Sv39 paging"); }
     kernel::boot::resolve_hhdm();
 
     kernel::platform::console_init();
@@ -54,8 +54,6 @@ extern "C" [[noreturn]] void _start(void) {
 
     kernel::cpu_start_cores();
     kernel::cpu_gate_wait_for_cores_started();
-
-    g_log.info("riscv64: single-hart boot; secondary harts not started");
 
     kernel::boot::late_boot(0);
 }

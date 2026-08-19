@@ -41,16 +41,18 @@ __attribute__((used,
     .id = LIMINE_DATE_AT_BOOT_REQUEST, .revision = 0, .response = nullptr};
 
 #if defined(__riscv)
-// Pin the paging mode: the riscv64 paging code assumes a 4-level Sv48 walk and
-// a mode-9 satp, so Sv39/Sv57 would silently corrupt every table access.
+// Pin the paging mode: the riscv64 paging code assumes a 3-level Sv39 walk and
+// a mode-8 satp, so Sv48/Sv57 would silently corrupt every table access. Sv39
+// is universal (the JH7110's U74 cores implement nothing deeper), so QEMU and
+// real boards boot with identical translation.
 __attribute__((used,
                section(".limine_requests"))) static volatile struct limine_paging_mode_request paging_mode_request = {
     .id       = LIMINE_PAGING_MODE_REQUEST,
     .revision = 0,
     .response = nullptr,
-    .mode     = LIMINE_PAGING_MODE_RISCV_SV48,
-    .max_mode = LIMINE_PAGING_MODE_RISCV_SV48,
-    .min_mode = LIMINE_PAGING_MODE_RISCV_SV48};
+    .mode     = LIMINE_PAGING_MODE_RISCV_SV39,
+    .max_mode = LIMINE_PAGING_MODE_RISCV_SV39,
+    .min_mode = LIMINE_PAGING_MODE_RISCV_SV39};
 #endif
 
 namespace kernel::boot {
@@ -190,7 +192,7 @@ const boot_info& collect() {
 
 #if defined(__riscv)
     g_info.paging_mode_ok =
-        paging_mode_request.response != nullptr && paging_mode_request.response->mode == LIMINE_PAGING_MODE_RISCV_SV48;
+        paging_mode_request.response != nullptr && paging_mode_request.response->mode == LIMINE_PAGING_MODE_RISCV_SV39;
 #else
     // x86_64 makes no paging-mode request: long mode is always the 4-level walk
     // the paging code assumes (5-level must be opted into, and never is).

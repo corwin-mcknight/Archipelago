@@ -8,15 +8,6 @@
 // HHDM offset published by the Limine boot path (x86_64/main.cpp).
 extern uintptr_t g_hhdm_offset;
 
-namespace kernel::crash::arch {
-struct fp_walk_result {
-    static constexpr size_t max_frames = 32;
-    size_t depth                       = 0;
-    uintptr_t frames[max_frames]       = {};
-};
-fp_walk_result walk_frame_pointers(uintptr_t start_rbp);
-}  // namespace kernel::crash::arch
-
 namespace { uint64_t g_probe_anchor = 0xa5a5'a5a5'a5a5'a5a5ULL; }  // namespace
 
 KTEST_MODULE("crash_probe");
@@ -45,7 +36,7 @@ KTEST_CASE(crash_probe_rejects_far_unmapped) {
 
 KTEST_CASE(crash_walk_rejects_wrapping_rbp) {
     // Canonical, higher-half, 8-aligned -- but rbp+8 would wrap to 0.
-    auto bt = kernel::crash::arch::walk_frame_pointers(0xffff'ffff'ffff'fff8ULL);
+    auto bt = kernel::crash::walk_frame_pointers(0xffff'ffff'ffff'fff8ULL);
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
@@ -53,7 +44,7 @@ KTEST_CASE(crash_walk_rejects_unmapped_rbp) {
     // Plausible-looking rbp pointing into provably unmapped higher-half memory:
     // must terminate the walk instead of dereferencing.
     KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
-    auto bt = kernel::crash::arch::walk_frame_pointers(g_hhdm_offset + (64ull << 30));
+    auto bt = kernel::crash::walk_frame_pointers(g_hhdm_offset + (64ull << 30));
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
@@ -84,7 +75,7 @@ KTEST_CASE(crash_walk_fake_chain) {
     uintptr_t start = reinterpret_cast<uintptr_t>(&buf[2]);
 #endif
 
-    auto bt = kernel::crash::arch::walk_frame_pointers(start);
+    auto bt = kernel::crash::walk_frame_pointers(start);
     KTEST_REQUIRE_EQUAL(bt.depth, static_cast<size_t>(2));
     KTEST_EXPECT_EQUAL(bt.frames[0], ret1);
     KTEST_EXPECT_EQUAL(bt.frames[1], ret2);

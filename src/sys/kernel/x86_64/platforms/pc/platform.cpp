@@ -36,10 +36,7 @@ lapic_tick_handler g_timer;
 }  // namespace
 
 // The PC console is COM1, reached by port I/O, so nothing needs to be mapped first.
-void console_init() {
-    uart.init();
-    g_log.devices.push_back(&uart);
-}
+void console_init() { uart.init(); }
 
 void timer_init() {
     // A dead PIT or LAPIC timer degrades to a frozen clock with a warning, matching
