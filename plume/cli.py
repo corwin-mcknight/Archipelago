@@ -1,4 +1,4 @@
-"""Plume CLI -- the Archipelago package manager."""
+"""Plume CLI -- the Archipelago build coordinator."""
 
 import argparse
 import os
@@ -8,16 +8,11 @@ import sys
 import time
 
 from plume.config import Config, is_bare_config_name
-from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_reason, open_line, close_line, break_line
+from plume.output import bold, green, red, yellow, cyan, dim, fmt_duration, fmt_reason, break_line
 from plume.repository import load_packages
 from plume.universe import resolve_build_order, filter_packages, expand_with_deps, reverse_deps
-from plume.builder import (
-    build_package, install_package, uninstall_package, clean_package, ensure_installed,
-    build_needed, install_needed, build_log_path,
-)
-from plume.image import assemble_iso
-from plume.world import World
-from plume.validate import validate_packages, validate_package_yaml
+from plume.builder import build_needed, build_log_path, orchestrate, sysroot_needs_compose
+from plume.image import assemble_image, assemble_sd
 
 
 def _find_up(relpath):
@@ -137,14 +132,13 @@ def _load(args):
     with open(packages_yml, "r", encoding="utf-8") as f:
         raw_data = yaml.safe_load(f)
 
+    from plume.validate import validate_packages, validate_package_yaml
     for w in validate_package_yaml(raw_data or {}):
         print(f"{yellow('plume: warning')}: {w}", file=sys.stderr)
 
     packages = load_packages(packages_yml, arch=config.get_arch(), board=config.get_board())
 
-    errors, warnings = validate_packages(config, packages)
-    for w in warnings:
-        print(f"{yellow('plume: warning')}: {w}", file=sys.stderr)
+    errors = validate_packages(config, packages)
     if errors:
         for e in errors:
             print(f"{red('plume: error')}: {e}", file=sys.stderr)
@@ -153,279 +147,76 @@ def _load(args):
     return config, packages
 
 
-def _resolve(packages, requested):
-    """Filter, expand deps, and resolve build order. Returns (ordered, requested_names)."""
-    selected = filter_packages(packages, requested)
-    names = {p.full_name for p in selected}
-    expanded = expand_with_deps(selected, packages)
-    return resolve_build_order(expanded), names
+def _build_graph(packages, requested):
+    """Resolve a build request to (ordered graph, compose set, requested names).
+
+    The sysroot is the union of every supported non-tool package, so any
+    request touching a system package builds the whole system graph -- cheap
+    when fresh -- and recomposes the sysroot coherently. A request naming
+    only build tools (the host test lanes) builds just that closure and
+    leaves the sysroot alone.
+    """
+    selected = filter_packages(packages, requested) if requested else []
+    tool_only = bool(selected) and all(p.is_build_tool for p in selected)
+    system = [p for p in packages if p.supported and not p.is_build_tool]
+    base = selected if tool_only else system + selected
+    ordered = resolve_build_order(expand_with_deps(base, packages))
+    return ordered, ([] if tool_only else system), {p.full_name for p in selected}
 
 
-def _pkg_line_start(label: str, verbose: bool):
-    """Print a package's status line. In quiet mode leave it open for _pkg_line_finish."""
-    if verbose:
-        print(label, flush=True)
-    else:
-        open_line(label)
-
-
-def _pkg_line_finish(elapsed: float, verbose: bool, reason: str | None = None):
-    """Report a package's success: complete the open quiet-mode line, or add a summary row."""
-    text = f"{green('✓')}  {dim(fmt_duration(elapsed))}{fmt_reason(reason)}"
-    if verbose:
-        print(f"  {text}")
-    else:
-        close_line(text)
-
-
-def _warn_verbose_parallel(args):
-    """Parallel builds capture output per package; streaming (-v) cannot interleave sanely."""
-    if getattr(args, "verbose", False):
-        print(f"{yellow('plume: warning')}: --verbose is ignored with --jobs > 1", file=sys.stderr)
-
-
-def _sequential_run(ordered, requested_names, show_all, config, args, action, action_label, **action_kwargs):
-    """Run action on each package sequentially. Returns the exit code."""
-    total_start = time.monotonic()
-    needed = build_needed if action == build_package else install_needed
-    verb = "build" if action == build_package else "install"
-    force_all = getattr(args, "force", False)
-    keep_going = getattr(args, "keep_going", False)
-    dead: set[str] = set()  # failed packages and their transitive dependents
-    failures: list[str] = []
-
-    def is_target(pkg):
-        return show_all or pkg.full_name in requested_names
-
-    # Upfront count for the [i/total] labels only; each package is re-checked
-    # just before it runs, since sources can change while earlier ones build.
-    total = sum(1 for p in ordered if is_target(p) and (force_all or needed(config, p)))
-
-    done = 0
-    for pkg in ordered:
-        if any(d in dead for d in pkg.dependencies):
-            dead.add(pkg.full_name)
-            print(dim(f"  skipped {pkg} (dependency failed)"))
-            continue
-        target = is_target(pkg)
-        force = force_all if target else False
-        reason = needed(config, pkg)
-        if not force and reason is None:
-            # Already current, but its dependents build against the sysroot, so it still has to
-            # be in there. install_package commits on its own; only the build phase needs this.
-            if action == build_package:
-                ensure_installed(config, pkg)
-            continue
-        verbose = args.verbose if target else False
-        if target:
-            done += 1
-            total = max(total, done)
-            _pkg_line_start(bold(cyan(f"[{done}/{total}] {pkg}")), verbose)
-        else:
-            _pkg_line_start(dim(f"  dep {pkg}"), False)
-        ok, elapsed = action(config, pkg, verbose=verbose, force=force, **action_kwargs)
-        if ok:
-            if action == build_package:
-                ensure_installed(config, pkg)
-            _pkg_line_finish(elapsed, verbose, reason)
-        elif keep_going:
-            dead.add(pkg.full_name)
-            failures.append(pkg.full_name)
-        else:
-            print(f"\n{red(f'Failed to {verb}')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
-            return 1
-
-    if failures:
-        print(f"\n{red(f'Failed to {verb}')} {len(failures)} package(s): {', '.join(failures)}")
+def _run_build(config, packages, args):
+    """Shared build+compose entry for the build and test commands."""
+    requested = getattr(args, "packages", None) or []
+    try:
+        ordered, compose_set, requested_names = _build_graph(packages, requested)
+    except ValueError as e:
+        print(f"{red('plume: error')}: {e}", file=sys.stderr)
         return 1
-    if done == 0:
-        print(f"Nothing to {verb}.")
-    else:
-        print(f"\n{green(action_label)} {done} package(s) in {fmt_duration(time.monotonic() - total_start)}")
-    return 0
+
+    jobs = getattr(args, "jobs", 1)
+    verbose = getattr(args, "verbose", False)
+    if verbose and jobs > 1:
+        print(f"{yellow('plume: warning')}: --verbose is ignored with --jobs > 1", file=sys.stderr)
+        verbose = False
+
+    force_set = set()
+    if getattr(args, "force", False):
+        force_set = requested_names or {p.full_name for p in ordered}
+
+    if getattr(args, "dry_run", False):
+        shown = [p for p in ordered if p.full_name in force_set or build_needed(config, p) is not None]
+        print(bold("Build order (dry run):"))
+        for i, pkg in enumerate(shown, 1):
+            print(f"  [{i}/{len(shown)}] {pkg}{fmt_reason(build_needed(config, pkg))}")
+        if not shown:
+            print("  nothing to build")
+        return 0
+
+    return orchestrate(config, ordered, compose_set, jobs=jobs, force_set=force_set,
+                       verbose=verbose, keep_going=getattr(args, "keep_going", False))
 
 
 def cmd_build(args):
     config, packages = _load(args)
-    try:
-        ordered, requested_names = _resolve(packages, args.packages)
-    except ValueError as e:
-        print(f"{red('plume: error')}: {e}", file=sys.stderr)
-        return 1
-
-    show_all = not args.packages
-
-    if args.dry_run:
-        shown = [p for p in ordered if show_all or p.full_name in requested_names]
-        print(bold("Build order (dry run):"))
-        for i, pkg in enumerate(shown, 1):
-            print(f"  [{i}/{len(shown)}] {pkg}")
-        return 0
-
-    jobs = getattr(args, "jobs", 1)
-    if jobs > 1:
-        from plume.parallel import parallel_build
-        _warn_verbose_parallel(args)
-        force_set = requested_names if args.force else set()
-        total_start = time.monotonic()
-        ok, timings = parallel_build(config, ordered, max_workers=jobs, force_set=force_set,
-                                     keep_going=getattr(args, "keep_going", False))
-        total = time.monotonic() - total_start
-        if not timings:
-            print("Nothing to build.")
-        elif ok:
-            print(f"\n{green('Built')} {len(timings)} package(s) in {fmt_duration(total)}")
-        return 0 if ok else 1
-
-    return _sequential_run(ordered, requested_names, show_all, config, args, build_package, "Built")
-
-
-def cmd_install(args):
-    config, packages = _load(args)
-    try:
-        ordered, requested_names = _resolve(packages, args.packages)
-    except ValueError as e:
-        print(f"{red('plume: error')}: {e}", file=sys.stderr)
-        return 1
-
-    show_all = not args.packages
-    jobs = getattr(args, "jobs", 1)
-    no_binary = getattr(args, "no_binary", False)
-    keep_going = getattr(args, "keep_going", False)
-
-    if jobs > 1:
-        from plume.parallel import parallel_build
-        _warn_verbose_parallel(args)
-        force_set = requested_names if args.force else set()
-        total_start = time.monotonic()
-        ok, _ = parallel_build(config, ordered, max_workers=jobs, force_set=force_set, keep_going=keep_going)
-        # With -k the install pass below still runs: survivors get installed,
-        # and the failed packages are re-reported (and skipped) there.
-        if not ok and not keep_going:
-            print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}")
-            return 1
-
-    return _sequential_run(
-        ordered, requested_names, show_all, config, args,
-        install_package, "Installed", no_binary=no_binary,
-    )
-
-
-def cmd_rebuild(args):
-    """Clean and rebuild specific packages, building deps only if needed."""
-    config, packages = _load(args)
-    try:
-        requested = filter_packages(packages, args.packages)
-
-        if getattr(args, "no_propagate", False):
-            rebuild_set = requested
-        else:
-            rebuild_set = reverse_deps(requested, packages)
-        rebuild_names = {p.full_name for p in rebuild_set}
-
-        selected = expand_with_deps(rebuild_set, packages)
-        ordered = resolve_build_order(selected)
-    except ValueError as e:
-        print(f"{red('plume: error')}: {e}", file=sys.stderr)
-        return 1
-
-    total_start = time.monotonic()
-    rebuild_count = len(rebuild_set)
-
-    jobs = getattr(args, "jobs", 1)
-    if jobs > 1:
-        from plume.parallel import parallel_build
-        _warn_verbose_parallel(args)
-        for pkg in rebuild_set:
-            clean_package(config, pkg)
-        ok, _ = parallel_build(config, ordered, max_workers=jobs, force_set=rebuild_names)
-        if not ok:
-            print(f"\n{red('Rebuild failed')} after {fmt_duration(time.monotonic() - total_start)}")
-            return 1
-        print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(time.monotonic() - total_start)}")
-        return 0
-
-    idx = 0
-    for pkg in ordered:
-        if pkg.full_name in rebuild_names:
-            idx += 1
-            _pkg_line_start(bold(cyan(f"[{idx}/{rebuild_count}] {pkg}")), args.verbose)
-            clean_package(config, pkg)
-            ok, elapsed = build_package(config, pkg, verbose=args.verbose)
-            if ok:
-                _pkg_line_finish(elapsed, args.verbose)
-        else:
-            reason = build_needed(config, pkg)
-            if reason is None:
-                continue
-            _pkg_line_start(dim(f"  dep {pkg}"), False)
-            ok, elapsed = build_package(config, pkg)
-            if ok:
-                _pkg_line_finish(elapsed, False, reason)
-        if not ok:
-            print(f"\n{red('Rebuild failed for')} {pkg} after {fmt_duration(time.monotonic() - total_start)}")
-            return 1
-
-    print(f"\n{green('Rebuilt')} {rebuild_count} package(s) in {fmt_duration(time.monotonic() - total_start)}")
-    return 0
-
-
-def cmd_uninstall(args):
-    config, packages = _load(args)
-    try:
-        requested = filter_packages(packages, args.packages)
-    except ValueError as e:
-        print(f"{red('plume: error')}: {e}", file=sys.stderr)
-        return 1
-
-    if not args.force:
-        world = World(config.get("sysroot"))
-        installed_pkgs = [p for p in packages if world.contains(p.qualified_name)]
-        target_names = {p.full_name for p in requested}
-        for pkg in installed_pkgs:
-            if pkg.full_name in target_names:
-                continue
-            for dep in pkg.dependencies:
-                if dep in target_names:
-                    print(f"{red('plume: error')}: {pkg.qualified_name} depends on {dep}; use --force to uninstall anyway")
-                    return 1
-
-    for pkg in requested:
-        print(bold(cyan(f"Uninstalling {pkg}")))
-        if not uninstall_package(config, pkg):
-            return 1
-        print(f"  {green('Removed')} {pkg}")
-    return 0
+    return _run_build(config, packages, args)
 
 
 def cmd_image(args):
     config, _ = _load(args)
-    print(bold("Assembling ISO image"))
-    if not assemble_iso(config, verbose=getattr(args, "verbose", False)):
+    print(bold("Assembling boot image"))
+    if not assemble_image(config, verbose=getattr(args, "verbose", False)):
         return 1
-    print(f"{green('ISO written to')} {config.get('iso_output')}")
+    print(f"{green('Image written to')} {config.get('image_output')}")
     return 0
 
 
 def cmd_test(args):
     config, packages = _load(args)
-    ordered = resolve_build_order(filter_packages(packages, []))
-    total_start = time.monotonic()
-    for i, pkg in enumerate(ordered, 1):
-        reason = install_needed(config, pkg)
-        _pkg_line_start(bold(cyan(f"[{i}/{len(ordered)}] {pkg}")), args.verbose)
-        ok, elapsed = install_package(
-            config, pkg, verbose=args.verbose, force=args.force,
-            no_binary=getattr(args, "no_binary", False),
-        )
-        if ok:
-            _pkg_line_finish(elapsed, args.verbose, reason)
-        else:
-            print(f"\n{red('Build failed')} after {fmt_duration(time.monotonic() - total_start)}", file=sys.stderr)
-            return 1
+    if _run_build(config, packages, args) != 0:
+        return 1
 
-    print(bold("\nAssembling ISO image"))
-    if not assemble_iso(config, verbose=args.verbose):
+    print(bold("\nAssembling boot image"))
+    if not assemble_image(config, verbose=args.verbose):
         return 1
 
     print("\n\nRunning tests...\n")
@@ -434,7 +225,7 @@ def cmd_test(args):
     harness_args = [
         sys.executable, "tools/test-harness.py",
         "--arch", config.get_arch(),
-        "--iso", config.get("iso_output"),
+        "--iso", config.get("image_output"),
         "--artifacts", os.path.join(config.get("build_dir"), "test-artifacts"),
     ]
     # Omit --kernel-elf when no kernel package exists so the harness runs its own fallback lookup;
@@ -451,21 +242,73 @@ def cmd_test(args):
     return subprocess.run(harness_args, cwd=config.project_root).returncode
 
 
+def cmd_uboot_test(args):
+    """Boot the sysroot through OpenSBI -> U-Boot -> Limine in QEMU and require
+    the kernel to come up. This exercises the SD-card boot chain real boards
+    use (U-Boot's EFI loader finding /EFI/BOOT on a FAT partition), which the
+    EDK2 ISO path in `plume test` never touches."""
+    import threading
+
+    config, _ = _load(args)
+    if config.get_arch() != "riscv64":
+        print(f"{red('plume: error')}: uboot-test is riscv64-only", file=sys.stderr)
+        return 1
+    uboot = os.path.join(config.get("tools_path"), "u-boot-qemu", "u-boot.bin")
+    if not os.path.isfile(uboot):
+        print(f"{red('plume: error')}: no U-Boot at {uboot}; run `plume build`", file=sys.stderr)
+        return 1
+
+    print(bold("Assembling SD image"))
+    sd_image = os.path.join(config.get("build_dir"), "uboot-sd.img")
+    if not assemble_sd(config, verbose=args.verbose, output=sd_image):
+        return 1
+
+    marker = "boot: initialization complete"
+    qemu = config.get("qemu", "qemu-system-riscv64")
+    cmd = [qemu, "-M", "virt", "-m", str(config.get("memory", 128)), "-nographic",
+           "-kernel", uboot, "-drive", f"file={sd_image},format=raw,if=virtio", "-no-reboot"]
+    print(bold("Booting OpenSBI -> U-Boot -> Limine -> kernel"))
+    if args.verbose:
+        print(dim(" ".join(cmd)))
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace")
+    # The whole chain takes a few seconds; the timer only bounds a hung boot.
+    killer = threading.Timer(120, proc.kill)
+    killer.start()
+    tail, passed = [], False
+    try:
+        for line in proc.stdout:
+            if args.verbose:
+                print(line, end="")
+            tail.append(line)
+            del tail[:-30]
+            if marker in line:
+                passed = True
+                break
+    finally:
+        killer.cancel()
+        proc.kill()
+        proc.wait()
+
+    if passed:
+        print(f"{green('PASS')}: kernel reached '{marker}' via the U-Boot chain")
+        return 0
+    print(f"{red('FAIL')}: marker '{marker}' not seen; last output:", file=sys.stderr)
+    print("".join(tail), end="", file=sys.stderr)
+    return 1
+
+
 def cmd_status(args):
     config, packages = _load(args)
-    world = World(config.get("sysroot"))
-    installed = set(world.read())
 
     name_width = max((len(p.full_name) for p in packages), default=10)
-    print(bold(f"  {'Package':<{name_width}}  {'Built':<7}  {'Installed'}"))
-    print(f"  {'─' * (name_width + 22)}")
+    print(bold(f"  {'Package':<{name_width}}  {'Built'}"))
+    print(f"  {'─' * (name_width + 12)}")
 
     for pkg in packages:
         reason = build_needed(config, pkg)
         built = green("✓") if reason is None else dim("–")
-        # World entries are qualified names, so match through World's
-        # category/name keying rather than comparing the bare full_name.
-        inst = green("✓") if world.contains(pkg.qualified_name) else (dim("n/a") if pkg.is_build_tool else dim("–"))
         tags = ""
         if pkg.is_build_tool:
             tags += dim("  [build-tool]")
@@ -474,36 +317,27 @@ def cmd_status(args):
         if pkg.arches:
             tags += dim(f"  [{', '.join(pkg.arches)} only]")
         tags += fmt_reason(reason)
-        print(f"  {pkg.full_name:<{name_width}}  {built:<7}  {inst}{tags}")
-    return 0
+        print(f"  {pkg.full_name:<{name_width}}  {built}{tags}")
 
-
-def cmd_validate(args):
-    _, packages = _load(args)
-    print(f"{green('✓')} All {len(packages)} package(s) valid.")
-    return 0
-
-
-def cmd_world(args):
-    config, _ = _load(args)
-    entries = World(config.get("sysroot")).read()
-    if not entries:
-        print("No packages installed.")
+    system = [p for p in packages if p.supported and not p.is_build_tool]
+    stale = sysroot_needs_compose(config, system)
+    if stale:
+        print(f"\n  Sysroot: {dim('–')}  {dim(f'({stale})')}")
     else:
-        for entry in entries:
-            print(f"  {entry}")
+        print(f"\n  Sysroot: {green('✓')}  {dim(config.get('sysroot'))}")
     return 0
 
 
 def cmd_clean(args):
     config, _ = _load(args)
-    for d in ["obj", "sysroot", "tmp", "logs"]:
-        p = os.path.join(config.get("build_dir"), d)
-        if os.path.exists(p):
+    from plume.builder import sysroot_stamp_path
+    targets = [os.path.join(config.get("build_dir"), d) for d in ("obj", "tmp", "logs")]
+    targets += [config.get("sysroot"), config.get("image_output"), sysroot_stamp_path(config)]
+    for p in targets:
+        if os.path.isdir(p):
             shutil.rmtree(p)
-    iso = config.get("iso_output")
-    if os.path.exists(iso):
-        os.remove(iso)
+        elif os.path.exists(p):
+            os.remove(p)
     print("Cleaned build artifacts.")
     return 0
 
@@ -674,13 +508,13 @@ def cmd_run(args):
     config, _ = _load(args)
     arch = config.get_arch()
     qemu = config.get("qemu", f"qemu-system-{arch}")
-    iso = config.get("iso_output")
+    iso = config.get("image_output")
     firmware = config.get("firmware")
     if not os.path.exists(iso):
         print(f"{red('plume: error')}: no ISO at {iso}; run `plume image` first", file=sys.stderr)
         return 1
     if firmware and not os.path.exists(firmware):
-        print(f"{red('plume: error')}: UEFI firmware missing at {firmware}; run `plume build @system`",
+        print(f"{red('plume: error')}: UEFI firmware missing at {firmware}; run `plume build`",
               file=sys.stderr)
         return 1
 
@@ -709,7 +543,7 @@ def cmd_run(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="plume", description="Plume -- the Archipelago package manager")
+    parser = argparse.ArgumentParser(prog="plume", description="Plume -- the Archipelago build coordinator")
     sub = parser.add_subparsers(dest="command")
 
     # Target selection, shared by every subcommand.
@@ -720,51 +554,37 @@ def main(argv=None):
                              "repo/config/<target>.yaml. 'all' runs every arch at its default board; "
                              "'all-boards' runs every board target too")
 
-    build_p = sub.add_parser("build", parents=[target], help="Build packages (does not install to sysroot)")
-    build_p.add_argument("packages", nargs="*", help="Packages to build (default: all, supports @set)")
+    build_p = sub.add_parser("build", parents=[target],
+                             help="Build stale packages and compose the sysroot")
+    build_p.add_argument("packages", nargs="*",
+                         help="Extra packages to build (supports @set); naming only build tools skips the sysroot")
     build_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
     build_p.add_argument("--dry-run", "-n", action="store_true", help="Print build order without building")
-    build_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
+    build_p.add_argument("--force", "-f", action="store_true",
+                         help="Force rebuild (of the named packages, or everything)")
     build_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
     build_p.add_argument("--keep-going", "-k", action="store_true",
                          help="Keep building other packages after a failure (skips dependents of the failed one)")
 
-    install_p = sub.add_parser("install", parents=[target], help="Install packages into sysroot (builds if needed)")
-    install_p.add_argument("packages", nargs="*", help="Packages to install (default: all, supports @set)")
-    install_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
-    install_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
-    install_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
-    install_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
-    install_p.add_argument("--keep-going", "-k", action="store_true",
-                           help="Keep going after a failure (skips dependents of the failed package)")
+    image_p = sub.add_parser("image", parents=[target], help="Assemble the boot image (ISO or SD, per config)")
+    image_p.add_argument("--verbose", "-v", action="store_true", help="Show image-tool and limine output")
 
-    rebuild_p = sub.add_parser("rebuild", parents=[target], help="Clean and rebuild specific packages")
-    rebuild_p.add_argument("packages", nargs="*", help="Packages to rebuild (default: all, supports @set)")
-    rebuild_p.add_argument("--verbose", "-v", action="store_true", help="Stream make output instead of capturing")
-    rebuild_p.add_argument("--no-propagate", action="store_true", help="Only rebuild named packages, not reverse deps")
-    rebuild_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+    uboot_p = sub.add_parser("uboot-test", parents=[target],
+                             help="Boot the U-Boot EFI chain (SD image) in QEMU and check the kernel comes up")
+    uboot_p.add_argument("--verbose", "-v", action="store_true", help="Stream the serial console")
 
-    uninstall_p = sub.add_parser("uninstall", parents=[target], help="Remove packages from sysroot")
-    uninstall_p.add_argument("packages", nargs="+", help="Packages to uninstall")
-    uninstall_p.add_argument("--force", "-f", action="store_true", help="Uninstall even if other packages depend on it")
-
-    image_p = sub.add_parser("image", parents=[target], help="Assemble ISO image")
-    image_p.add_argument("--verbose", "-v", action="store_true", help="Show xorriso and limine output")
-
-    test_p = sub.add_parser("test", parents=[target], help="Build and run tests")
+    test_p = sub.add_parser("test", parents=[target], help="Build, compose, image, and run tests")
     test_p.add_argument("tests", nargs="*")
     test_p.add_argument("--verbose", action="store_true")
     test_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
-    test_p.add_argument("--no-binary", action="store_true", help="Build from source even if binary package is cached")
+    test_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
 
-    sub.add_parser("status", parents=[target], help="Show build and install state of all packages")
-    sub.add_parser("validate", parents=[target], help="Validate packages.yml and package Makefiles")
+    sub.add_parser("status", parents=[target], help="Show build and sysroot state")
     sub.add_parser("clean", parents=[target], help="Remove build artifacts")
 
     list_p = sub.add_parser("list", parents=[target], help="List packages")
     list_p.add_argument("--tree", action="store_true", help="Show dependency tree")
 
-    sub.add_parser("world", parents=[target], help="Show packages installed in the sysroot")
     sub.add_parser("clangd", parents=[target], help="Regenerate compile_commands.json")
 
     shell_p = sub.add_parser("shell", parents=[target], help="Open a shell in a package's build environment")
@@ -792,11 +612,10 @@ def main(argv=None):
         return 1
 
     commands = {
-        "build": cmd_build, "install": cmd_install, "uninstall": cmd_uninstall,
-        "rebuild": cmd_rebuild, "image": cmd_image, "test": cmd_test,
-        "status": cmd_status, "validate": cmd_validate, "clean": cmd_clean,
-        "list": cmd_list, "world": cmd_world, "clangd": cmd_clangd,
-        "set-config": cmd_set_config, "run": cmd_run, "shell": cmd_shell,
+        "build": cmd_build, "image": cmd_image, "test": cmd_test,
+        "status": cmd_status, "clean": cmd_clean, "list": cmd_list,
+        "clangd": cmd_clangd, "set-config": cmd_set_config, "run": cmd_run,
+        "shell": cmd_shell, "uboot-test": cmd_uboot_test,
         "deps": cmd_deps, "log": cmd_log,
     }
     try:

@@ -33,7 +33,7 @@ def fmt_duration(seconds: float) -> str:
 
 
 # Reasons that add no information next to the surrounding output.
-_QUIET_REASONS = ("never built", "not installed")
+_QUIET_REASONS = ("never built",)
 
 
 def fmt_reason(reason: str | None) -> str:

@@ -10,7 +10,7 @@ config:
   tools_path: ./build/tools
   source_dir: ./src
   repo_path: ./repo
-  iso_output: ./build/riscv64/image.iso
+  image_output: ./build/riscv64/image.iso
   triple: riscv64-unknown-none
   cc: clang
   cxx: clang++

@@ -12,7 +12,7 @@ pkg_build:
 	@true
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P) for $(ARCH)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN) for $(ARCH)"
 	mkdir -p $(D)/boot
 ifeq ($(ARCH),riscv64)
 	# riscv64 has no BIOS: the only boot artifact is an El Torito EFI system

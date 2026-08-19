@@ -10,7 +10,7 @@ import yaml
 # build hash because they are machine-specific.
 PATH_KEYS = [
     "sysroot", "build_dir", "tmp_path", "tools_path",
-    "source_dir", "repo_path", "iso_output", "firmware",
+    "source_dir", "repo_path", "image_output", "firmware",
 ]
 
 # Settings excluded from the build hash for reasons other than being paths.

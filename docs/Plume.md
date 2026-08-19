@@ -1,12 +1,14 @@
 # Plume
-Plume is Archipelago's package manager and build system. It builds packages from a single source tree, manages dependencies, and assembles bootable ISO images. The source lives in `plume/`.
+Plume is Archipelago's build coordinator. It builds packages from a single source tree in dependency order, composes the resulting staging trees into a sysroot, and assembles bootable images from it. The source lives in `plume/`.
+
+Plume is deliberately not a package manager: there is no installed-package database, no versions, and no uninstall. The sysroot is a derived artifact -- a pure function of the repository and the target config -- never a mutable system that state must be tracked against.
 
 ## Quick Reference
 
 ```bash
-make build              # Build all packages
-make install            # Build, install to sysroot, assemble ISO
-make test               # Build ISO and run the test suite
+make build              # Build all packages and compose the sysroot
+make install            # Build, compose, assemble the boot image
+make test               # Build the image and run the test suite
 make test TEST=<name>   # Run a single test
 make clean              # Remove build artifacts
 make clangd             # Regenerate compile_commands.json
@@ -16,21 +18,19 @@ These Make targets wrap `python3 -m plume` commands.
 
 ## Packages
 
-Packages are defined in `repo/packages.yml`. Each has a category, name, version, and optional dependencies.
+Packages are defined in `repo/packages.yml`. Each is named `category/name` and declares a description and optional dependencies. There are no versions: everything builds from the tree at HEAD, and third-party packages pin their upstream commit in their own Makefile.
 A package that only exists on some targets declares `arches:`; it is skipped everywhere else, and naming it explicitly on the wrong target is an error. `arches:` matches the bare architecture -- a board narrows a target, it never changes which architecture that target is.
 A package that compiles board facts in declares `varies_by: ["board"]` and builds once per board; see Targets and Boards.
 ### Example Packages
-| Package                  | Description                               |
-| ------------------------ | ----------------------------------------- |
-| `boot/limine-tools-10.0` | Limine bootloader host tools (build tool) |
-| `boot/limine-10.0`       | Limine boot binaries                      |
-| `boot/limine-config-1.0` | Limine bootloader configuration           |
-| `sys/kernel-0.0.1`       | The Archipelago kernel                    |
-| `sys/kernel-headers-0.0.1` | Public kernel headers (user/kernel ABI) |
-| `sys/init-0.0.1`         | The first user program                    |
-| `sys/kernel-src-0.0.1`   | Kernel source archive                     |
-
-The `@system` package set (`repo/sets/system`) includes all packages needed for a bootable image.
+| Package              | Description                               |
+| -------------------- | ----------------------------------------- |
+| `boot/limine-tools`  | Limine bootloader host tools (build tool) |
+| `boot/limine`        | Limine boot binaries                      |
+| `boot/limine-config` | Limine bootloader configuration           |
+| `sys/kernel`         | The Archipelago kernel                    |
+| `sys/kernel-headers` | Public kernel headers (user/kernel ABI)   |
+| `sys/init`           | The first user program                    |
+| `sys/kernel-src`     | Kernel source archive                     |
 
 ### Package Structure
 Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implementing four stages:
@@ -43,34 +43,24 @@ Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implem
 | 4 | `pkg_install` | Install to staging directory |
 
 ### Live Sources
-Packages can declare `supports_live_sources: true` with a `live_source_path` pointing into the source tree. Plume stamps the build and checks source modification times -- if any source file is newer than the stamp, the package rebuilds. The kernel and limine-config packages use this.
+Packages can declare `supports_live_sources: true` with a `live_source_path` pointing into the source tree. The kernel and limine-config packages use this; editing a watched source marks the package stale.
 
 ### Staleness
-Every successful build writes a stamp recording a hash of the target config's build-affecting settings (architecture, toolchain, triple, flags).
-A package is stale when its stamp is missing, when the recorded hash no longer matches the active config, or -- for live-source packages -- when a source file is newer than the stamp.
-Editing a target config therefore rebuilds everything it affects; paths and run-only settings (QEMU, memory, image layout) are excluded from the hash.
+Every successful build writes a stamp recording a hash of the target config's build-affecting settings (architecture, toolchain, triple, flags) and a content hash of every input file -- the package's own files under `repo/packages/` for every package, plus the live source tree for live-source packages.
+A package is stale exactly when that record differs from the present: a config change, or a source file whose content changed, appeared, or vanished. Modification times are never consulted, so a branch switch that restores identical content rebuilds nothing, and deleting a source file is a change like any other. Paths and run-only settings (QEMU, memory, image layout) are excluded from the config hash.
 
-When a package rebuilds, Plume prints why on the package's status line -- a config change, or the first source file found newer than the stamp. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead. Captured output from the most recent build of each package is kept at `build/<arch>/logs/<category>/<name>.log`, whether the build succeeded or failed.
+When a package rebuilds, Plume prints why on the package's status line -- a config change, or the changed file. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead. Captured output from the most recent build of each package is kept at `build/<arch>/logs/<category>/<name>.log`, whether the build succeeded or failed.
 
 ## Build Flow
 ### Dependency Resolution
-Plume resolves dependencies via topological sort. Given a set of target packages, it expands all transitive dependencies and computes a build order where dependencies build first.
+Plume resolves dependencies via topological sort and builds dependencies first; independent packages can build in parallel with `-j`.
 
-For `make install`:
+`plume build` always operates on the whole system graph: every supported non-tool package, plus the build tools they depend on. Staleness checks make this cheap -- a fresh package costs one hash comparison. Naming packages on the command line scopes `--force` to them; naming only build tools (the host test lanes) builds just that closure and leaves the sysroot alone.
 
-```
-1. boot/limine-tools-10.0   (build tool, no deps)
-2. boot/limine-10.0         (depends on limine-tools)
-3. boot/limine-config-1.0   (no deps)
-4. sys/kernel-0.0.1          (depends on limine, limine-config)
-5. sys/kernel-headers-0.0.1  (no deps)
-6. sys/init-0.0.1            (depends on kernel-headers)
-7. sys/kernel-src-0.0.1      (no deps)
-```
+### Sysroot
+Each package installs into its own staging directory (`$D`). The sysroot is the union of the system packages' staging trees, and it is composed, never patched: whenever any system package (re)builds or the composed set changes, Plume removes the sysroot and copies every staging tree back in, in dependency order. A package is copied in as soon as it is current, so a later package always compiles against its dependencies' installed files -- that is what lets `sys/init` build against the headers `sys/kernel-headers` installs to `/usr/include`, exactly as any other consumer of that ABI would.
 
-Steps that don't depend on each other can build in parallel with `-j`.
-
-A package may compile against its dependencies' installed files. Building commits each package into the sysroot as soon as it is done -- built or already current -- so by the time a dependent runs, everything it depends on is in `$(SYSROOT)`. That is what lets `sys/init` build against the headers `sys/kernel-headers` installs to `/usr/include`, exactly as any other consumer of that ABI would. The later install pass then has nothing left to do for those packages.
+Two packages installing the same path is an error caught during composition; there is no ownership database to consult because the staging trees themselves are the ownership record. A sibling stamp (`<sysroot>.stamp`) records what the sysroot was derived from, so an unchanged system recomposes nothing.
 
 ### Build Environment
 Each package build receives environment variables:
@@ -81,7 +71,7 @@ Each package build receives environment variables:
 | `BOARD` | Board name; exported only to packages declaring `varies_by: ["board"]` |
 | `TRIPLE` | Target triple from the config (e.g. `x86_64-unknown-none`) |
 | `SYSROOT` | `build/<arch>/sysroot` |
-| `WORKDIR` | `build/<arch>/tmp/<category>/<name>-<version>[^<board>]` |
+| `WORKDIR` | `build/<arch>/tmp/<category>/<name>[^<board>]` |
 | `OBJ_DIR` | `build/<arch>/obj/<category>/<name>[^<board>]` -- intermediate build tree |
 | `S` | Source directory (`$WORKDIR/src`) |
 | `D` | Staging install directory (`$WORKDIR/install`) |
@@ -89,21 +79,15 @@ Each package build receives environment variables:
 | `LD`, `AS` | `ld.lld`, `nasm` |
 | `LIVE_SOURCES` | Source tree path (for live-source packages) |
 
-### Sysroot
-Packages install their files to a staging directory (`$D`), then Plume merges them into the target's sysroot at `build/<arch>/sysroot/`. The sysroot becomes the root of the bootable ISO.
-
-Installed package manifests (file paths, SHA256 checksums, metadata) are stored in `sysroot/var/plume/manifests/`. A world file at `sysroot/var/plume/world` tracks what is installed.
-
-### Binary Packages
-After a successful build, Plume caches a binary package (`.tar.xz`) in `build/<arch>/packages/`. On subsequent installs, if the binary is cached and neither sources nor config have changed, Plume extracts from the cache instead of rebuilding.
-
-### ISO Assembly
-`plume image` assembles the ISO, driven by the config's `image:` stanza:
+### Image Assembly
+`plume image` assembles the boot image, driven by the config's `image:` stanza. `format` selects the layout; the default is `iso`:
 
 1. **xorriso** creates a bootable ISO from the sysroot; `bios_boot` and `efi_boot` name the boot images
 2. **limine bios-install** writes boot code to the ISO's MBR (only when `bios_boot` is configured)
 
-The resulting image is `build/<arch>/image.iso`.
+`format: sd` instead builds an SD-card image for boards that boot through U-Boot's EFI loader: an MBR partition table with one FAT32 ESP holding the sysroot verbatim plus Limine's EFI executable at `/EFI/BOOT/`. It is built with mtools (no root privileges) and written to a card with `dd`.
+
+The resulting image lands at the config's `image_output` path.
 
 ## Build Output
 Each architecture builds in its own tree so targets never clobber each other; host tools are shared.
@@ -112,11 +96,10 @@ Each architecture builds in its own tree so targets never clobber each other; ho
 build/
   <arch>/                  Per-target tree (x86_64/, riscv64/)
     obj/                   Intermediate build artifacts
-    sysroot/               Merged system root
+    sysroot/               Composed system root
       boot/                kernel.elf, limine binaries, limine.conf
-      var/plume/           Manifests and world file
+    sysroot.stamp          What the sysroot was composed from
     tmp/                   Per-package work directories
-    packages/              Binary package cache (.tar.xz)
     image.iso              Bootable ISO
   tools/                   Host build tools (limine, EDK2 firmware, test runners)
   compile_commands.json    For clangd (active target)
@@ -124,22 +107,18 @@ build/
 
 ## Commands
 All commands are invoked as `python3 -m plume <command>` or through the Makefile.
-Every command accepts `--arch <target>` (or `--config <path>`) to select a target for one invocation without changing the `default.yaml` selection. A target is an arch (`riscv64`) or a board (`riscv64^visionfive2`).
+Every command accepts `--arch <target>` (or `--config <path>`) to select a target for one invocation without changing the `default.yaml` selection. A target is an arch (`riscv64`) or a board (`riscv64^jh7110`).
 `--arch all` fans the command out over every arch at its default board; `--arch all-boards` covers every board target as well. Either ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
 
 | Command | Description |
 |---------|-------------|
-| `build` | Build packages and their dependencies |
-| `install` | Build and install to sysroot |
-| `rebuild` | Clean and rebuild, optionally propagating to reverse dependencies |
-| `uninstall` | Remove packages from sysroot |
-| `image` | Assemble ISO from sysroot |
-| `test` | Install, assemble ISO, run test harness |
-| `status` | Show build and install state |
-| `validate` | Check packages.yml and Makefiles |
+| `build` | Build stale packages and compose the sysroot |
+| `image` | Assemble the boot image from the sysroot |
+| `test` | Build, compose, image, run the test harness |
+| `uboot-test` | Boot the U-Boot EFI chain (SD image) in QEMU |
+| `status` | Show build and sysroot state |
 | `clean` | Remove build artifacts |
 | `list` | List packages with optional dependency tree |
-| `world` | Show installed packages |
 | `clangd` | Rebuild kernel with compile_commands.json generation |
 | `set-config` | Select the active target config (symlinks `default.yaml`) |
 | `run` | Launch the built ISO interactively in QEMU |
@@ -147,26 +126,30 @@ Every command accepts `--arch <target>` (or `--config <path>`) to select a targe
 | `deps` | Show a package's transitive and reverse dependencies, optionally as a tree |
 | `log` | Print a package's most recent build log |
 
+Package validation (names, dependency existence, cycles, board-config isolation) runs automatically at the start of every command.
+
 ## Targets and Boards
-A target is an architecture, optionally narrowed to a board. `repo/config/riscv64.yaml` is an arch target; `repo/config/riscv64^visionfive2.yaml` is a board target. Every arch config names its default board, so `--arch riscv64` already builds a board -- the qualifier is only spelled out when selecting a non-default one.
+A target is an architecture, optionally narrowed to a board. `repo/config/riscv64.yaml` is an arch target; `repo/config/riscv64^jh7110.yaml` is a board target. Every arch config names its default board, so `--arch riscv64` already builds a board -- the qualifier is only spelled out when selecting a non-default one.
 
 A board config names its arch with `base:` and declares only what differs. The base is merged underneath it, so toolchain settings live in one place and boards on an arch cannot drift apart:
 
 ```yaml
 config:
   base: riscv64
-  board: visionfive2
-  sysroot: ./build/riscv64/boards/visionfive2/sysroot
-  iso_output: ./build/riscv64/boards/visionfive2/image.iso
+  board: jh7110
+  sysroot: ./build/riscv64/jh7110/sysroot
+  image:
+    format: sd
+  image_output: ./build/riscv64/jh7110/sd.img
 ```
 
-A board target must override `sysroot` and `iso_output`, since it inherits the arch's build tree; `plume validate` rejects a board config that does not, and checks that the filename agrees with its `arch`/`board` keys.
+A board target must override `sysroot` and `image_output`, since it inherits the arch's build tree; validation rejects a board config that does not, and checks that the filename agrees with its `arch`/`board` keys.
 
-Boards on one architecture share that architecture's build tree and binary package cache. A package that declares no board-specific behavior builds once and every board on the arch reuses it -- that is the normal case, not a cache miss. Only packages declaring `varies_by: ["board"]` build separately per board, and only those carry `^<board>` in their qualifier, workdir, and cached binary package:
+Boards on one architecture share that architecture's build tree. A package that declares no board-specific behavior builds once and every board on the arch reuses it -- that is the normal case, not a cache miss. Only packages declaring `varies_by: ["board"]` build separately per board, and only those carry `^<board>` in their qualifier and workdir:
 
 ```
-sys/kernel-0.0.1~riscv64^visionfive2     board-varying: one build per board
-boot/limine-10.0~riscv64                 shared by every riscv64 board
+sys/kernel~riscv64^jh7110      board-varying: one build per board
+boot/limine~riscv64            shared by every riscv64 board
 ```
 
 Because of that sharing, `board` is excluded from the build hash: a board switch must not invalidate packages that do not depend on the board. Board-varying packages get their isolation from the qualifier in their paths instead.
@@ -188,8 +171,8 @@ When no selection exists, Plume falls back to `repo/config/x86_64.yaml`.
 | `triple` | Target triple exported to package builds |
 | `cc` / `cxx` | `clang` / `clang++` |
 | `ld` / `as` | `ld.lld` / `nasm` |
-| `iso_output` | `./build/<arch>/image.iso` |
-| `image` | Boot image layout (`efi_boot`, optional `bios_boot`) |
+| `image_output` | `./build/<arch>/image.iso` |
+| `image` | Boot image layout (`format`: `iso`/`sd`; `efi_boot`, optional `bios_boot`) |
 | `qemu` | QEMU binary for this target |
 | `memory` | Guest memory for `plume run` in MiB |
 | `firmware` | UEFI firmware image (riscv64 only) |

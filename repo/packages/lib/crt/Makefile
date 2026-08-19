@@ -12,12 +12,12 @@ pkg_configure:
 	@true
 
 pkg_build:
-	@echo "[plume] Building $(CATEGORY)/$(P)"
+	@echo "[plume] Building $(CATEGORY)/$(PN)"
 	mkdir -p $(OBJ_DIR)
 	cd $(LIVE_SOURCES) && $(MAKE) -j$(MAKE_JOBS) BUILD_DIR=$(BUILD_DIR) OBJ_DIR=$(OBJ_DIR) SYSROOT=$(SYSROOT)
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(D)/usr/lib $(D)/usr/include
 	cp $(OBJ_DIR)/libcrt.a $(D)/usr/lib/libcrt.a
 	cp $(LIVE_SOURCES)/user.ld $(D)/usr/lib/user.ld

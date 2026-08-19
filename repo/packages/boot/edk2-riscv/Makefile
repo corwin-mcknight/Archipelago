@@ -39,7 +39,7 @@ pkg_build:
 
 pkg_install:
 ifeq ($(ARCH),riscv64)
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(TOOL_INSTALL)/edk2-riscv
 	cp $(S)/$(CODE_FD) $(TOOL_INSTALL)/edk2-riscv/RISCV_VIRT_CODE.fd
 	cp $(S)/$(VARS_FD) $(TOOL_INSTALL)/edk2-riscv/RISCV_VIRT_VARS.fd

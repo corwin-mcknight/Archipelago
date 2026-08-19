@@ -80,19 +80,10 @@ def create_build_sorter(packages: list[Package]) -> TopologicalSorter:
     return sorter
 
 
-def _package_lookups(all_packages: list[Package]) -> tuple[dict[str, Package], dict[str, Package]]:
-    """Build by-full-name and by-short-name lookup dicts."""
-    by_name = {p.full_name: p for p in all_packages}
-    by_short = {f"{p.category}/{p.name}": p for p in all_packages}
-    return by_name, by_short
-
-
-def _lookup_package(name: str, by_name: dict, by_short: dict, context: str = "") -> Package:
+def _lookup_package(name: str, by_name: dict, context: str = "") -> Package:
     """Resolve a package name, raising ValueError if not found."""
     if name in by_name:
         return by_name[name]
-    if name in by_short:
-        return by_short[name]
     msg = f"Unknown package '{name}'" + (f" in set @{context}" if context else "")
     raise ValueError(msg)
 
@@ -106,13 +97,13 @@ def filter_packages(all_packages: list[Package], requested: list[str]) -> list[P
     if not requested:
         return [p for p in all_packages if p.supported]
 
-    by_name, by_short = _package_lookups(all_packages)
+    by_name = {p.full_name: p for p in all_packages}
     result = []
     for name in requested:
         if name.startswith("@"):
-            result.extend(p for p in load_set(name[1:], all_packages, _lookups=(by_name, by_short)) if p.supported)
+            result.extend(p for p in load_set(name[1:], by_name) if p.supported)
         else:
-            pkg = _lookup_package(name, by_name, by_short)
+            pkg = _lookup_package(name, by_name)
             if not pkg.supported:
                 raise ValueError(f"{pkg.full_name} is not available for {pkg.arch} (arches: {', '.join(pkg.arches)})")
             result.append(pkg)
@@ -122,32 +113,20 @@ def filter_packages(all_packages: list[Package], requested: list[str]) -> list[P
     return [p for p in result if not (p.full_name in seen or seen.add(p.full_name))]
 
 
-def load_set(set_name: str, all_packages: list[Package],
-             repo_path: str | None = None, _lookups=None) -> list[Package]:
-    """Load a package set from repo/sets/<set_name>."""
-    if repo_path is None:
-        d = os.getcwd()
-        while True:
-            candidate = os.path.join(d, "repo", "sets", set_name)
-            if os.path.exists(candidate):
-                set_path = candidate
-                break
-            parent = os.path.dirname(d)
-            if parent == d:
-                raise ValueError(f"Set file not found: @{set_name}")
-            d = parent
-    else:
-        set_path = os.path.join(repo_path, "sets", set_name)
-
-    if not os.path.exists(set_path):
-        raise ValueError(f"Set file not found: {set_path}")
+def load_set(set_name: str, by_name: dict) -> list[Package]:
+    """Load a package set from repo/sets/<set_name>, walking up to the project root."""
+    d = os.getcwd()
+    while True:
+        candidate = os.path.join(d, "repo", "sets", set_name)
+        if os.path.exists(candidate):
+            set_path = candidate
+            break
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise ValueError(f"Set file not found: @{set_name}")
+        d = parent
 
     with open(set_path, "r", encoding="utf-8") as f:
         entries = [line.strip() for line in f if line.strip()]
 
-    if _lookups:
-        by_name, by_short = _lookups
-    else:
-        by_name, by_short = _package_lookups(all_packages)
-
-    return [_lookup_package(e, by_name, by_short, context=set_name) for e in entries]
+    return [_lookup_package(e, by_name, context=set_name) for e in entries]

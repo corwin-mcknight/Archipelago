@@ -1,5 +1,5 @@
 # Host fuzz lane: libFuzzer over pure kernel parsers/serializers (demangler, ktl::format brace parser,
-# JSON string escaper, atoi, both ELF parsers). A separate package from kernel-testrunner because the fuzzer/coverage
+# JSON string escaper, both ELF parsers). A separate package from kernel-testrunner because the fuzzer/coverage
 # instrumentation is its own build mode (ASan/fuzzer/TSan don't co-instrument). Build tool: stays on
 # the host, not installed into the sysroot.
 
@@ -10,7 +10,6 @@ OBJDIR := $(BUILD_DIR)/obj/test/kernel-fuzz
 FUZZ_DEMANGLE := $(OBJDIR)/fuzz-demangle
 FUZZ_FMT      := $(OBJDIR)/fuzz-fmt
 FUZZ_JSON     := $(OBJDIR)/fuzz-json
-FUZZ_ATOI     := $(OBJDIR)/fuzz-atoi
 FUZZ_ELF      := $(OBJDIR)/fuzz-elf
 FUZZ_RBTREE   := $(OBJDIR)/fuzz-rbtree
 FUZZ_ELF_LOADER := $(OBJDIR)/fuzz-elf-loader
@@ -34,7 +33,7 @@ pkg_configure:
 	@true
 
 pkg_build:
-	@echo "[plume] Building fuzzers (demangle, fmt, json, atoi)"
+	@echo "[plume] Building fuzzers (demangle, fmt, json)"
 	mkdir -p $(OBJDIR)
 	@for src in $(DEMANGLE_SRCS); do \
 		obj=$(OBJDIR)/$$(basename $$src .cpp).o; \
@@ -42,7 +41,7 @@ pkg_build:
 		$(CXX) $(FLAGS) $(INC_KERNEL) -c $$src -o $$obj || exit 1; \
 	done
 	$(CXX) $(SAN) -fuse-ld=lld $(DEMANGLE_OBJS) -o $(FUZZ_DEMANGLE)
-	# stdlib.o (atoi/itoa) is shared by the fmt and atoi fuzzers.
+	# stdlib.o supplies itoa for the formatter.
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/std/stdlib.cpp -o $(OBJDIR)/stdlib.o
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/fmt_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/fmt_fuzz.cpp -o $(OBJDIR)/fmt_fuzz.o
@@ -50,9 +49,6 @@ pkg_build:
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/json_escape_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/json_escape_fuzz.cpp -o $(OBJDIR)/json_escape_fuzz.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/json_escape_fuzz.o -o $(FUZZ_JSON)
-	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/atoi_fuzz.cpp"
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/atoi_fuzz.cpp -o $(OBJDIR)/atoi_fuzz.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/atoi_fuzz.o $(OBJDIR)/stdlib.o -o $(FUZZ_ATOI)
 	# ELF parser lives in symbols.cpp (pure logic, no hardware deps); link it in for the parser under test.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp -o $(OBJDIR)/elf_symbols_fuzz.o
@@ -74,7 +70,6 @@ pkg_install:
 	cp $(FUZZ_DEMANGLE) $(TOOL_INSTALL)/kernel-fuzz/fuzz-demangle
 	cp $(FUZZ_FMT) $(TOOL_INSTALL)/kernel-fuzz/fuzz-fmt
 	cp $(FUZZ_JSON) $(TOOL_INSTALL)/kernel-fuzz/fuzz-json
-	cp $(FUZZ_ATOI) $(TOOL_INSTALL)/kernel-fuzz/fuzz-atoi
 	cp $(FUZZ_ELF) $(TOOL_INSTALL)/kernel-fuzz/fuzz-elf
 	cp $(FUZZ_ELF_LOADER) $(TOOL_INSTALL)/kernel-fuzz/fuzz-elf-loader
 	cp $(FUZZ_RBTREE) $(TOOL_INSTALL)/kernel-fuzz/fuzz-rbtree

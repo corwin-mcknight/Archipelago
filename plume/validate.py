@@ -10,24 +10,24 @@ from plume.package import Package
 
 KNOWN_PACKAGE_KEYS = {
     "description", "is_build_tool", "supports_live_sources",
-    "live_source_path", "dependencies", "source", "arches", "varies_by",
+    "live_source_path", "dependencies", "arches", "varies_by",
 }
 
 # Axes a package may declare it builds separately for. A package listing an
-# axis gets that axis in its qualifier, workdir, and binary package name;
-# packages listing nothing resolve at the arch level and are shared.
+# axis gets that axis in its qualifier and workdir; packages listing nothing
+# resolve at the arch level and are shared.
 KNOWN_VARIES_BY = {"board"}
 
 
 def validate_target(config: Config) -> list[str]:
     """Validate the active target config. Returns errors.
 
-    The board name becomes a path component in workdirs, object trees, binary
-    package names, and manifest filenames, so it is constrained to the same
-    character set as an arch. A board target must also isolate the paths that
-    hold per-board output: boards on one arch deliberately share the build
-    tree, so a board inheriting its base's sysroot would install its kernel
-    over the other board's and write both to the same ISO.
+    The board name becomes a path component in workdirs and object trees, so
+    it is constrained to the same character set as an arch. A board target
+    must also isolate the paths that hold per-board output: boards on one
+    arch deliberately share the build tree, so a board inheriting its base's
+    sysroot would install its kernel over the other board's and write both
+    to the same ISO.
     """
     errors = []
     board = config.get_board()
@@ -42,7 +42,7 @@ def validate_target(config: Config) -> list[str]:
         expected = f"{arch}^{board}"
         if config_name != expected:
             errors.append(f"config {config_name}.yaml declares arch/board '{expected}'; filename must match")
-        for key in ("sysroot", "iso_output"):
+        for key in ("sysroot", "image_output"):
             base_value = config.base_values.get(key)
             if base_value is not None and config.get(key) == base_value:
                 errors.append(
@@ -52,15 +52,14 @@ def validate_target(config: Config) -> list[str]:
     return errors
 
 
-def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str], list[str]]:
-    """Validate all packages. Returns (errors, warnings)."""
+def validate_packages(config: Config, packages: list[Package]) -> list[str]:
+    """Validate all packages. Returns errors."""
     errors = validate_target(config)
-    warnings = []
     by_name = {p.full_name: p for p in packages}
 
     for pkg in packages:
-        if not re.match(r"^[a-z0-9_-]+/[a-z0-9_-]+-[a-zA-Z0-9._]+$", pkg.full_name):
-            errors.append(f"{pkg}: invalid package name format (expected category/name-version)")
+        if not re.match(r"^[a-z0-9_-]+/[a-z0-9_-]+$", pkg.full_name):
+            errors.append(f"{pkg}: invalid package name format (expected category/name)")
 
         makefile = os.path.join(config.get("repo_path"), "packages", pkg.category, pkg.name, "Makefile")
         if not os.path.exists(makefile):
@@ -93,7 +92,7 @@ def validate_packages(config: Config, packages: list[Package]) -> tuple[list[str
     except CycleError as e:
         errors.append(f"circular dependency detected: {e}")
 
-    return errors, warnings
+    return errors
 
 
 def validate_package_yaml(raw_data: dict) -> list[str]:

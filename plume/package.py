@@ -1,6 +1,5 @@
 """Package metadata model."""
 
-import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -9,10 +8,9 @@ from typing import Optional
 class Package:
     """Represents a single package in the repository."""
 
-    full_name: str          # e.g. "sys/kernel-0.0.1"
+    full_name: str          # e.g. "sys/kernel"
     category: str           # e.g. "sys"
     name: str               # e.g. "kernel"
-    version: str            # e.g. "0.0.1"
     arch: str = ""          # e.g. "x86_64", set at load time from config
     board: str = ""         # e.g. "virt", set at load time from config
     description: str = ""
@@ -20,7 +18,6 @@ class Package:
     supports_live_sources: bool = False
     live_source_path: Optional[str] = None
     dependencies: list = field(default_factory=list)
-    source: dict = field(default_factory=dict)
     arches: list = field(default_factory=list)  # empty = all architectures
     varies_by: list = field(default_factory=list)  # axes this package builds separately for
 
@@ -50,20 +47,21 @@ class Package:
 
     @property
     def qualified_name(self) -> str:
-        """Full name with target qualifier, e.g. 'sys/kernel-0.0.1~x86_64^pc'."""
+        """Full name with target qualifier, e.g. 'sys/kernel~x86_64^pc'."""
         if self.arch:
             return f"{self.full_name}~{self.arch}{self.variant_suffix}"
         return self.full_name
 
     @staticmethod
     def parse(full_name: str, data: dict, arch: str = "", board: str = "") -> "Package":
-        """Parse a package from its manifest key and YAML data."""
-        info = Package.split_name(full_name)
+        """Parse a package from its packages.yml key ('category/name') and YAML data."""
+        category, _, name = full_name.partition("/")
+        if not category or not name:
+            raise ValueError(f"Invalid package name: {full_name} (expected category/name)")
         return Package(
             full_name=full_name,
-            category=info["category"],
-            name=info["name"],
-            version=info["version"],
+            category=category,
+            name=name,
             arch=arch,
             board=board,
             description=data.get("description", ""),
@@ -71,27 +69,9 @@ class Package:
             supports_live_sources=data.get("supports_live_sources", False),
             live_source_path=data.get("live_source_path"),
             dependencies=data.get("dependencies", []),
-            source=data.get("source", {}),
             arches=data.get("arches", []),
             varies_by=data.get("varies_by", []),
         )
-
-    @staticmethod
-    def split_name(full_name: str) -> dict:
-        """Split 'category/name-version' into components.
-
-        Examples:
-            'sys/kernel-0.0.1' -> {'category': 'sys', 'name': 'kernel', 'version': '0.0.1'}
-            'boot/limine-10.0' -> {'category': 'boot', 'name': 'limine', 'version': '10.0'}
-        """
-        match = re.match(r"^(.+)/(.+)-([^-]+)$", full_name)
-        if not match:
-            raise ValueError(f"Invalid package name: {full_name}")
-        return {
-            "category": match.group(1),
-            "name": match.group(2),
-            "version": match.group(3),
-        }
 
     def __hash__(self):
         return hash(self.full_name)

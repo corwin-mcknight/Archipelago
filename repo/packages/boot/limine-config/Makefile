@@ -10,6 +10,6 @@ pkg_build:
 	@true
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P) for $(ARCH)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN) for $(ARCH)"
 	cp -r $(LIVE_SOURCES)/boot $(D)/
 	cp $(LIVE_SOURCES)/$(ARCH).conf $(D)/limine.conf

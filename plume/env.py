@@ -30,7 +30,7 @@ def get_build_env(config: Config, package: Package) -> dict:
     # packages build once -- so board-varying packages carry '^<board>' here.
     tmp_base = os.path.join(
         config.get("tmp_path"), package.category,
-        f"{package.name}-{package.version}{package.variant_suffix}",
+        f"{package.name}{package.variant_suffix}",
     )
 
     # ARCH is the bare arch so package Makefiles can match on it directly
@@ -51,9 +51,7 @@ def get_build_env(config: Config, package: Package) -> dict:
     env["WORKDIR"] = tmp_base
     env["S"] = os.path.join(tmp_base, "src")
     env["D"] = os.path.join(tmp_base, "install")
-    env["P"] = f"{package.name}-{package.version}"
     env["PN"] = package.name
-    env["PV"] = package.version
     env["CATEGORY"] = package.category
     env["CC"] = config.get("cc", "clang")
     env["CXX"] = config.get("cxx", "clang++")

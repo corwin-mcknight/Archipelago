@@ -1,27 +1,28 @@
-boot/limine-tools-10.0:
+boot/limine-tools:
   description: "Limine bootloader host tools"
   is_build_tool: true
-  source:
-    type: git
-    url: "https://github.com/limine-bootloader/limine.git"
-    commit: "7a9013f305de0bea1f6310e76e7baba30499fef0"
 
-boot/limine-10.0:
+boot/limine:
   description: "Limine bootloader boot binaries"
   dependencies:
-    - "boot/limine-tools-10.0"
+    - "boot/limine-tools"
 
-boot/edk2-riscv-1.0:
+boot/edk2-riscv:
   description: "EDK2 RiscVVirt UEFI firmware (riscv64 QEMU host tool)"
   is_build_tool: true
   arches: [riscv64]
 
-boot/limine-config-1.0:
+boot/u-boot-qemu:
+  description: "Mainline U-Boot for QEMU riscv64 (boot-chain test host tool)"
+  is_build_tool: true
+  arches: [riscv64]
+
+boot/limine-config:
   description: "Limine bootloader configuration"
   supports_live_sources: true
   live_source_path: "boot/limine-config"
 
-sys/kernel-0.0.1:
+sys/kernel:
   description: "The Archipelago kernel"
   supports_live_sources: true
   live_source_path: "sys/kernel"
@@ -30,63 +31,63 @@ sys/kernel-0.0.1:
   # qualifier. Every other package resolves at the arch level and is shared.
   varies_by: ["board"]
   dependencies:
-    - "boot/limine-10.0"
-    - "boot/limine-config-1.0"
+    - "boot/limine"
+    - "boot/limine-config"
 
-sys/kernel-headers-0.0.1:
+sys/kernel-headers:
   description: "Public kernel headers (user/kernel ABI)"
   supports_live_sources: true
   live_source_path: "sys/kernel"
 
-lib/crt-0.0.1:
+lib/crt:
   description: "User-program C runtime: _start, syscall stubs, linker script"
   supports_live_sources: true
   live_source_path: "lib/crt"
   dependencies:
-    - "sys/kernel-headers-0.0.1"
+    - "sys/kernel-headers"
 
-sys/init-0.0.1:
+sys/init:
   description: "The first user program"
   supports_live_sources: true
   live_source_path: "sys/init"
   dependencies:
-    - "sys/kernel-headers-0.0.1"
-    - "lib/crt-0.0.1"
+    - "sys/kernel-headers"
+    - "lib/crt"
 
-sys/selftest-0.0.1:
+sys/selftest:
   description: "The user-mode self-check payload"
   supports_live_sources: true
   live_source_path: "sys/selftest"
   dependencies:
-    - "sys/kernel-headers-0.0.1"
-    - "lib/crt-0.0.1"
+    - "sys/kernel-headers"
+    - "lib/crt"
 
-srv/echo-0.0.1:
+srv/echo:
   description: "The echo server, first userspace service"
   supports_live_sources: true
   live_source_path: "srv/echo"
   dependencies:
-    - "sys/kernel-headers-0.0.1"
-    - "lib/crt-0.0.1"
+    - "sys/kernel-headers"
+    - "lib/crt"
 
-sys/kernel-src-0.0.1:
+sys/kernel-src:
   description: "Kernel source archive"
   supports_live_sources: true
   live_source_path: "sys/kernel"
 
-test/kernel-testrunner-0.0.1:
+test/kernel-testrunner:
   description: "Host-tier kernel test runner"
   is_build_tool: true
   supports_live_sources: true
   live_source_path: "sys/kernel"
 
-test/kernel-fuzz-0.0.1:
+test/kernel-fuzz:
   description: "Host fuzz lane (libFuzzer over the demangler)"
   is_build_tool: true
   supports_live_sources: true
   live_source_path: "sys/kernel"
 
-test/kernel-tsan-0.0.1:
+test/kernel-tsan:
   description: "Host TSan lane (real-thread stress over ktl::atomic)"
   is_build_tool: true
   supports_live_sources: true

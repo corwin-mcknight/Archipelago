@@ -18,11 +18,11 @@ pkg_configure:
 	@true
 
 pkg_build:
-	@echo "[plume] Building $(CATEGORY)/$(P)"
+	@echo "[plume] Building $(CATEGORY)/$(PN)"
 	$(MAKE) -C $(S)
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(TOOL_INSTALL)/limine-tools
 	cp $(S)/limine $(TOOL_INSTALL)/limine-tools/
 	cp $(S)/limine-bios-cd.bin $(TOOL_INSTALL)/limine-tools/

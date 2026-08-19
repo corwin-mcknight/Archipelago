@@ -12,11 +12,11 @@ pkg_configure:
 	@true
 
 pkg_build:
-	@echo "[plume] Building $(CATEGORY)/$(P)"
+	@echo "[plume] Building $(CATEGORY)/$(PN)"
 	mkdir -p $(OBJ_DIR)
 	cd $(LIVE_SOURCES) && $(MAKE) -j$(MAKE_JOBS) BUILD_DIR=$(BUILD_DIR) OBJ_DIR=$(OBJ_DIR) SYSROOT=$(SYSROOT)
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(D)/boot
 	cp $(OBJ_DIR)/$(PN).elf $(D)/boot/$(PN).elf

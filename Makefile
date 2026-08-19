@@ -7,18 +7,14 @@ ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null 
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
-.PHONY: all build install test test-verbose host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
+.PHONY: all build install test test-verbose uboot-test host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
 
 all: install
 
 build:
-	@$(PLUME) build @system
-
-rebuild:
-	@$(PLUME) rebuild @system
+	@$(PLUME) build
 
 install: build
-	@$(PLUME) install @system
 	@$(PLUME) image
 
 test:
@@ -26,6 +22,12 @@ test:
 
 test-verbose:
 	@$(PLUME) test --verbose $(TEST)
+
+# Boot-chain smoke test (riscv64): OpenSBI -> U-Boot EFI -> Limine -> kernel
+# in QEMU, the same chain real boards use from an SD card.
+uboot-test:
+	@$(PLUME) build --arch riscv64
+	@$(PLUME) uboot-test --arch riscv64
 
 host-test:
 	@$(PLUME) build test/kernel-testrunner

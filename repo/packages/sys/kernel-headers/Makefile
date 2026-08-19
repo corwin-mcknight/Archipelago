@@ -14,6 +14,6 @@ pkg_build:
 	@true
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(D)/usr/include
 	cp -r $(LIVE_SOURCES)/includes/abi $(D)/usr/include/

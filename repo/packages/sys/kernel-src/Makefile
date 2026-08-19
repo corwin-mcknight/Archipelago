@@ -11,6 +11,6 @@ pkg_build:
 	tar cJf $(WORKDIR)/kernel.tar.xz -C $(LIVE_SOURCES)/.. kernel
 
 pkg_install:
-	@echo "[plume] Installing $(CATEGORY)/$(P)"
+	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(D)/usr/src
 	cp $(WORKDIR)/kernel.tar.xz $(D)/usr/src/kernel.tar.xz
