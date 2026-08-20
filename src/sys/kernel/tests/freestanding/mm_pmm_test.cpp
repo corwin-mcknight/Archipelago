@@ -142,8 +142,9 @@ KTEST_CASE(pmm_zeroer_and_stats) {
     // allocation here. The page cannot be inspected while pooled -- the pools
     // are intrusive, so a pooled page carries the freelist link word -- which
     // is why the check happens at reallocation, where the guarantee is owed.
-    // Phase 1 drained every earlier dirty page, so this page is the zeroed
-    // stack's top and the next alloc returns exactly it.
+    // Its depth in the zeroed pool depends on what earlier activity left
+    // pooled (pool order is not a contract), so hunt for it within a bound
+    // rather than assuming the next alloc returns exactly it.
     {
         KTEST_REQUIRE_VALUE(addr, pmm.alloc());
         dirty_page(addr);
@@ -151,10 +152,21 @@ KTEST_CASE(pmm_zeroer_and_stats) {
 
         while (pmm.stats().dirty != 0 && pmm.zero_one_page()) {}
 
-        KTEST_REQUIRE_VALUE(again, pmm.alloc());
-        KTEST_EXPECT_EQUAL(again, addr);
+        uintptr_t held[64];
+        size_t held_count = 0;
+        uintptr_t again   = 0;
+        while (held_count < 64) {
+            KTEST_REQUIRE_VALUE(page, pmm.alloc());
+            if (page == addr) {
+                again = page;
+                break;
+            }
+            held[held_count++] = page;
+        }
+        KTEST_REQUIRE(again == addr);
         KTEST_EXPECT_TRUE(page_is_zeroed(again));
         pmm.free(again);
+        while (held_count > 0) { pmm.free(held[--held_count]); }
     }
 
     // Phase 3: stats track alloc/free counts. All comparisons are deltas
