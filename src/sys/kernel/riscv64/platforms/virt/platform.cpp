@@ -35,6 +35,12 @@ void console_init() { uart.init(); }
 // No fixed interrupt hardware needs quiescing; PLIC routing is future work.
 void interrupt_init() {}
 
+bool dispatch_external_interrupt(::register_frame*) { return false; }
+
+void interrupt_set_source_enabled(unsigned int, bool) {}
+
+unsigned int console_uart_interrupt_id() { return 0; }
+
 void harness_exit(uint8_t code) {
     if (g_hhdm_offset == 0) { return; }  // MMIO unreachable before the HHDM is known
     volatile uint32_t* finisher = reinterpret_cast<volatile uint32_t*>(g_hhdm_offset + SIFIVE_TEST_PADDR);

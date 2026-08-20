@@ -51,3 +51,11 @@ The kernel communicates with Limine through request structures placed in the `__
 |---------|---------|
 | HHDM | Higher-Half Direct Map base address |
 | MP | Multiprocessor core information |
+| Memory map | Physical memory ranges and ownership |
+| Executable file | Kernel ELF image used for symbol discovery |
+| Command line | Boot-mode selection |
+| Modules | Initial userspace images and their roles |
+| Device tree | Firmware hardware description; currently consumed by the JH7110 PLIC driver |
+| Date at boot | Initial wall-clock epoch |
+| Framebuffer | First firmware framebuffer and pixel layout |
+| Paging mode (riscv64) | Requires the Sv39 mode implemented by the RISC-V page-table code |

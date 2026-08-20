@@ -1,5 +1,6 @@
 #include "kernel/interrupt.h"
 #include "kernel/log.h"
+#include "kernel/platform.h"
 
 kernel::hal::interrupt_manager g_interrupt_manager;
 
@@ -12,6 +13,7 @@ void interrupt_manager::register_interrupt(unsigned int id, IInterruptHandler* h
     if (id >= IM_MAX_HANDLERS) { return; }
     handlers[id].handler.object = handler;
     handlers[id].flags = (flags | InterruptHandlerEntry::ENABLED_MASK) | InterruptHandlerEntry::OBJECT_HANDLER_MASK;
+    kernel::platform::interrupt_set_source_enabled(id, true);
     g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
@@ -19,11 +21,13 @@ void interrupt_manager::register_interrupt(unsigned int id, bool (*handler)(regi
     if (id >= IM_MAX_HANDLERS) { return; }
     handlers[id].handler.function = handler;
     handlers[id].flags = (flags | InterruptHandlerEntry::ENABLED_MASK) & (~InterruptHandlerEntry::OBJECT_HANDLER_MASK);
+    kernel::platform::interrupt_set_source_enabled(id, true);
     g_log.trace("Registered interrupt 0x{0:x} with handler 0x{1:p}", id, (uint64_t)handler);
 }
 
 void interrupt_manager::clear_handler(unsigned int id) {
     if (id >= IM_MAX_HANDLERS) { return; }
+    kernel::platform::interrupt_set_source_enabled(id, false);
     if (handlers[id].flags & InterruptHandlerEntry::OBJECT_HANDLER_MASK) {
         handlers[id].handler.object = nullptr;
     } else {

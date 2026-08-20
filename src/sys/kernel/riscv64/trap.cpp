@@ -2,6 +2,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/log.h>
 #include <kernel/panic.h>
+#include <kernel/platform.h>
 #include <kernel/registers.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/synchronization/execution_context.h>
@@ -79,9 +80,10 @@ extern "C" [[noreturn]] void riscv_trap_stack_overflow(uintptr_t sepc, uintptr_t
 extern "C" void riscv_trap_handler(register_frame_t* regs) {
     if (regs->scause & SCAUSE_INTERRUPT) {
         kernel::synchronization::interrupt_enter();
-        // CLINT/PLIC routing is future work; hand the cause code to the
-        // dispatcher so registered handlers (e.g. the SBI timer) can claim it.
-        g_interrupt_manager.dispatch_interrupt(static_cast<unsigned int>(regs->scause & ~SCAUSE_INTERRUPT), regs);
+        const auto cause = static_cast<unsigned int>(regs->scause & ~SCAUSE_INTERRUPT);
+        if (cause != 9 || !kernel::platform::dispatch_external_interrupt(regs)) {
+            g_interrupt_manager.dispatch_interrupt(cause, regs);
+        }
         kernel::synchronization::interrupt_exit();
         return;
     }

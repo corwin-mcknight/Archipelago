@@ -43,7 +43,7 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::synchronization::init_execution_context(0);
 
     // Single-hart bring-up: install the trap vector (which also enables FP execution), then let
-    // interrupts in. CLINT/PLIC routing for external interrupts is future work.
+    // interrupts in. The board hook quiesces and configures its external-interrupt controller.
     kernel::riscv::trap_init();
     g_interrupt_manager.initialize();
     kernel::platform::interrupt_init();

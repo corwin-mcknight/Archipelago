@@ -33,4 +33,10 @@ void interrupt_init() {
     outb(0xA1, 0xFF);
 }
 
+bool dispatch_external_interrupt(::register_frame*) { return false; }
+
+void interrupt_set_source_enabled(unsigned int, bool) {}
+
+unsigned int console_uart_interrupt_id() { return 0; }
+
 }  // namespace kernel::platform

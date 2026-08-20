@@ -33,9 +33,6 @@ constexpr size_t CACHE_LINE_BYTES   = 64;
 // run before this.
 void console_init() { uart.init(); }
 
-// No fixed interrupt hardware needs quiescing; PLIC routing is future work.
-void interrupt_init() {}
-
 // No debug-exit device on real hardware, and SBI SRST dead-ends in OpenSBI's
 // pm-reset (the PMIC sits on an I2C bus whose clocks U-Boot gates off at EFI
 // handoff). The exit code has nowhere to go, but the contract's intent --

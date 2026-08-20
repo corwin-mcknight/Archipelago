@@ -36,6 +36,9 @@ __attribute__((used, section(".limine_requests"))) static volatile struct limine
 __attribute__((used, section(".limine_requests"))) static volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST, .revision = 0, .response = nullptr, .flags = 0};
 
+__attribute__((used, section(".limine_requests"))) static volatile struct limine_dtb_request dtb_request = {
+    .id = LIMINE_DTB_REQUEST, .revision = 0, .response = nullptr};
+
 __attribute__((used,
                section(".limine_requests"))) static volatile struct limine_date_at_boot_request date_at_boot_request = {
     .id = LIMINE_DATE_AT_BOOT_REQUEST, .revision = 0, .response = nullptr};
@@ -189,6 +192,8 @@ const boot_info& collect() {
     if (executable_cmdline_request.response != nullptr) {
         g_info.cmdline = executable_cmdline_request.response->cmdline;
     }
+
+    if (dtb_request.response != nullptr) { g_info.dtb = dtb_request.response->dtb_ptr; }
 
     if (date_at_boot_request.response != nullptr) {
         g_info.boot_epoch_seconds = date_at_boot_request.response->timestamp;

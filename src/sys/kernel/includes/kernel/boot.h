@@ -45,6 +45,9 @@ struct boot_info {
     size_t kernel_elf_size;
     // Space-delimited kernel command line, or null if the protocol supplied none.
     const char* cmdline;
+    // Firmware device tree in flattened-device-tree format. The bootloader-owned
+    // blob remains valid because reclaimable boot memory is not reclaimed yet.
+    const void* dtb;
     // Files the protocol loaded alongside the kernel. Empty when it loaded none or supports none.
     const boot_module* modules;
     size_t module_count;

@@ -4,14 +4,18 @@
 - Standard streams (`docs/Design/Standard Streams.md`), remaining slices now that the socket primitive landed (SYS_SOCKET_*): the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. The endowment slice needs a rights-stripping mechanism first -- socket ends are move-only (no DUPLICATE, so PEER_CLOSED stays readable as hangup), so making an end unidirectional takes an in-place rights-narrowing handle op (a restrict/replace) that does not mint a second handle.
 
 ## Second Architecture (riscv64)
-- CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
+- Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
+  CLINT software-interrupt routing remains future work.
 - Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).
-- Grow the riscv64/tests/ suite (external interrupt claim path, more sfence/TLB behavior).
+- Grow the riscv64/tests/ suite beyond the JH7110 UART-to-PLIC claim/complete test (more sfence/TLB behavior and
+  multi-source/per-hart external-interrupt coverage).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
 
 ## Boot & Platform
 - `_start` still owns the boot ordering itself: `kernel::platform::console_init()`/`timer_init()` moved device bring-up out of the arch files, but the sequence (heap, ctors, console, cores, memory, traps, timer, late boot) is written twice, once per arch, and the two orders differ in ways that are not all forced. Factor the common spine once the third arch makes the real variation visible.
-- Board device discovery is still hardcoded: each riscv64 board directory fixes its timebase and UART address as constants. Reading the DTB's /cpus/timebase-frequency would replace the per-board constants; Limine has a DTB request, so extend `boot_info` rather than teaching shared code a second protocol.
+- Board discovery is partial: Limine's DTB is exposed through `boot_info` and JH7110 PLIC topology is read from it, but
+  each riscv64 board still fixes its timebase and UART address as constants. Read `/cpus/timebase-frequency` and UART
+  `reg` next rather than growing the per-board constant set.
 - Linker scripts stayed in `<arch>/`: the higher-half load address is an arch and boot-protocol fact, not a board one. Revisit only if a board needs a different load address.
 - Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
 - Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.

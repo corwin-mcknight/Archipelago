@@ -29,6 +29,10 @@ A crashed driver loses all access immediately, and the system can restart it cle
 See [[Server Lifecycle]].
 
 ## Current System
-The kernel currently includes two in-kernel drivers for bootstrap purposes:
+The kernel currently includes a small in-kernel bootstrap set:
 - **UART serial** -- used for logging and the [[Testing|test harness]]
 - **Timer** -- kernel time base (x86_64: LAPIC timer calibrated once against the PIT; riscv64: SBI timer)
+- **JH7110 PLIC** -- discovers its MMIO range and boot-hart supervisor context from Limine's DTB, then routes claimed
+  device sources through the kernel interrupt manager; the board test tier verifies the complete path with a one-shot
+  UART transmit-empty interrupt
+- **JH7110 watchdog** -- resets real hardware when the scheduler stops making progress
