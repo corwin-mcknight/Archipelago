@@ -7,7 +7,7 @@ ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null 
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
-.PHONY: all build install test test-verbose uboot-test host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
+.PHONY: all build install test test-verbose uboot-test netboot host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
 
 all: install
 
@@ -22,6 +22,12 @@ test:
 
 test-verbose:
 	@$(PLUME) test --verbose $(TEST)
+
+# Rebuild the jh7110 image and refresh the TFTP root the board netboots from.
+netboot:
+	@$(PLUME) build --arch riscv64^jh7110
+	@$(PLUME) image --arch riscv64^jh7110
+	@python3 tools/netboot.py
 
 # Boot-chain smoke test (riscv64): OpenSBI -> U-Boot EFI -> Limine -> kernel
 # in QEMU, the same chain real boards use from an SD card.
