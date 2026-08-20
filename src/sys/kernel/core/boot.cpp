@@ -225,6 +225,8 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 
     kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");
 
+    kernel::platform::watchdog_init();
+
     boot_mode mode      = resolve_boot_mode();
     bool entering_shell = false;
 #if CONFIG_KERNEL_SHELL

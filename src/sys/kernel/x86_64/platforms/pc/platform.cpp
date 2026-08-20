@@ -112,4 +112,11 @@ void timestamp_calibrate() {
     }
 }
 
+// The PC target runs under QEMU, which has no watchdog worth arming.
+void watchdog_init() {}
+
+// Pulse the 8042 keyboard controller's reset line, the legacy reboot path
+// every PC inherits.
+void reboot() { outb(0x64, 0xFE); }
+
 }  // namespace kernel::platform

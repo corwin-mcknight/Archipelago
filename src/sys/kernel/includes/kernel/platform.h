@@ -44,4 +44,14 @@ uint64_t timestamp_hz();
 /// enabled; called once from late boot before the scheduler starts.
 void timestamp_calibrate();
 
+/// Arm the board's hardware watchdog, if it has one, and spawn the thread that
+/// feeds it. Called once by the boot CPU after the scheduler is online. From
+/// then on a kernel that stops scheduling hard-resets the board instead of
+/// hanging forever; boards without a watchdog do nothing.
+void watchdog_init();
+
+/// Ask the firmware or board to reset the machine. Returns only if the board
+/// has no reset path, so callers must handle coming back.
+void reboot();
+
 }  // namespace kernel::platform

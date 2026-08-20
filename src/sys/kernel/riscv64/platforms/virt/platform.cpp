@@ -46,4 +46,17 @@ uint64_t timestamp_hz() { return TIMEBASE_FREQ_HZ; }
 // The timebase is a fixed board constant, so there is nothing to measure.
 void timestamp_calibrate() {}
 
+// virt has no watchdog device.
+void watchdog_init() {}
+
+// SBI SRST extension (EID "SRST", FID 0): ask the SBI firmware to cold-reboot
+// the machine. Returns if the firmware lacks the extension.
+void reboot() {
+    register uint64_t a0 asm("a0") = 1;  // reset type: cold reboot
+    register uint64_t a1 asm("a1") = 0;  // reset reason: none
+    register uint64_t a6 asm("a6") = 0;
+    register uint64_t a7 asm("a7") = 0x53525354;
+    asm volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a6), "r"(a7) : "memory");
+}
+
 }  // namespace kernel::platform

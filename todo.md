@@ -159,9 +159,9 @@
 - Expand x86_64 bring-up with IOAPIC routing for device interrupts (LAPIC and its timer landed; the legacy PIC is now fully masked).
 - High-resolution timer events: one-shot deadline programming (LAPIC one-shot/TSC-deadline on x86_64, sbi_set_timer already one-shot on riscv64) with a deadline queue, so sleeps and preemption wake at sub-tick deadlines; `ns_since_boot()` already reads the cycle counter.
 - Add keyboard (PS/2) and framebuffer/console drivers; wire the Limine framebuffer request (UART hardening already landed).
-- UART: pre-init panics lose their output (writes before init are dropped by the health gate); real hardware needs a bounded data-ready poll before reading the loopback echo; consider an atomic health flag for crash-context writes.
+- UART: pre-init panics lose their output (writes before init are dropped by the health gate); consider an atomic health flag for crash-context writes.
 - UART RX interrupt path (IOAPIC/PLIC routing) so shell input can block on a wait queue instead of sleep-polling; QEMU's chardev backpressure makes the current 1 ms poll lossless, but a real 16550's 16-byte FIFO would drop pasted input.
-- Implement storage (AHCI or NVMe), RTC, entropy, and watchdog timer drivers. Wall-clock time already comes from the Limine date-at-boot request (`boot_info::boot_epoch_seconds`, shell `date`); an RTC driver is still wanted for non-Limine boot paths and for re-syncing drift on long uptimes.
+- Implement storage (AHCI or NVMe), RTC, and entropy drivers (the jh7110 hardware watchdog is done; no other board has one worth arming). Wall-clock time already comes from the Limine date-at-boot request (`boot_info::boot_epoch_seconds`, shell `date`); an RTC driver is still wanted for non-Limine boot paths and for re-syncing drift on long uptimes.
 
 ## Security & Reliability
 - Enforce memory zeroisation, W^X policies, and static analysis for privileged code paths.
