@@ -22,6 +22,9 @@ void uart::init() {
     uart_reg_write(2, 0xC7);                       // Enable FIFO, clear them, with 14-byte threshold
     uart_reg_write(4, 0x0B);                       // IRQs enabled, RTS/DSR set
     uart_reg_write(4, 0x1E);                       // Set in loopback mode, test the serial chip
+    // Drain bytes that arrived between the FIFO clear and loopback engaging --
+    // a key pressed during boot must not fail the self-test and mute the port.
+    for (uint32_t drained = 0; (uart_reg_read(5) & 1) != 0 && drained < 32; drained++) { uart_reg_read(0); }
     uart_reg_write(0, 0xAE);  // Test serial chip (send byte 0xAE and check if serial returns same byte)
     // The echo takes one character time to shift through real silicon; only
     // emulators return it instantly.
