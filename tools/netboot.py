@@ -15,6 +15,7 @@ Usage: netboot.py [--server 10.0.0.26]
 """
 
 import argparse
+import hashlib
 import pathlib
 import struct
 import subprocess
@@ -77,15 +78,31 @@ def uimage_script(text: bytes) -> bytes:
 
 
 def boot_script(server: str) -> str:
-    # One && chain: `source` runs every line regardless of the previous line's
-    # status, so a single command is the only way a failed fetch skips the boot.
-    steps = []
-    for tftp_name, fat_name in FILES:
-        steps.append(f"tftpboot {LOAD} {server}:{tftp_name}")
-        steps.append(f"fatwrite {FAT} {LOAD} {fat_name} ${{filesize}}")
-    steps.append(f"fatload {FAT} {LOAD} limine.efi")
-    steps.append(f"bootefi {LOAD} ${{fdtcontroladdr}}")
-    return " && ".join(steps) + "\n"
+    # The fetch is one && chain so a failed transfer skips the stamp write and
+    # the boot falls through to the SD. The stamp (a hash of the artifact set)
+    # is fetched first and compared against the SD's copy; a match skips the
+    # transfers entirely. It is written last, after the artifacts it describes.
+    alt = "0x45000000"
+    fetch = " && ".join(
+        f"tftpboot {LOAD} {server}:{tftp_name} && fatwrite {FAT} {LOAD} {fat_name} ${{filesize}}"
+        for tftp_name, fat_name in FILES
+    )
+    return f"""setenv autoload no
+dhcp
+setenv stamp_ok 0
+if tftpboot {LOAD} {server}:netboot.stamp; then
+setenv stamp_size ${{filesize}}
+if fatload {FAT} {alt} netboot.stamp && itest ${{filesize}} == ${{stamp_size}} && cmp.b {LOAD} {alt} ${{stamp_size}}; then
+setenv stamp_ok 1
+fi
+fi
+if itest ${{stamp_ok}} == 1; then
+echo netboot: artifacts current, skipping transfers
+else
+{fetch} && tftpboot {LOAD} {server}:netboot.stamp && fatwrite {FAT} {LOAD} netboot.stamp ${{filesize}}
+fi
+fatload {FAT} {LOAD} limine.efi && bootefi {LOAD} ${{fdtcontroladdr}}
+"""
 
 
 def main() -> None:
@@ -102,6 +119,10 @@ def main() -> None:
     )
     (TFTP_ROOT / "limine-netboot.conf").write_text(LIMINE_CONF)
     (TFTP_ROOT / "boot.scr").write_bytes(uimage_script(boot_script(args.server).encode()))
+    digest = hashlib.sha256()
+    for tftp_name, _ in FILES:
+        digest.update((TFTP_ROOT / tftp_name).read_bytes())
+    (TFTP_ROOT / "netboot.stamp").write_text(digest.hexdigest() + "\n")
     print(f"netboot artifacts written to {TFTP_ROOT} (server {args.server})")
 
 
