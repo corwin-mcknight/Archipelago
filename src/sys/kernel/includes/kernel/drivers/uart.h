@@ -23,6 +23,8 @@ class uart {
 
     bool m_healthy                              = false;
 
+    void write_raw(char c);
+
    public:
     void init();
     void write_byte(char c);

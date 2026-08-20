@@ -33,7 +33,7 @@ void uart::init() {
     uart_reg_write(4, 0x0F);
 }
 
-void uart::write_byte(char c) {
+void uart::write_raw(char c) {
     if (!m_healthy) { return; }  // never touch a dead or absent port
     // Bound the busy-wait so a wedged transmitter cannot hang the kernel (notably the panic path).
     for (uint32_t spins = 0; transmit_empty() == 0; spins++) {
@@ -43,6 +43,11 @@ void uart::write_byte(char c) {
         }
     }
     uart_reg_write(0, (uint8_t)c);
+}
+
+void uart::write_byte(char c) {
+    if (c == '\n') { write_raw('\r'); }  // serial convention: a bare LF stair-steps raw terminals
+    write_raw(c);
 }
 
 int uart::received_data() { return uart_reg_read(5) & 1; }
