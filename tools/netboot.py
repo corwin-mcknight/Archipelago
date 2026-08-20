@@ -87,6 +87,18 @@ def boot_script(server: str) -> str:
         f"tftpboot {LOAD} {server}:{tftp_name} && fatwrite {FAT} {LOAD} {fat_name} ${{filesize}}"
         for tftp_name, fat_name in FILES
     )
+    # Keep the display alive across ExitBootServices. This SPI U-Boot tags its
+    # DC8200 (video) and Inno HDMI (display) drivers DM_FLAG_OS_PREPARE (0x400),
+    # so efi_exit_boot_services runs their .remove -- powering the panel off
+    # right as Limine takes over. Clearing the flag on both relocated struct
+    # driver .flags fields skips that teardown, so the framebuffer Limine hands
+    # the kernel stays scanned out. Addresses are fixed for this build (relocaddr
+    # 0xf7f17000); each write is guarded on the current 0x400 value so a U-Boot
+    # reflash that moves the structs is left untouched rather than corrupted.
+    keep_display = (
+        "if itest.l *f7fd54d0 == 0x400; then mw.l f7fd54d0 0; fi\n"
+        "if itest.l *f7fd4648 == 0x400; then mw.l f7fd4648 0; fi\n"
+    )
     return f"""setenv autoload no
 dhcp
 setenv stamp_ok 0
@@ -101,7 +113,7 @@ echo netboot: artifacts current, skipping transfers
 else
 {fetch} && tftpboot {LOAD} {server}:netboot.stamp && fatwrite {FAT} {LOAD} netboot.stamp ${{filesize}}
 fi
-fatload {FAT} {LOAD} limine.efi && bootefi {LOAD} ${{fdtcontroladdr}}
+{keep_display}fatload {FAT} {LOAD} limine.efi && bootefi {LOAD} ${{fdtcontroladdr}}
 """
 
 
