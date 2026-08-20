@@ -7,7 +7,7 @@ ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null 
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
-.PHONY: all build install test test-verbose uboot-test netboot host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
+.PHONY: all build install test test-verbose uboot-test netboot console host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
 
 all: install
 
@@ -28,6 +28,14 @@ netboot:
 	@$(PLUME) build --arch riscv64^jh7110
 	@$(PLUME) image --arch riscv64^jh7110
 	@python3 tools/netboot.py
+
+# Interactive serial console on the board, shared with automation through the
+# mux (started here if not already running). Ctrl-] detaches.
+console:
+	@python3 -c "import socket; socket.create_connection(('localhost', 5556), 1)" 2>/dev/null || \
+		{ nohup python3 tools/serial_mux.py >/tmp/serial-mux.log 2>&1 & sleep 1; }
+	@echo "board serial console -- Ctrl-] to detach"
+	@socat -,rawer,escape=0x1d TCP:localhost:5556
 
 # Boot-chain smoke test (riscv64): OpenSBI -> U-Boot EFI -> Limine -> kernel
 # in QEMU, the same chain real boards use from an SD card.
