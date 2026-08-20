@@ -5,7 +5,6 @@
 
 ## Second Architecture (riscv64)
 - CLINT/PLIC interrupt routing (the trap handler dispatches raw scause codes with no external-interrupt claim path).
-- Bring up the jh7110 board target (Orange Pi RV) on hardware: dd `build/riscv64/jh7110/sd.img` to a card and verify Limine over the board's SPI-flash U-Boot. `make uboot-test` already proves the chain against mainline U-Boot 2025.01 in QEMU, so a failure points at the vendor U-Boot -- update it to mainline before debugging anything else.
 - Secondary harts via Limine MP (riscv64/cpu.cpp is single-hart today).
 - Grow the riscv64/tests/ suite (external interrupt claim path, more sfence/TLB behavior).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.

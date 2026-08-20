@@ -7,7 +7,7 @@ ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null 
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := ${PWD}/build/docs/kernel
 
-.PHONY: all build install test test-verbose uboot-test netboot console host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
+.PHONY: all build install test test-verbose uboot-test netboot board-test console host-test host-coverage host-fuzz host-tsan shell clean full-clean clangd format docs
 
 all: install
 
@@ -28,6 +28,12 @@ netboot:
 	@$(PLUME) build --arch riscv64^jh7110
 	@$(PLUME) image --arch riscv64^jh7110
 	@python3 tools/netboot.py
+
+# Run kernel tests on the real board over serial: all tests, or TEST=<name>.
+# Non-crash tests batch onto shared boots; FRESH=1 reboots before every test.
+# Requires the board netbooted from the current build (`make netboot` + reboot).
+board-test:
+	@python3 tools/board_test.py $(if $(TEST),--test $(TEST)) $(if $(FRESH),--fresh)
 
 # Interactive serial console on the board, shared with automation through the
 # mux (started here if not already running). Ctrl-] detaches.
