@@ -182,10 +182,7 @@ uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uin
     for (uint64_t i = 0; i < handle_count; i++) {
         auto taken = task->handles().take(unpack_handle(handle_values[i]));
         if (taken.is_err()) { return errc_of(taken.unwrap_err()); }
-        auto moved = taken.unwrap();
-        // The channel handle itself is the one cycle cheap to refuse: escrowed on its own queue it
-        // could never be read again, and the escrow reference would keep the queue alive forever.
-        if (moved.object.get() == channel.get()) { return errc_of(ktl::errc::invalid_operation); }
+        auto moved    = taken.unwrap();
         auto escrowed = kernel::sched::kernel_task()->handles().insert(ktl::move(moved.object), moved.rights);
         if (escrowed.is_err()) { return errc_of(escrowed.unwrap_err()); }
         message.attach_handle(escrowed.unwrap());

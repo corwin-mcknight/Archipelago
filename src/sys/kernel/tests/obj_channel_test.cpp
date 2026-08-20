@@ -196,3 +196,24 @@ KTEST_CASE(obj_channel_escrow_closed_with_channel) {
     }
     KTEST_EXPECT_ALL(destroyed, escrow.count() == baseline);
 }
+
+// Neither endpoint may ride through its own pair: the peer would land in its own inbound queue,
+// forming queue -> message -> endpoint -> queue, while the sender would form the mirror cycle.
+KTEST_CASE(obj_channel_rejects_pair_endpoint_in_escrow) {
+    auto& escrow    = kernel::sched::kernel_task()->handles();
+    size_t baseline = escrow.count();
+
+    KTEST_UNWRAP(pair, Channel::create());
+    KTEST_UNWRAP(peer, escrow.insert(pair.second, Channel::DEFAULT_RIGHTS));
+    auto peer_message = message_of("peer");
+    KTEST_REQUIRE_TRUE(peer_message.attach_handle(peer));
+    KTEST_EXPECT_ERR(pair.first->write(ktl::move(peer_message)), ktl::errc::invalid_operation);
+    KTEST_EXPECT_TRUE(escrow.count() == baseline);
+
+    KTEST_UNWRAP(sender, escrow.insert(pair.first, Channel::DEFAULT_RIGHTS));
+    auto sender_message = message_of("sender");
+    KTEST_REQUIRE_TRUE(sender_message.attach_handle(sender));
+    KTEST_EXPECT_ERR(pair.first->write(ktl::move(sender_message)), ktl::errc::invalid_operation);
+    KTEST_EXPECT_TRUE(escrow.count() == baseline);
+    KTEST_EXPECT_ERR(pair.second->read(64), ktl::errc::would_block);
+}

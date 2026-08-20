@@ -50,13 +50,25 @@ ktl::result<MessageBuffer> MessageBuffer::create(size_t length) {
 // Close handles still escrowed when the message dies -- the "channel destroyed with handles in
 // flight" path, where the kernel closes them like any other handle. Runs after the channel state
 // lock is released (the state's reference drops in ~Channel's member destruction), so a close that
-// destroys another channel endpoint cannot deadlock here. A handle to an endpoint of this same
-// pair queued on itself is the one shape this cannot reclaim: the escrow reference keeps the
-// endpoint alive, the endpoint keeps the queue alive, and the cycle leaks rather than crashes.
+// destroys another channel endpoint cannot deadlock here. Channel::write rejects handles to either
+// endpoint of its own pair, preventing a queue -> endpoint -> queue ownership cycle.
 void MessageBuffer::release_handles() {
     auto& escrow = kernel::sched::kernel_task()->handles();
     for (size_t i = 0; i < m_handle_count; i++) { (void)escrow.close(m_handles[i]); }
     m_handle_count = 0;
+}
+
+bool MessageBuffer::carries_endpoint_from_pair(const Channel& channel) const {
+    auto& escrow = kernel::sched::kernel_task()->handles();
+    for (size_t i = 0; i < m_handle_count; i++) {
+        auto handle = escrow.verify(m_handles[i], 0);
+        if (handle.is_err()) { continue; }
+        auto verified = handle.unwrap();
+        if (verified.object->type_id() != Channel::TYPE_ID) { continue; }
+        auto endpoint = ktl::static_ref_cast<Channel>(verified.object);
+        if (endpoint->m_state.get() == channel.m_state.get()) { return true; }
+    }
+    return false;
 }
 
 Channel::Channel(ktl::ref<channel_state> state, uint32_t side)
@@ -87,6 +99,10 @@ Channel::~Channel() {
 }
 
 ktl::result<void> Channel::write(MessageBuffer message) {
+    // Queuing either endpoint of this pair would make the queue own an endpoint that owns the
+    // queue. Reject it before taking the state lock; dropping the message then closes its escrow.
+    if (message.carries_endpoint_from_pair(*this)) { return ktl::err(ktl::errc::invalid_operation); }
+
     kernel::synchronization::lock_guard guard(m_state->lock);
     Channel* peer = m_state->ends[m_side ^ 1];
     if (!peer) { return ktl::err(ktl::errc::peer_closed); }

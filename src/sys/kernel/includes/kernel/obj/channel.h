@@ -13,6 +13,7 @@
 namespace kernel::obj {
 
 struct channel_state;
+class Channel;
 
 // Message pages: Allocates from PMM, a message is at most MAX_MESSAGE_BYTES (1 page) via physmap.
 // Returns 0 when no page is available.
@@ -73,6 +74,10 @@ class MessageBuffer {
     }
 
    private:
+    friend class Channel;
+
+    bool carries_endpoint_from_pair(const Channel& channel) const;
+
     void adopt_handles(MessageBuffer& other) {
         m_handle_count = other.m_handle_count;
         for (size_t i = 0; i < m_handle_count; i++) { m_handles[i] = other.m_handles[i]; }
@@ -147,6 +152,8 @@ class Channel : public Object {
     Channel(ktl::ref<channel_state> state, uint32_t side);
 
    private:
+    friend class MessageBuffer;
+
     ktl::ref<channel_state> m_state;
     uint32_t m_side;
 };
