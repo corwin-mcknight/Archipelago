@@ -8,6 +8,12 @@ using namespace kernel::driver;
 void uart::init() {
     if (!uart_present()) { return; }  // bus unreachable; stay unhealthy so writes are dropped
     uint16_t divisor = uart_divisor();
+    // Wait for any bootloader-era transmission to finish first: the DW_apb_uart
+    // (jh7110) ignores LCR writes while a transfer is in flight, which would
+    // silently corrupt the DLAB/divisor sequence below.
+    for (uint32_t spins = 0; (uart_reg_read(5) & 0x40) == 0; spins++) {
+        if (spins >= TRANSMIT_SPIN_CAP) { break; }
+    }
     uart_reg_write(1, 0x00);                       // Disable all interrupts
     uart_reg_write(3, 0x80);                       // Enable DLAB (set baud rate divisor)
     uart_reg_write(0, (uint8_t)(divisor & 0xFF));  // Board-clock divisor (lo byte)
@@ -16,8 +22,14 @@ void uart::init() {
     uart_reg_write(2, 0xC7);                       // Enable FIFO, clear them, with 14-byte threshold
     uart_reg_write(4, 0x0B);                       // IRQs enabled, RTS/DSR set
     uart_reg_write(4, 0x1E);                       // Set in loopback mode, test the serial chip
-    uart_reg_write(0, 0xAE);                 // Test serial chip (send byte 0xAE and check if serial returns same byte)
+    uart_reg_write(0, 0xAE);  // Test serial chip (send byte 0xAE and check if serial returns same byte)
+    // The echo takes one character time to shift through real silicon; only
+    // emulators return it instantly.
+    for (uint32_t spins = 0; (uart_reg_read(5) & 1) == 0; spins++) {
+        if (spins >= TRANSMIT_SPIN_CAP) { break; }
+    }
     m_healthy = (uart_reg_read(0) == 0xAE);  // a broken/absent port fails the echo -- mark it dead
+    uart_reg_write(2, 0xC7);                 // Clear FIFOs again: drop anything the loopback test left behind
     uart_reg_write(4, 0x0F);
 }
 
