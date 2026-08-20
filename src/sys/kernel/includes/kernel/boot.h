@@ -55,6 +55,20 @@ struct boot_info {
     // protocol (Limine reads the firmware RTC). Zero when the protocol
     // supplied none; consumers then have no wall clock.
     int64_t boot_epoch_seconds;
+    // First framebuffer the boot protocol supplied, already mapped writable in the
+    // kernel half (the kernel page tables clone that mapping, so the pointer stays
+    // valid for the life of the system). Null when the protocol supplied none.
+    void* framebuffer;
+    uint64_t fb_width;
+    uint64_t fb_height;
+    uint64_t fb_pitch;  // bytes per row
+    uint16_t fb_bpp;    // bits per pixel
+    // Bit position of each colour channel's least-significant bit within a pixel,
+    // so a consumer can pack colours for this framebuffer's actual layout (BGR,
+    // RGB, ...) rather than assuming one. Meaningful only when framebuffer is set.
+    uint8_t fb_red_shift;
+    uint8_t fb_green_shift;
+    uint8_t fb_blue_shift;
     // CPUs reported by the boot protocol, densely indexed by list position.
     // Zero when the protocol supplied no CPU list. boot_cpu_index is the boot
     // CPU's position in that list, or SIZE_MAX if the list omits it; it is

@@ -1,5 +1,6 @@
 #include <kernel/arch.h>
 #include <kernel/boot.h>
+#include <kernel/console.h>
 #include <kernel/obj/handle_table.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
@@ -216,12 +217,21 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 }
 
 [[noreturn]] void late_boot(uint32_t boot_core_index) {
+    if (const boot_info& info = collect(); info.framebuffer != nullptr) {
+        g_log.info("fb: {0}x{1} bpp={2} pitch={3} at 0x{4:p}", info.fb_width, info.fb_height, info.fb_bpp,
+                   info.fb_pitch, (uintptr_t)info.framebuffer);
+    }
+
     kernel::obj::obj_init();
     g_log.info("Object subsystem initialized");
 
     kernel::platform::timestamp_calibrate();
     kernel::time::use_timestamp_clock();
     kernel::sched::init(boot_core_index);
+
+    // The scheduler is up, so the framebuffer console can spawn its painter thread; from here
+    // the log and the shell appear on the panel as well as the UART.
+    kernel::console::init(collect());
 
     kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");
 

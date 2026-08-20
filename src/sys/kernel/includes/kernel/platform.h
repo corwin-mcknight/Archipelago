@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // What the kernel needs from the board, as opposed to from the CPU.
@@ -53,5 +54,12 @@ void watchdog_init();
 /// Ask the firmware or board to reset the machine. Returns only if the board
 /// has no reset path, so callers must handle coming back.
 void reboot();
+
+/// Write the CPU data cache back to physical memory over [vaddr, vaddr+bytes),
+/// so a device that reads DRAM directly -- a non-coherent display or DMA engine
+/// -- sees the CPU's writes instead of stale memory. A no-op on cache-coherent
+/// machines (the QEMU targets). vaddr must lie in the physical map; the board
+/// implementation derives the physical line addresses from it.
+void dcache_clean_range(const void* vaddr, size_t bytes);
 
 }  // namespace kernel::platform

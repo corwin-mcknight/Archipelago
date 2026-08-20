@@ -38,6 +38,9 @@ lapic_tick_handler g_timer;
 // The PC console is COM1, reached by port I/O, so nothing needs to be mapped first.
 void console_init() { uart.init(); }
 
+// x86 DMA is cache-coherent, so devices see CPU writes with no flush.
+void dcache_clean_range(const void*, size_t) {}
+
 void timer_init() {
     // A dead PIT or LAPIC timer degrades to a frozen clock with a warning, matching
     // timestamp_calibrate's dead-timer policy: readers see time stuck at 0, boot continues.

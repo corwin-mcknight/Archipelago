@@ -46,6 +46,9 @@ uint64_t timestamp_hz() { return TIMEBASE_FREQ_HZ; }
 // The timebase is a fixed board constant, so there is nothing to measure.
 void timestamp_calibrate() {}
 
+// QEMU presents a cache-coherent machine, so DMA sees CPU writes with no flush.
+void dcache_clean_range(const void*, size_t) {}
+
 // virt has no watchdog device.
 void watchdog_init() {}
 

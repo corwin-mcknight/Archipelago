@@ -40,6 +40,10 @@ __attribute__((used,
                section(".limine_requests"))) static volatile struct limine_date_at_boot_request date_at_boot_request = {
     .id = LIMINE_DATE_AT_BOOT_REQUEST, .revision = 0, .response = nullptr};
 
+__attribute__((used,
+               section(".limine_requests"))) static volatile struct limine_framebuffer_request framebuffer_request = {
+    .id = LIMINE_FRAMEBUFFER_REQUEST, .revision = 0, .response = nullptr};
+
 #if defined(__riscv)
 // Pin the paging mode: the riscv64 paging code assumes a 3-level Sv39 walk and
 // a mode-8 satp, so Sv48/Sv57 would silently corrupt every table access. Sv39
@@ -188,6 +192,18 @@ const boot_info& collect() {
 
     if (date_at_boot_request.response != nullptr) {
         g_info.boot_epoch_seconds = date_at_boot_request.response->timestamp;
+    }
+
+    if (framebuffer_request.response != nullptr && framebuffer_request.response->framebuffer_count > 0) {
+        const auto* fb        = framebuffer_request.response->framebuffers[0];
+        g_info.framebuffer    = fb->address;
+        g_info.fb_width       = fb->width;
+        g_info.fb_height      = fb->height;
+        g_info.fb_pitch       = fb->pitch;
+        g_info.fb_bpp         = fb->bpp;
+        g_info.fb_red_shift   = fb->red_mask_shift;
+        g_info.fb_green_shift = fb->green_mask_shift;
+        g_info.fb_blue_shift  = fb->blue_mask_shift;
     }
 
 #if defined(__riscv)

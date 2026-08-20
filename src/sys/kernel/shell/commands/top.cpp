@@ -103,7 +103,7 @@ void render_tree(ShellOutput& out) {
             ktl::format::format_to_buffer_raw(task_name, sizeof(task_name), "task#{0}", task->id());
             tn = task_name;
         }
-        print_stats_row(out, owns_cur ? "▸" : " ", static_cast<uint64_t>(task->id()), tn, "-", aggregate(threads),
+        print_stats_row(out, owns_cur ? "*" : " ", static_cast<uint64_t>(task->id()), tn, "-", aggregate(threads),
                         total, hz);
         out.reset_style();
 
