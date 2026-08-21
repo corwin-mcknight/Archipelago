@@ -2,6 +2,7 @@
 
 #include "kernel/assert.h"
 #include "kernel/log.h"
+#include "kernel/platform.h"
 #include "vendor/limine.h"
 
 // The Limine boot protocol behind kernel::boot::collect(). Everything that knows
@@ -93,29 +94,46 @@ memory_kind classify(uint64_t limine_type) {
     }
 }
 
+size_t g_range_count = 0;
+
+void push_range(uint64_t base, uint64_t length, memory_kind kind) {
+    // Limine reports the memmap sorted by base, so contiguous same-kind entries merge
+    // into the previous range instead of costing an array slot.
+    if (g_range_count > 0 && g_ranges[g_range_count - 1].kind == kind &&
+        g_ranges[g_range_count - 1].base + g_ranges[g_range_count - 1].length == base) {
+        g_ranges[g_range_count - 1].length += length;
+        return;
+    }
+    if (g_range_count == MAX_MEMORY_RANGES) {
+        g_log.warn("boot: memmap exceeds {0} coalesced entries; ignoring the remainder", MAX_MEMORY_RANGES);
+        return;
+    }
+    g_ranges[g_range_count++] = {.base = base, .length = length, .kind = kind};
+}
+
 void translate_memmap() {
     if (memmap_request.response == nullptr) { return; }
 
-    size_t count = 0;
+    // Firmware can fence off DRAM it never offers to anyone (the JH7110's U-Boot and
+    // everything above its ram_top clamp), which reaches here as reclaimable. The part
+    // above the board's fence holds nothing of Limine's, so it goes straight to the
+    // page pool; the part below keeps the usual hands-off treatment.
+    uint64_t fence = platform::firmware_fenced_memory_base();
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
         const auto* entry = memmap_request.response->entries[i];
-        memory_kind kind  = classify(entry->type);
-        // Limine reports the memmap sorted by base, so contiguous same-kind entries merge
-        // into the previous range instead of costing an array slot.
-        if (count > 0 && g_ranges[count - 1].kind == kind &&
-            g_ranges[count - 1].base + g_ranges[count - 1].length == entry->base) {
-            g_ranges[count - 1].length += entry->length;
+        uint64_t end      = entry->base + entry->length;
+        if (entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE && fence != 0 && end > fence) {
+            uint64_t split = entry->base > fence ? entry->base : fence;
+            if (split > entry->base) { push_range(entry->base, split - entry->base, memory_kind::OTHER); }
+            push_range(split, end - split, memory_kind::USABLE);
+            g_log.info("boot: reclaiming {0} MiB of firmware-fenced memory at 0x{1:p}", (end - split) >> 20, split);
             continue;
         }
-        if (count == MAX_MEMORY_RANGES) {
-            g_log.warn("boot: memmap exceeds {0} coalesced entries; ignoring the remainder", MAX_MEMORY_RANGES);
-            break;
-        }
-        g_ranges[count++] = {.base = entry->base, .length = entry->length, .kind = kind};
+        push_range(entry->base, entry->length, classify(entry->type));
     }
 
     g_info.memory_map       = g_ranges;
-    g_info.memory_map_count = count;
+    g_info.memory_map_count = g_range_count;
 }
 
 // Limine's module strings and paths live in bootloader-reclaimable memory, which classify() sends

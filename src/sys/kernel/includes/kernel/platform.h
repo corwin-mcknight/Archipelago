@@ -74,6 +74,12 @@ void watchdog_arm();
 /// without a watchdog do nothing.
 void watchdog_init();
 
+/// Physical address above which memory the firmware reports as its own is
+/// really untouched DRAM it fenced off and never allocated from, so the boot
+/// code may hand it to the page pool. Zero on boards whose firmware map means
+/// what it says.
+uint64_t firmware_fenced_memory_base();
+
 /// Ask the firmware or board to reset the machine. Returns only if the board
 /// has no reset path, so callers must handle coming back.
 void reboot();

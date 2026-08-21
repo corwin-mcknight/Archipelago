@@ -52,6 +52,9 @@ uint64_t timestamp_hz() { return TIMEBASE_FREQ_HZ; }
 // The timebase is a fixed board constant, so there is nothing to measure.
 void timestamp_calibrate() {}
 
+// The firmware memory map is complete; nothing is fenced off.
+uint64_t firmware_fenced_memory_base() { return 0; }
+
 // QEMU presents a cache-coherent machine, so DMA sees CPU writes with no flush.
 void dcache_clean_range(const void*, size_t) {}
 

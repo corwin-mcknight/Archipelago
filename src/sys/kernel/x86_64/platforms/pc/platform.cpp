@@ -123,4 +123,7 @@ void watchdog_init() {}
 // every PC inherits.
 void reboot() { outb(0x64, 0xFE); }
 
+// The firmware memory map is complete; nothing is fenced off.
+uint64_t firmware_fenced_memory_base() { return 0; }
+
 }  // namespace kernel::platform

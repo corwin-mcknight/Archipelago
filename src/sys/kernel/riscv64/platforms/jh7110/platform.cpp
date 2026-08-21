@@ -42,6 +42,12 @@ void harness_exit(uint8_t) { reboot(); }
 
 uint64_t timestamp_hz() { return TIMEBASE_FREQ_HZ; }
 
+// The vendor U-Boot clamps ram_top to 4 GiB and marks the DRAM above it as EFI
+// boot-services data: never offered to EFI allocations (so Limine put nothing
+// there), but also never reported as free. On the 4 GiB board that is the top
+// 1 GiB. Flashing a fixed U-Boot is not an option (see docs/Kernel/JH7110 Board.md).
+uint64_t firmware_fenced_memory_base() { return 1ull << 32; }
+
 // The timebase is a fixed board constant, so there is nothing to measure.
 void timestamp_calibrate() {}
 
