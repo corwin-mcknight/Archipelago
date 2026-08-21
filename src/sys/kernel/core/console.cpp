@@ -106,6 +106,7 @@ struct term {
     cell* grid;       // logical contents
     cell* shadow;     // what is currently on the panel; the diff target
     bool dirty;       // grid changed since the last flush; gates the diff so an idle console is free
+    bool hold;        // inside CSI ?2026 h..l (synchronized output): defer flushing until the frame ends
 
     // pen
     uint8_t fg, bg;
@@ -260,7 +261,10 @@ void do_sgr() {
 }
 
 void dispatch(char final) {
-    if (t.priv != 0) { return; }  // DEC private modes (?25l, ?1049h, ...) -- swallow
+    if (t.priv != 0) {  // DEC private modes: only synchronized output (?2026) matters to us; swallow the rest
+        if (t.priv == '?' && param(0, 0) == 2026 && (final == 'h' || final == 'l')) { t.hold = (final == 'h'); }
+        return;
+    }
     switch (final) {
         case 'H':
         case 'f': {
@@ -416,7 +420,8 @@ constexpr uint64_t IDLE_TICKS  = 8;
         // Flush when the ring drains (n < batch) or a flood crosses the safety cap, but only if
         // something changed -- gating on the dirty flag keeps an idle console off the CPU entirely
         // (no full-grid diff when nothing was written).
-        if (t.dirty && (n < sizeof(batch) || since_flush >= FLUSH_BYTES)) {
+        bool hold = t.hold && since_flush < FLUSH_BYTES;  // the flood cap also bounds a frame left open
+        if (t.dirty && !hold && (n < sizeof(batch) || since_flush >= FLUSH_BYTES)) {
             flush();
             t.dirty     = false;
             since_flush = 0;
@@ -472,7 +477,7 @@ void init(const kernel::boot::boot_info& info) {
     t.shadow    = shadow;
     t.fg        = DEFAULT_FG;
     t.bg        = DEFAULT_BG;
-    t.bold = t.reverse = false;
+    t.bold = t.reverse = t.hold = false;
     t.esc = t.nparams = t.cur = t.priv = 0;
     t.have_cur                         = false;
 

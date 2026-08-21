@@ -127,17 +127,20 @@ void cmd_top(ShellOutput& out) {
         while (uart.received_data() != 0) {
             char c = uart.read();
             if (c == 'x' || c == 'q') {
-                out.write("\x1b[0m\n");
+                out.write("\x1b[?2026l\x1b[0m\n");
                 return;
             }
         }
-        out.write("\x1b[H\x1b[2J");
+        // Synchronized output (CSI ?2026): the framebuffer console and modern terminals hold the
+        // repaint until the frame is complete, so the clear and the rows land together.
+        out.write("\x1b[?2026h\x1b[H\x1b[2J");
         out.sgr(C_TITLE);
         out.write("top");
         out.sgr(C_DIM);
         out.write("  --  press x to exit\n\n");
         out.reset_style();
         render_tree(out);
+        out.write("\x1b[?2026l");
         kernel::sched::sleep_ticks(500);
     }
 }
