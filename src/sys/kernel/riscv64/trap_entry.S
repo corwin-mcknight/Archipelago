@@ -1,15 +1,17 @@
 // Supervisor trap entry: build a register_frame_t on the kernel stack and hand
 // it to riscv_trap_handler. Byte offsets must match the field order in
-// includes/kernel/riscv/registers.h exactly. sscratch is zero in supervisor
-// mode and holds the current kernel stack top while user mode is running.
+// includes/kernel/riscv/registers.h exactly. tp addresses the hart's cpu_core
+// (includes/kernel/riscv/cpu.h: kstack_top at 0, user_sp at 8) in supervisor
+// mode; sscratch is zero in supervisor mode and parks that pointer while user
+// mode is running, so the entry swaps it back into tp.
 
 .section .text
 .global riscv_trap_entry
 .align 2
 riscv_trap_entry:
-    csrrw sp, sscratch, sp
-    bnez sp, .Lfrom_user
-    csrrw sp, sscratch, sp
+    csrrw tp, sscratch, tp
+    bnez tp, .Lfrom_user
+    csrrw tp, sscratch, tp
     // Check the tripwire before touching memory: a stack overflow re-faults on the
     // first frame store below, which would recurse here forever. t0 is stashed
     // register-only in sscratch (zero in supervisor mode) across the check.
@@ -23,20 +25,24 @@ riscv_trap_entry:
     sd t1, 40(sp)
     addi t1, sp, 288
     sd t1, 8(sp)
+    sd tp, 24(sp)
     j .Lsave_frame
 
 .Lfrom_user:
+    // tp = this hart's cpu_core, sscratch = the user tp.
+    sd sp, 8(tp)
+    ld sp, 0(tp)
     addi sp, sp, -288
     sd t0, 32(sp)
     sd t1, 40(sp)
-    csrr t0, sscratch
+    ld t0, 8(tp)
     sd t0, 8(sp)
-    csrw sscratch, zero
+    csrrw t0, sscratch, zero
+    sd t0, 24(sp)
 
 .Lsave_frame:
     sd ra, 0(sp)
     sd gp, 16(sp)
-    sd tp, 24(sp)
     sd t2, 48(sp)
     sd s0, 56(sp)
     sd s1, 64(sp)
@@ -86,8 +92,10 @@ riscv_trap_entry:
     csrw sstatus, t0
     andi t0, t0, 256
     bnez t0, .Lrestore_frame
+    // Returning to user: publish this stack as the next trap's landing and park tp in sscratch.
     addi t0, sp, 288
-    csrw sscratch, t0
+    sd t0, 0(tp)
+    csrw sscratch, tp
 
 .Lrestore_frame:
     ld ra, 0(sp)

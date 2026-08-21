@@ -42,10 +42,6 @@ bool try_resolve_page_fault(register_frame_t* regs) {
 
 }  // namespace
 
-// Low-water mark for the trap entry's stack-overflow backstop, published per running thread by
-// the scheduler on every switch; the definition lives in core/sched/scheduler.cpp.
-extern "C" uintptr_t g_kstack_floor;
-
 namespace kernel::riscv {
 
 void trap_init() {
@@ -57,17 +53,10 @@ void trap_init() {
     // scheduler's own state switching -- traps as an illegal instruction. Setting Initial (0b01)
     // once per hart is enough: hardware only ever promotes FS toward Dirty, every other sstatus
     // write in the kernel is bit-scoped or round-trips a live value, and the trap return path
-    // restores the frame's saved sstatus, so no path can turn FS back Off. It lives here so any
-    // future secondary hart inherits FP enablement along with its trap vector.
+    // restores the frame's saved sstatus, so no path can turn FS back Off. It lives here so every
+    // hart inherits FP enablement along with its trap vector.
     constexpr uint64_t SSTATUS_FS_INITIAL = 1ull << 13;
     asm volatile("csrs sstatus, %0" ::"r"(SSTATUS_FS_INITIAL));
-
-    // Limine guarantees at least 64 KiB of boot stack below the entry sp;
-    // trap_init runs near the top of it, so 48 KiB down is legitimately
-    // reachable and the last 16 KiB is the overflow tripwire.
-    uintptr_t sp;
-    asm volatile("mv %0, sp" : "=r"(sp));
-    g_kstack_floor = sp - 48 * 1024;
 }
 
 }  // namespace kernel::riscv

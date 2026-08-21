@@ -760,7 +760,7 @@ def machine_args(arch, iso, firmware=None, exit_device: bool = False) -> List[st
             raise HarnessError("riscv64 requires --firmware (EDK2 RISCV_VIRT_CODE.fd)")
         vars_fd = str(firmware).replace("_CODE.fd", "_VARS.fd")
         return [
-            "-M", "virt",
+            "-M", "virt", "-smp", "4",
             "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
             "-drive", f"if=pflash,unit=1,format=raw,snapshot=on,file={vars_fd}",
             "-device", "virtio-scsi-pci,id=scsi0",

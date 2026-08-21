@@ -1,6 +1,7 @@
 #include "kernel/arch.h"
 
 #include "kernel/panic.h"
+#include "kernel/riscv/cpu.h"
 
 namespace {
 // sstatus.SIE: supervisor interrupt enable.
@@ -14,29 +15,30 @@ constexpr uint64_t SSTATUS_SIE = 1ull << 1;
 
 namespace kernel::arch {
 
-// The trap return path republishes the frame's kernel stack top in sscratch.
+// The trap return path republishes the frame's kernel stack top in the hart's cpu_core.
 void set_kernel_stack(uintptr_t) {}
 
 [[noreturn]] void enter_user(uintptr_t entry, uintptr_t user_sp, uintptr_t kstack_top, uintptr_t ipc_base,
                              uintptr_t ipc_size) {
     disable_interrupts();
-    constexpr uint64_t SSTATUS_SPP  = 1ull << 8;
-    constexpr uint64_t SSTATUS_SPIE = 1ull << 5;
+    riscv::current_core().kstack_top = kstack_top;
+    constexpr uint64_t SSTATUS_SPP   = 1ull << 8;
+    constexpr uint64_t SSTATUS_SPIE  = 1ull << 5;
     // a0/a1 carry the IPC buffer, matching the argument registers so startup code reads them as
     // ordinary function arguments. Everything outside that ABI is zeroed so no kernel value stays
     // readable in a register; the zeroing follows the last use of every operand, and the operands
-    // are read-write because it overwrites them. gp and tp are safe to clear: the kernel is built
-    // -mcmodel=medany and the trap path restores both from the frame rather than assuming a value.
+    // are read-write because it overwrites them. gp is safe to clear because the kernel is built
+    // -mcmodel=medany; tp is parked in sscratch, where the trap entry swaps it back in.
     asm volatile(
-        "csrw sscratch, %0\n"
-        "li t0, %5\n"
+        "csrw sscratch, tp\n"
+        "li t0, %4\n"
         "csrc sstatus, t0\n"
-        "li t0, %6\n"
+        "li t0, %5\n"
         "csrs sstatus, t0\n"
-        "csrw sepc, %1\n"
-        "mv sp, %2\n"
-        "mv a0, %3\n"
-        "mv a1, %4\n"
+        "csrw sepc, %0\n"
+        "mv sp, %1\n"
+        "mv a0, %2\n"
+        "mv a1, %3\n"
         "li ra, 0\n"
         "li gp, 0\n"
         "li tp, 0\n"
@@ -66,7 +68,7 @@ void set_kernel_stack(uintptr_t) {}
         "li a6, 0\n"
         "li a7, 0\n"
         "sret\n"
-        : "+r"(kstack_top), "+r"(entry), "+r"(user_sp), "+r"(ipc_base), "+r"(ipc_size)
+        : "+r"(entry), "+r"(user_sp), "+r"(ipc_base), "+r"(ipc_size)
         : "i"(SSTATUS_SPP), "i"(SSTATUS_SPIE)
         : "ra", "gp", "tp", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
           "s8", "s9", "s10", "s11", "a0", "a1", "memory");
