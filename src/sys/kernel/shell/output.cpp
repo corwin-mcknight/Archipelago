@@ -6,6 +6,7 @@
 namespace kernel::shell {
 
 void ShellOutput::write(const char* s) {
+    kernel::console::line_guard line;
     if (sink_ != nullptr) {
         for (const char* p = s; *p != '\0'; ++p) { sink_(*p, sink_ctx_); }
         return;
@@ -14,6 +15,7 @@ void ShellOutput::write(const char* s) {
 }
 
 void ShellOutput::write_char(char c) {
+    kernel::console::line_guard line;
     if (sink_ != nullptr) {
         sink_(c, sink_ctx_);
         return;

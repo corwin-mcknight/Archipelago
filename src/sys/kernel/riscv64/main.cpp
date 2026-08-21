@@ -71,6 +71,7 @@ extern "C" [[noreturn]] void _start(void) {
     kernel::riscv::trap_init();
     arm_boot_stack_tripwire();
     g_interrupt_manager.initialize();
+    kernel::riscv::ipi_init();
     kernel::platform::interrupt_init();
     kernel::arch::enable_interrupts();
     g_log.debug("cpu{0}: Interrupts Enabled", bsp_index);

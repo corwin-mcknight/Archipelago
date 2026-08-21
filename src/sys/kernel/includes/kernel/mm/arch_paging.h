@@ -44,6 +44,9 @@ vm_paddr_t current_root();
 void set_root(vm_paddr_t root);
 // Invalidate one page's translation if root is live on this CPU.
 void flush_tlb_page(vm_paddr_t root, uintptr_t vaddr);
+// Invalidate one page's translation on every core in core_mask (bit n = dense core n), none of
+// which is the caller. The caller established that the space is live on each of them.
+void shootdown_tlb_page(uint64_t core_mask, uintptr_t vaddr);
 // Post-install flush for a brand-new leaf: pre-Svvptc riscv64 may cache the
 // failed translation that faulted us here; a no-op on x86_64.
 void flush_new_leaf(vm_paddr_t root, uintptr_t vaddr);

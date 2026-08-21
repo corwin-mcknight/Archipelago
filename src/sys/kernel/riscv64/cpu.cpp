@@ -6,10 +6,13 @@
 
 #include "kernel/arch.h"
 #include "kernel/config.h"
+#include "kernel/interrupt.h"
 #include "kernel/log.h"
 #include "kernel/mm/vm_aspace.h"
+#include "kernel/panic.h"
 #include "kernel/platform.h"
 #include "kernel/riscv/cpu.h"
+#include "kernel/riscv/sbi.h"
 #include "kernel/sched/scheduler.h"
 #include "kernel/synchronization/execution_context.h"
 
@@ -25,6 +28,44 @@ kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 size_t kernel::arch::current_core_index() { return kernel::riscv::current_core().index; }
 void kernel::arch::set_kstack_floor(uintptr_t floor) { kernel::riscv::current_core().kstack_floor = floor; }
 uintptr_t kernel::arch::kstack_floor() { return kernel::riscv::current_core().kstack_floor; }
+
+namespace {
+constexpr unsigned SUPERVISOR_SOFTWARE_CAUSE = 1;
+constexpr uint64_t SIP_SSIP                  = 1ull << 1;
+ktl::atomic<uint64_t> g_ipi_count{0};
+
+// The reschedule IPI carries no payload: it asks the hart to revisit the run queue on its way
+// out of the trap. Requesting it here rather than relying on the idle loop closes the window
+// between idle finding the queue empty and entering wfi.
+bool ipi_handler(register_frame_t*) {
+    asm volatile("csrc sip, %0" ::"r"(SIP_SSIP));
+    g_ipi_count.fetch_add(1, ktl::memory_order::relaxed);
+    kernel::synchronization::request_preemption();
+    return true;
+}
+
+// SBI hart masks are passed with base 0, so a hartid must fit one word.
+uint64_t hart_bit(size_t core_index) {
+    uint64_t hartid = kernel::boot::cpu_hw_id(core_index);
+    if (hartid >= 64) { panic("sbi: hartid does not fit a hart mask"); }
+    return 1ull << hartid;
+}
+
+void ipi_enable_local() { asm volatile("csrs sie, %0" ::"r"(SIP_SSIP)); }
+}  // namespace
+
+void kernel::riscv::ipi_init() {
+    g_interrupt_manager.register_interrupt(SUPERVISOR_SOFTWARE_CAUSE, ipi_handler, 0);
+    ipi_enable_local();
+}
+
+uint64_t kernel::riscv::ipi_count() { return g_ipi_count.load(ktl::memory_order::relaxed); }
+
+void kernel::arch::send_reschedule_ipi(size_t core_index) {
+    if (kernel::riscv::sbi::send_ipi(hart_bit(core_index)).error != 0) {
+        g_log.warn("ipi: SBI send_ipi to cpu{0} failed", core_index);
+    }
+}
 
 namespace {
 
@@ -45,6 +86,7 @@ size_t started_core_count() {
     kernel::mm::kernel_aspace().activate();
     kernel::synchronization::init_execution_context(core_index);
     kernel::riscv::trap_init();
+    ipi_enable_local();
     uintptr_t sp;
     asm volatile("mv %0, sp" : "=r"(sp));
     kernel::arch::set_kstack_floor(sp - 48 * 1024);

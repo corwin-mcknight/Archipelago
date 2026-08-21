@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #include <ktl/string_view>
 
 namespace kernel::boot { struct boot_info; }
@@ -12,6 +14,20 @@ namespace kernel::console {
 // paint. The log and the shell write through here so both land on the panel.
 void write_byte(char c);
 void write_string(ktl::string_view s);
+
+// Holds the console for one line so writers on different cores cannot splice bytes into each
+// other's output. Interrupts are off while held; re-entrant on the owning core, so a panic raised
+// mid-line can still report.
+class line_guard {
+   public:
+    line_guard();
+    ~line_guard();
+    line_guard(const line_guard&)            = delete;
+    line_guard& operator=(const line_guard&) = delete;
+
+   private:
+    uint64_t m_flags;
+};
 
 // Bring up the framebuffer text console and start the console_framebuffer
 // thread that drains queued bytes onto the display. A no-op unless the boot

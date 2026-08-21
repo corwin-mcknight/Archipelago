@@ -6,8 +6,8 @@
 ## Second Architecture (riscv64)
 - Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
   CLINT software-interrupt routing remains future work.
-- Secondary harts schedule kernel threads (shared run queue, per-hart SBI tick) but wake only on their own tick: add an SBI IPI
-  so a newly runnable thread reaches an idle hart immediately, and TLB shootdown so user threads can leave the boot hart.
+- x86_64 APs still park: give them the same scheduler entry as riscv64 harts (per-CPU kstack floor, LAPIC timer tick,
+  reschedule IPI, invlpg shootdown) and run the x86_64 test lane with -smp.
 - Grow the riscv64/tests/ suite beyond the JH7110 UART-to-PLIC claim/complete test (more sfence/TLB behavior and
   multi-source/per-hart external-interrupt coverage).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.

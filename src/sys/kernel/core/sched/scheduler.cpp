@@ -18,26 +18,20 @@ namespace kernel::sched {
 
 kernel::synchronization::spinlock g_sched_lock;
 cpu_sched g_cpus[CONFIG_MAX_CORES];
-uint32_t g_boot_core = 0;
 
 cpu_sched& cur_cpu() { return g_cpus[kernel::arch::current_core_index()]; }
 cpu_sched& cpu_at(size_t index) { return g_cpus[index]; }
-bool on_boot_core() { return kernel::arch::current_core_index() == g_boot_core; }
+// From the boot protocol rather than init(): the boot core's timer ticks (and advances kernel
+// time) before the scheduler exists.
+bool on_boot_core() { return kernel::arch::current_core_index() == kernel::boot::collect().boot_cpu_index; }
 
 namespace {
 
 bool g_started = false;
 
-// Two FIFOs under g_sched_lock. Threads of a task with an address space run only on the boot core
-// until cross-core TLB shootdown exists; everything else runs wherever a core picks it up.
+// One FIFO under g_sched_lock; any core picks from it.
 // ponytail: one shared queue, per-core queues if the lock shows up in profiles.
 ktl::deque<ktl::ref<Thread>> g_run_queue;
-ktl::deque<ktl::ref<Thread>> g_pinned_queue;
-
-bool pinned(Thread& thread) {
-    auto* task = static_cast<Task*>(thread.owner().get());
-    return task != nullptr && task->aspace() != nullptr;
-}
 
 // Pop the first thread whose previous core has finished switching it out; one still on-cpu rotates
 // to the back so no core ever waits on another inside the lock.
@@ -51,15 +45,23 @@ ktl::maybe<ktl::ref<Thread>> pop_locked(ktl::deque<ktl::ref<Thread>>& queue) {
     return ktl::maybe<ktl::ref<Thread>>();
 }
 
-ktl::maybe<ktl::ref<Thread>> pick_next_locked() {
-    if (on_boot_core()) {
-        auto thread = pop_locked(g_pinned_queue);
-        if (thread.has_value()) { return thread; }
-    }
-    return pop_locked(g_run_queue);
-}
+ktl::maybe<ktl::ref<Thread>> pick_next_locked() { return pop_locked(g_run_queue); }
 
-bool has_runnable_locked() { return g_run_queue.size() != 0 || (on_boot_core() && g_pinned_queue.size() != 0); }
+bool has_runnable_locked() { return g_run_queue.size() != 0; }
+
+// A core parked in wait_for_interrupt() would otherwise notice new work only at its next tick. An
+// idle pusher (the tick waking a sleeper) picks the thread up itself at interrupt exit, so it
+// kicks nobody.
+void kick_idle_core_locked() {
+    size_t self = kernel::arch::current_core_index();
+    if (g_cpus[self].current.get() == g_cpus[self].idle.get()) { return; }
+    for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
+        auto& c = g_cpus[i];
+        if (i == self || !c.current || c.current.get() != c.idle.get()) { continue; }
+        kernel::arch::send_reschedule_ipi(i);
+        return;
+    }
+}
 
 // Interrupts must be disabled and no lock held. Returns when this thread is next switched in.
 void switch_to(ktl::ref<Thread> next, switch_reason reason) {
@@ -209,7 +211,7 @@ ktl::result<void> ensure_tick_capacity() {
     // spawn and a reap race the counter. The reservations only need to be >= the worst case.
     size_t target = live + 2;
 
-    bool ok       = grow_under_sched_lock(g_run_queue, target) && grow_under_sched_lock(g_pinned_queue, target);
+    bool ok       = grow_under_sched_lock(g_run_queue, target);
     if (ok) { ok = sleepers_reserve(target); }
     if (ok) { ok = zombies_reserve(target); }
     if (!ok) {
@@ -222,11 +224,12 @@ ktl::result<void> ensure_tick_capacity() {
 void note_thread_reaped() { g_live_threads.fetch_sub(1, ktl::memory_order::relaxed); }
 
 bool push_runnable_locked(ktl::ref<Thread> thread) {
-    auto& queue = pinned(*thread) ? g_pinned_queue : g_run_queue;
-    return queue.push_back(ktl::move(thread));
+    if (!g_run_queue.push_back(ktl::move(thread))) { return false; }
+    kick_idle_core_locked();
+    return true;
 }
 
-size_t run_queue_depth_locked() { return g_run_queue.size() + g_pinned_queue.size(); }
+size_t run_queue_depth_locked() { return g_run_queue.size(); }
 
 void make_ready_locked(ktl::ref<Thread> thread) {
     assert(thread->state() == thread_state::BLOCKED, "make_ready: thread is not blocked");
@@ -264,17 +267,13 @@ void yield() {
     ktl::ref<Thread> next;
     {
         sched_guard guard(g_sched_lock);
-        auto& c     = cur_cpu();
+        auto& c = cur_cpu();
+        if (c.current.get() != c.idle.get()) { c.current->stats().yields += 1; }
+        // Nothing else runnable: keep going. Bouncing through idle would requeue this thread, kick
+        // another core for it, and switch twice to land back here.
         auto picked = pick_next_locked();
-        if (!picked.has_value() && c.current.get() != c.idle.get()) {
-            // Queue empty: hand off to idle. The boot context runs as the idle thread and is never
-            // re-queued after a tick preemption, so a cooperatively-yielding thread would
-            // otherwise starve it forever.
-            picked = c.idle;
-        }
         if (picked.has_value()) {
             if (c.current.get() != c.idle.get()) {
-                c.current->stats().yields += 1;
                 c.current->set_state(thread_state::READY);
                 c.current->set_ready_ts(kernel::arch::timestamp());
                 bool ok = push_runnable_locked(c.current);
@@ -371,7 +370,7 @@ void service_pending_preemption() {
 }
 
 void init(uint32_t boot_core_index) {
-    g_boot_core  = boot_core_index;
+    assert(boot_core_index == kernel::boot::collect().boot_cpu_index, "sched: init on a non-boot core");
     size_t cores = kernel::boot::collect().cpu_count;
     if (cores > CONFIG_MAX_CORES) { cores = CONFIG_MAX_CORES; }
     for (uint32_t i = 0; i < cores; i++) { create_idle(i); }

@@ -27,6 +27,7 @@ void kernel::system_log::flush() {
     // interrupt-context) flushes never block. The drain emits READY slots in sequence order and
     // stops at the first in-progress slot.
     m_ring.drain([this](const log_message& message) {
+        kernel::console::line_guard line;
         const int clamped_level = ktl::clamp((int)message.level(), 0, (int)ktl::size(log_level_data) - 1);
         char status             = log_level_data[clamped_level].status;
         time_ns_t timestamp     = kernel::time::ktime_to_ns(message.timestamp);

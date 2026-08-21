@@ -1,3 +1,4 @@
+#include <kernel/arch.h>
 #include <kernel/boot.h>
 #include <kernel/console.h>
 #include <kernel/data/font_unscii.h>
@@ -434,6 +435,30 @@ constexpr uint64_t IDLE_TICKS  = 8;
 }
 
 }  // namespace
+
+namespace {
+constexpr size_t NO_OWNER    = SIZE_MAX;
+volatile size_t g_line_owner = NO_OWNER;
+size_t g_line_depth          = 0;
+}  // namespace
+
+line_guard::line_guard() : m_flags(kernel::arch::save_and_disable_interrupts()) {
+    size_t self = kernel::arch::current_core_index();
+    if (__atomic_load_n(&g_line_owner, __ATOMIC_RELAXED) == self) {
+        ++g_line_depth;
+        return;
+    }
+    size_t expected = NO_OWNER;
+    while (!__atomic_compare_exchange_n(&g_line_owner, &expected, self, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        expected = NO_OWNER;
+    }
+    g_line_depth = 1;
+}
+
+line_guard::~line_guard() {
+    if (--g_line_depth == 0) { __atomic_store_n(&g_line_owner, NO_OWNER, __ATOMIC_RELEASE); }
+    kernel::arch::restore_interrupts(m_flags);
+}
 
 void write_byte(char c) {
     uart.write_byte(c);

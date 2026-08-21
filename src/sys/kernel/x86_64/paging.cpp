@@ -70,8 +70,7 @@ vm_paddr_t current_root() {
 
 void set_root(vm_paddr_t root) { asm volatile("mov %0, %%cr3" ::"r"(root) : "memory"); }
 
-// Invalidate the TLB entry for vaddr if this address space is live on this
-// CPU. Cross-CPU TLB shootdown is future work; only one CPU is active today.
+// Invalidate the TLB entry for vaddr if this address space is live on this CPU.
 void flush_tlb_page(vm_paddr_t root, uintptr_t vaddr) {
     if (current_root() != (root & pte::ADDR_MASK)) { return; }
     asm volatile("invlpg (%0)" ::"r"(vaddr) : "memory");
@@ -80,5 +79,8 @@ void flush_tlb_page(vm_paddr_t root, uintptr_t vaddr) {
 // x86_64 never caches failed translations, so a freshly installed leaf needs
 // no flush.
 void flush_new_leaf(vm_paddr_t, uintptr_t) {}
+
+// The APs park rather than schedule, so no other core ever has a user space live.
+void shootdown_tlb_page(uint64_t, uintptr_t) {}
 
 }  // namespace kernel::mm::arch

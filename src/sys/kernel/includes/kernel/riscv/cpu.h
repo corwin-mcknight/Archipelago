@@ -32,6 +32,11 @@ inline cpu_core& current_core() {
 // Point tp at this hart's entry; must run before anything consults the execution context.
 inline void set_current_core(cpu_core& core) { asm volatile("mv tp, %0" ::"r"(&core)); }
 
+// Install the reschedule-IPI handler and enable it on the boot hart; secondary harts enable it in
+// their own entry. ipi_count() is the number of IPIs any hart has taken.
+void ipi_init();
+uint64_t ipi_count();
+
 }  // namespace riscv
 }  // namespace kernel
 

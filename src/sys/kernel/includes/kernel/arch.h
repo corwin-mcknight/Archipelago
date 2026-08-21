@@ -34,6 +34,10 @@ uintptr_t active_translation_root();
 /// Halt until the next interrupt (hlt / wfi). Call with interrupts enabled.
 void wait_for_interrupt();
 
+/// Interrupt core `core_index` so it leaves wait_for_interrupt() and revisits the run queue. The
+/// receiving side needs no handler logic beyond acknowledging the interrupt.
+void send_reschedule_ipi(size_t core_index);
+
 /// Stack-overflow tripwire for the calling core: the trap entry faults on any kernel sp below
 /// it. The scheduler publishes the running thread's floor on every switch; zero disables it.
 void set_kstack_floor(uintptr_t floor);

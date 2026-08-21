@@ -18,6 +18,8 @@ kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 extern "C" uintptr_t g_kstack_floor = 0;
 
 void kernel::arch::set_kstack_floor(uintptr_t floor) { g_kstack_floor = floor; }
+// The APs park rather than schedule, so there is never another core to interrupt.
+void kernel::arch::send_reschedule_ipi(size_t) {}
 uintptr_t kernel::arch::kstack_floor() { return g_kstack_floor; }
 
 [[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id);  // x86_64/main.cpp

@@ -16,6 +16,17 @@ namespace {
 // The address space active on each core. The fault handler resolves against the calling core's.
 vm_aspace* g_active_space[CONFIG_MAX_CORES];
 
+// Other cores on which `space` is live right now. A core that activates it afterwards loads the
+// tables fresh (activate() flushes), so a stale entry can only sit on a core that already had it.
+uint64_t remote_cores_with(const vm_aspace* space) {
+    size_t self   = kernel::arch::current_core_index();
+    uint64_t mask = 0;
+    for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
+        if (i != self && g_active_space[i] == space) { mask |= 1ull << i; }
+    }
+    return mask;
+}
+
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
 constexpr size_t level_index(uintptr_t vaddr, int level) { return (vaddr >> (arch::VA_BITS - 9 - 9 * level)) & 0x1FF; }
@@ -220,6 +231,8 @@ bool vm_aspace::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_c
 
     *leaf = arch::make_leaf(paddr, flags);
     arch::flush_new_leaf(m_arch.root_phys, vaddr);
+    // Pre-Svvptc harts may have cached the failed translation that preceded this leaf.
+    if (uint64_t remote = remote_cores_with(this)) { arch::shootdown_tlb_page(remote, vaddr); }
     return true;
 }
 
@@ -256,6 +269,7 @@ ktl::maybe<vm_paddr_t> vm_aspace::unmap_page(uintptr_t vaddr) {
     vm_paddr_t paddr = arch::pte_addr(*leaf);
     *leaf            = 0;
     arch::flush_tlb_page(m_arch.root_phys, vaddr);
+    if (uint64_t remote = remote_cores_with(this)) { arch::shootdown_tlb_page(remote, vaddr); }
     return paddr;
 }
 

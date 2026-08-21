@@ -5,6 +5,7 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/arch.h>
+#include <kernel/console.h>
 #include <kernel/drivers/uart.h>
 #include <kernel/json_escape.h>
 
@@ -23,16 +24,13 @@ class ShellOutput {
     template <typename... Args> void print(const char* fmt, const Args&... args) {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
+        // Lines must reach the wire unspliced: a log write from interrupt context or from another
+        // core landing mid-line corrupts the harness JSON stream.
+        kernel::console::line_guard line;
         if (protocol_mode_) {
-            // Protocol lines must reach the wire unspliced: a log write from interrupt context
-            // (or from another thread after a preemption) landing mid-line corrupts the harness
-            // JSON stream. Interrupts stay off for the whole line; protocol mode only runs under
-            // QEMU, whose virtual UART drains fast enough that the window is microseconds.
-            uint64_t flags = kernel::arch::save_and_disable_interrupts();
             write("@@HARNESS {\"event\":\"result\",\"text\":\"");
             write_json_escaped(buffer.c_str());
             write("\"}\n");
-            kernel::arch::restore_interrupts(flags);
         } else {
             write(buffer.c_str());
         }
@@ -43,12 +41,10 @@ class ShellOutput {
     template <typename... Args> void event(const char* fmt, const Args&... args) {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-        // Same anti-splice guard as print(); see the comment there.
-        uint64_t flags = kernel::arch::save_and_disable_interrupts();
+        kernel::console::line_guard line;
         write("@@HARNESS ");
         write(buffer.c_str());
         write("\n");
-        kernel::arch::restore_interrupts(flags);
     }
 
     void write(const char* s);

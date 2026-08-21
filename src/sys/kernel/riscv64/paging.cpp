@@ -1,3 +1,7 @@
+#include <kernel/boot.h>
+#include <kernel/panic.h>
+#include <kernel/riscv/sbi.h>
+
 #include "kernel/mm/arch_paging.h"
 
 // riscv64 (Sv39) PTE codec and MMU primitives behind the shared page-walk
@@ -92,8 +96,7 @@ void set_root(vm_paddr_t root) {
     asm volatile("csrw satp, %0\n\tsfence.vma zero, zero" ::"r"(satp) : "memory");
 }
 
-// Invalidate the TLB entry for vaddr if this address space is live on this
-// CPU. Cross-CPU TLB shootdown is future work; only one CPU is active today.
+// Invalidate the TLB entry for vaddr if this address space is live on this CPU.
 void flush_tlb_page(vm_paddr_t root, uintptr_t vaddr) {
     if (current_root() != root) { return; }
     asm volatile("sfence.vma %0, zero" ::"r"(vaddr) : "memory");
@@ -104,5 +107,20 @@ void flush_tlb_page(vm_paddr_t root, uintptr_t vaddr) {
 // re-fault on the now-present page. QEMU doesn't cache invalid entries, so
 // only real hardware sees this.
 void flush_new_leaf(vm_paddr_t root, uintptr_t vaddr) { flush_tlb_page(root, vaddr); }
+
+// SBI RFENCE runs the sfence.vma on the named harts and returns once they have executed it, so
+// the caller's unmap is complete everywhere on return.
+void shootdown_tlb_page(uint64_t core_mask, uintptr_t vaddr) {
+    uint64_t hart_mask = 0;
+    for (size_t core = 0; core_mask != 0; core++, core_mask >>= 1) {
+        if (!(core_mask & 1)) { continue; }
+        uint64_t hartid = kernel::boot::cpu_hw_id(core);
+        if (hartid >= 64) { panic("sbi: hartid does not fit a hart mask"); }
+        hart_mask |= 1ull << hartid;
+    }
+    if (kernel::riscv::sbi::remote_sfence_vma(hart_mask, vaddr, 4096).error != 0) {
+        panic("tlb: SBI RFENCE remote_sfence_vma failed");
+    }
+}
 
 }  // namespace kernel::mm::arch
