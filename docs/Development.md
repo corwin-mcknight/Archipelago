@@ -49,7 +49,7 @@ clang-format -i <file>  # Format a specific file
 - `UPPER_SNAKE_CASE` for constants, macros, enum values.
 - No exceptions, no RTTI, no standard library -- use [[KTL]] equivalents.
 - Strings are opaque UTF-8 byte sequences. Never reject or strip bytes >= 0x80, never apply per-byte transformations that assume ASCII (case folding, character classes), and never split a multibyte sequence when truncating or editing. Only code that measures or edits text needs codepoint awareness; use the `<ktl/utf8>` helpers. Codepoints approximate display columns -- double-cell characters (CJK, emoji) are out of scope.
-- Comment only non-obvious behavior. The code should be self-documenting.
+- Comment only non-obvious behavior. The code should be self-documenting; a comment earns its place by explaining hidden intent, an edge case, a mathematical constraint, or an API requirement, in one tight line. Never write a comment that justifies an edit or a symbol's existence -- that belongs in the commit message.
 - Use `nullptr`, `constexpr`, `const` appropriately.
 - Prefer composition over inheritance.
 
@@ -89,6 +89,3 @@ The devcontainer mounts three named volumes so state survives container rebuilds
 | --------------------- | --------------------------------- | ------------------------------------ |
 | `vscode-extensions`   | `/root/.vscode-server/extensions` | Installed VS Code extensions         |
 | `vscode-server-data`  | `/root/.vscode-server/data`       | VS Code server state                 |
-| `vscode-claude-cache` | `/root/.claude`                   | Claude Code configuration and memory |
-
-Claude authentication is bind-mounted from `.claude/auth/.claude.json` in the workspace.

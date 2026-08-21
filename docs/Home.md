@@ -12,6 +12,7 @@ Today, Archipelago provides a small kernel with boot, memory-management, testing
 - [[KTL]]: Freestanding container library
 - [[Configuration]]: Compile-time constants
 - [[Testing]]: Test framework and harness
+- [[JH7110 Board]]: Netboot loop, watchdog reset, display handoff, and cache flushing on the first real board
 ## Development
 - [[Development]]: Devcontainer setup, toolchain, IDE, code style
 - [[Plume]]: Package manager and build system

@@ -452,6 +452,16 @@ void write_string(ktl::string_view s) {
 void init(const kernel::boot::boot_info& info) {
     if (info.framebuffer == nullptr || info.fb_bpp != 32) { return; }
 
+    // Treat the bootloader descriptor as untrusted input. In particular, a
+    // zero/short pitch aliases scanlines onto the same MMIO addresses, which
+    // can wedge real display hardware instead of merely drawing incorrectly.
+    constexpr uint64_t BYTES_PER_PIXEL = 4;
+    if (info.fb_width == 0 || info.fb_height == 0 || info.fb_width > UINT64_MAX / BYTES_PER_PIXEL ||
+        info.fb_pitch < info.fb_width * BYTES_PER_PIXEL || info.fb_height > SIZE_MAX / info.fb_pitch) {
+        g_log.warn("console: ignoring invalid framebuffer geometry");
+        return;
+    }
+
     uint32_t cols = static_cast<uint32_t>(info.fb_width / GLYPH_W);
     uint32_t rows = static_cast<uint32_t>(info.fb_height / GLYPH_H);
     if (cols == 0 || rows == 0) { return; }

@@ -66,7 +66,7 @@ void feed() {
 
 }  // namespace
 
-void watchdog_init() {
+void watchdog_arm() {
     if (g_hhdm_offset == 0) { return; }  // MMIO unreachable before the HHDM is known
 
     reg(SYSCRG_PADDR + CLK_WDT_APB)  = reg(SYSCRG_PADDR + CLK_WDT_APB) | CLK_ENABLE;
@@ -79,9 +79,11 @@ void watchdog_init() {
     reg(WDOG_PADDR + WDT_LOAD)       = LOAD_COUNT;
     reg(WDOG_PADDR + WDT_CONTROL)    = CONTROL_RUN;
     reg(WDOG_PADDR + WDT_LOCK)       = 0;
+}
 
+void watchdog_init() {
     kernel::sched::spawn("watchdog", watchdog_thread_main, nullptr).expect("watchdog: feeder spawn failed");
-    g_log.info("watchdog: armed, {0}s timeout, fed every {1}s", TIMEOUT_S, FEED_PERIOD_TICKS / 1000);
+    g_log.info("watchdog: feeder started ({0}s timeout, fed every {1}s)", TIMEOUT_S, FEED_PERIOD_TICKS / 1000);
 }
 
 // SBI SRST is a dead end on this board: OpenSBI's pm-reset needs the PMIC

@@ -79,10 +79,9 @@ def uimage_script(text: bytes) -> bytes:
 
 def boot_script(server: str) -> str:
     # The fetch is one && chain so a failed transfer skips the stamp write and
-    # the boot falls through to the SD. The stamp (a hash of the artifact set)
-    # is fetched first and compared against the SD's copy; a match skips the
-    # transfers entirely. It is written last, after the artifacts it describes.
-    alt = "0x45000000"
+    # the boot falls through to the SD. Always refresh the files: boot.scr is
+    # itself fetched over TFTP on every boot, and unconditional transfers make
+    # it impossible for a stale on-card stamp to hide a changed kernel.
     fetch = " && ".join(
         f"tftpboot {LOAD} {server}:{tftp_name} && fatwrite {FAT} {LOAD} {fat_name} ${{filesize}}"
         for tftp_name, fat_name in FILES
@@ -101,18 +100,7 @@ def boot_script(server: str) -> str:
     )
     return f"""setenv autoload no
 dhcp
-setenv stamp_ok 0
-if tftpboot {LOAD} {server}:netboot.stamp; then
-setenv stamp_size ${{filesize}}
-if fatload {FAT} {alt} netboot.stamp && itest ${{filesize}} == ${{stamp_size}} && cmp.b {LOAD} {alt} ${{stamp_size}}; then
-setenv stamp_ok 1
-fi
-fi
-if itest ${{stamp_ok}} == 1; then
-echo netboot: artifacts current, skipping transfers
-else
 {fetch} && tftpboot {LOAD} {server}:netboot.stamp && fatwrite {FAT} {LOAD} netboot.stamp ${{filesize}}
-fi
 {keep_display}fatload {FAT} {LOAD} limine.efi && bootefi {LOAD} ${{fdtcontroladdr}}
 """
 

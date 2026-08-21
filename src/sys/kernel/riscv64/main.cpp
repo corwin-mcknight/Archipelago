@@ -30,6 +30,7 @@ extern "C" [[noreturn]] void _start(void) {
     // is silent, because there is no mapped device to report through.
     if (!kernel::boot::collect().paging_mode_ok) { panic("Boot protocol did not grant Sv39 paging"); }
     kernel::boot::resolve_hhdm();
+    kernel::platform::watchdog_arm();
 
     kernel::platform::console_init();
 

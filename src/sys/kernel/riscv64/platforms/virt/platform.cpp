@@ -56,6 +56,7 @@ void timestamp_calibrate() {}
 void dcache_clean_range(const void*, size_t) {}
 
 // virt has no watchdog device.
+void watchdog_arm() {}
 void watchdog_init() {}
 
 // SBI SRST extension (EID "SRST", FID 0): ask the SBI firmware to cold-reboot

@@ -114,6 +114,7 @@ python3 -m plume image --arch riscv64^jh7110
 ```
 
 The board boots via its SPI-flash U-Boot, whose EFI loader finds Limine on the card's FAT partition; the console is UART0 at 115200 baud. `make uboot-test` rehearses the same boot chain headlessly in QEMU against the virt target's sysroot, using mainline U-Boot fetched as a host tool -- run it before blaming the board.
+Day-to-day work on the board uses netboot instead of reflashing the card: `make netboot`, `make console`, and `make board-test` are described in `docs/Kernel/JH7110 Board.md`.
 
 ## Build Output
 

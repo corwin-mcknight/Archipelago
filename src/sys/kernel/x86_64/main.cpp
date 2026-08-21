@@ -115,6 +115,7 @@ extern "C" [[noreturn]] void _start(void) {
 
     kernel::boot::snapshot_symbols();
     kernel::boot::resolve_hhdm();
+    kernel::platform::watchdog_arm();
     kernel::boot::init_memory();
 
     const auto& boot_info = kernel::boot::collect();
