@@ -1,4 +1,4 @@
-// src/sys/kernel/core/sched/sleep.cpp
+// src/sys/kernel/task/sleep.cpp
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/log.h>

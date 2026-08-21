@@ -58,9 +58,15 @@ The `.clang-format` and `.editorconfig` files in the repository root enforce the
 ## Project Layout
 ```
 src/sys/kernel/          Kernel source
-  core/                  Logging, panic, CPU, time, interrupts
+  core/                  Boot, logging, panic, time, interrupts, and freestanding runtime support
+    drivers/             Core drivers (for example, the shared 16550 UART implementation)
+    std/                 Freestanding libc replacements
+  task/                  Task lifecycle, scheduling, and synchronization primitives
+  obj/                   Kernel objects and handle management
+  crash/                 Crash reporting, symbols, and demangling
+  elf/                   ELF parsing and loading
+  syscalls/              System-call dispatch
   mm/                    Memory management (early heap, PMM)
-  std/                   Freestanding libc replacements
   tests/                 Unit tests
   includes/
     kernel/              Kernel headers

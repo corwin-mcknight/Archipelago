@@ -6,8 +6,6 @@
 ## Second Architecture (riscv64)
 - Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
   CLINT software-interrupt routing remains future work.
-- x86_64 APs still park: give them the same scheduler entry as riscv64 harts (per-CPU kstack floor, LAPIC timer tick,
-  reschedule IPI, invlpg shootdown) and run the x86_64 test lane with -smp.
 - Grow the riscv64/tests/ suite beyond the JH7110 UART-to-PLIC claim/complete test (more sfence/TLB behavior and
   multi-source/per-hart external-interrupt coverage).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
@@ -107,7 +105,7 @@
     - Buffers occupy fixed slots in a reserved address-space region (64 slots per task, one bitmap word), predating the VMM's first-fit search; moving them onto `map_anywhere` retires the slot bitmap.
     - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
 - Post-Milestone-1 review findings, syscall and handle pipeline:
-    - `syscall.cpp` reaches a task through `static_ref_cast<Task>(self->owner())` with no type check; `Thread` accepts any `Object` owner, so a non-Task owner is silent type confusion. Same pattern in `scheduler.cpp` and `reaper.cpp`.
+    - `syscalls/handle.cpp` reaches a task through `static_ref_cast<Task>(self->owner())` with no type check; `Thread` accepts any `Object` owner, so a non-Task owner is silent type confusion. Same pattern in `task/scheduler.cpp` and `task/reaper.cpp`.
     - `SYS_SLEEP` passes its argument straight into `now() + ticks`, so a large value wraps to a deadline in the past and returns on the next tick.
     - `sys_write`'s copy loop runs with interrupts masked for a user-chosen length up to the full IPC buffer; cap the per-call length or re-enable interrupts around it.
     - `ipc_buffer::kernel_at` indexes `m_frames[]` with no bound, safe only because its one caller checks `contains()` first; assert the invariant in the function.
@@ -144,7 +142,7 @@
 ## IPC & Services
 - Handle-transfer gaps: no per-handle transfer right yet (no object type registers TRANSFER; the channel-handle gate is the only check), a receiver-table insert failure on dequeue closes the arrived handle rather than failing the recv (the message is already dequeued), and an endpoint escrowed on its own pair's queue is an unreclaimable reference cycle (the exact self-channel case is refused; the peer-through-itself shape is not detectable cheaply).
 - Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
-- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscall.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
+- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscalls/channel.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end as `Task::mailbox()` only for the coordinator, its one child; spawned tasks' parent ends live in the spawner's handle table). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
 - Coordinator follow-ups (the register/connect layer itself landed: `sys/init`, `docs/Design/Service Coordination.md`):

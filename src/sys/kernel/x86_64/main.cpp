@@ -11,25 +11,22 @@
 #include "kernel/mm/early_heap.h"
 #include "kernel/panic.h"
 #include "kernel/platform.h"
+#include "kernel/sched/scheduler.h"
 #include "kernel/synchronization/execution_context.h"
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 
 extern "C" void init_global_constructors_array(void);
 
-// Published per running thread by the scheduler; defined in core/sched/scheduler.cpp.
-extern "C" uintptr_t g_kstack_floor;
-
-// The interrupt stubs compare rsp against g_kstack_floor, so it has to describe the stack in use
-// before interrupts are enabled; left at zero the comparison never trips and the boot stack runs
-// untripwired, as does the idle thread that sched::init seeds from this same value. Limine
-// guarantees at least 64 KiB below the entry sp and this runs near its top, so 48 KiB down is
-// legitimately reachable and the last 16 KiB is the tripwire. Boot processor only: one global
-// floor cannot describe the APs' stacks too, and they park rather than schedule.
+// The interrupt stubs compare rsp against the calling CPU's GS-local floor. It has to describe the
+// stack in use before interrupts are enabled; left at zero the comparison never trips and the boot
+// stack runs untripwired, as does the idle thread that sched::init seeds from this same value.
+// Limine guarantees at least 64 KiB below the entry sp and this runs near its top, so 48 KiB down
+// is legitimately reachable and the last 16 KiB is the tripwire.
 static void arm_boot_stack_tripwire() {
     uintptr_t sp;
     asm volatile("mov %%rsp, %0" : "=r"(sp));
-    g_kstack_floor = sp - 48 * 1024;
+    kernel::arch::set_kstack_floor(sp - 48 * 1024);
 }
 
 // Enable EFER.NXE so a present PTE may carry the no-execute bit (bit 63).
@@ -72,8 +69,15 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
     // Start basic hardware initialisation
     g_log.debug("cpu{0} (lapic {1}): Initializing", core_index, lapic_id);
     kernel::x86::init_gdt((int)core_index);
+    kernel::x86::install_local(core_index);
     kernel::x86::init_idt();
     kernel::arch::syscall_init();
+
+    if (!is_boot_processor) {
+        uintptr_t sp;
+        asm volatile("mov %%rsp, %0" : "=r"(sp));
+        kernel::arch::set_kstack_floor(sp - 48 * 1024);
+    }
 
     if (is_boot_processor) {
         arm_boot_stack_tripwire();
@@ -96,7 +100,10 @@ void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor) {
 [[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id) {
     g_log.info("cpu{0}: Starting (lapic {1})", core_index, hw_id);
     core_init((uint32_t)core_index, (uint32_t)hw_id, /*is_boot_processor=*/false);
-    while (true) { __asm__ volatile("hlt"); }
+    while (!kernel::sched::started()) { asm volatile("" ::: "memory"); }
+    kernel::sched::join_secondary((uint32_t)core_index);
+    kernel::platform::timer_start_local();
+    kernel::sched::idle_loop();
 }
 
 extern uintptr_t _initial_heap_start;

@@ -2,7 +2,6 @@
 
 extern k_exception_handler
 extern k_irq_handler
-extern g_kstack_floor
 
 %macro isr_handler 2
 global %1
@@ -29,7 +28,7 @@ global %1
 %endmacro
 
 isr_common:
-    cmp rsp, [rel g_kstack_floor]
+    cmp rsp, [gs:0]
     jb trap_sp_overflow
     rframe_save
     mov rdi, rsp                ; First argument is the register file
@@ -41,7 +40,7 @@ isr_common:
     iretq
 
 irq_common:
-    cmp rsp, [rel g_kstack_floor]
+    cmp rsp, [gs:0]
     jb trap_sp_overflow
     rframe_save
     mov rdi, rsp                ; First argument is the register file
@@ -99,6 +98,7 @@ irq_handler         interrupt_irq11, 43
 irq_handler         interrupt_irq12, 44
 irq_handler         interrupt_irq13, 45
 irq_handler         interrupt_irq14, 46
+irq_handler         interrupt_irq16, 48
 
 ; Spurious vectors: 0x27/0x2F carry the PIC's spurious IRQ7/IRQ15 and 0x2F is also the
 ; LAPIC's spurious vector. A spurious interrupt sets no ISR bit, so an EOI here would

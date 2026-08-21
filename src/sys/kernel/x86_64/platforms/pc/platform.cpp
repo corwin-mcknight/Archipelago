@@ -19,12 +19,13 @@ extern kernel::driver::uart uart;
 namespace kernel::platform {
 
 namespace {
-uint64_t g_tsc_hz             = 0;
+uint64_t g_tsc_hz              = 0;
+uint32_t g_lapic_counts_per_ms = 0;
 
 // Tick source: the LAPIC timer, calibrated once at boot against the PIT (the
 // fixed-frequency reference every PC inherits). Ticks are 1 ms exactly.
-constexpr time_ns_t TICK_NS   = 1'000'000;
-constexpr unsigned int CAL_MS = 10;
+constexpr time_ns_t TICK_NS    = 1'000'000;
+constexpr unsigned int CAL_MS  = 10;
 
 struct lapic_tick_handler : kernel::hal::IInterruptHandler {
     bool handle_interrupt(register_frame_t*) override {
@@ -59,9 +60,19 @@ void timer_init() {
         return;
     }
 
+    g_lapic_counts_per_ms = counts / CAL_MS;
     g_interrupt_manager.register_interrupt(kernel::x86::IRQ0, &g_timer, 0);
-    kernel::x86::lapic_timer_start_periodic(kernel::x86::IRQ0, counts / CAL_MS);
-    g_log.info("Time subsystem initialized (LAPIC timer, {0} counts/ms)", counts / CAL_MS);
+    kernel::x86::lapic_timer_start_periodic(kernel::x86::IRQ0, g_lapic_counts_per_ms);
+    g_log.info("Time subsystem initialized (LAPIC timer, {0} counts/ms)", g_lapic_counts_per_ms);
+}
+
+void timer_start_local() {
+    kernel::x86::lapic_init();
+    if (g_lapic_counts_per_ms == 0) {
+        g_log.warn("timer: LAPIC timer unavailable on this CPU");
+        return;
+    }
+    kernel::x86::lapic_timer_start_periodic(kernel::x86::IRQ0, g_lapic_counts_per_ms);
 }
 
 // QEMU's isa-debug-exit device, wired to port 0x604 by the test harness. The 0x2000 bias matches

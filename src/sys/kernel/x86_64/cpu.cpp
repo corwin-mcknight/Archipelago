@@ -3,37 +3,64 @@
 #include <kernel/boot.h>
 #include <stddef.h>
 
-#include <ktl/ranges>
 #include <ktl/span>
 
 #include "kernel/arch.h"
 #include "kernel/config.h"
 #include "kernel/log.h"
+#include "kernel/panic.h"
+#include "kernel/x86/apic.h"
 #include "kernel/x86/cpu.h"
+#include "kernel/x86/descriptor_tables.h"
 
 kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
-// Stack tripwire floor consumed by the interrupt stubs. One global: only the boot processor
-// schedules on x86_64, and the APs park.
-extern "C" uintptr_t g_kstack_floor = 0;
+namespace {
+kernel::x86::cpu_local g_cpu_locals[CONFIG_MAX_CORES];
+constexpr uint32_t MSR_GS_BASE = 0xC0000101;
+ktl::atomic<uint64_t> g_reschedule_ipi_count{0};
+}  // namespace
 
-void kernel::arch::set_kstack_floor(uintptr_t floor) { g_kstack_floor = floor; }
-// The APs park rather than schedule, so there is never another core to interrupt.
-void kernel::arch::send_reschedule_ipi(size_t) {}
-uintptr_t kernel::arch::kstack_floor() { return g_kstack_floor; }
+void kernel::x86::install_local(size_t index) {
+    if (index >= CONFIG_MAX_CORES) { panic("x86: CPU index out of range"); }
+    g_cpu_locals[index]       = {};
+    g_cpu_locals[index].index = index;
+    wrmsr(MSR_GS_BASE, reinterpret_cast<uintptr_t>(&g_cpu_locals[index]));
+}
+
+kernel::x86::cpu_local& kernel::x86::local() {
+    uintptr_t base = rdmsr(MSR_GS_BASE);
+    if (base == 0) { panic("x86: GS local state is not installed"); }
+    return *reinterpret_cast<kernel::x86::cpu_local*>(base);
+}
+
+uint64_t kernel::x86::reschedule_ipi_count() { return g_reschedule_ipi_count.load(ktl::memory_order::relaxed); }
+
+extern "C" void x86_note_reschedule_ipi() { g_reschedule_ipi_count.fetch_add(1, ktl::memory_order::relaxed); }
+
+void kernel::arch::set_kstack_floor(uintptr_t floor) { kernel::x86::local().kstack_floor = floor; }
+void kernel::arch::send_reschedule_ipi(size_t core_index) {
+    if (core_index >= CONFIG_MAX_CORES || !g_cpu_cores[core_index].initialized.load(ktl::memory_order::acquire)) {
+        return;
+    }
+    kernel::x86::lapic_send_ipi(g_cpu_cores[core_index].lapic_id, kernel::x86::RESCHEDULE_IPI);
+}
+uintptr_t kernel::arch::kstack_floor() { return kernel::x86::local().kstack_floor; }
 
 [[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id);  // x86_64/main.cpp
 
 size_t kernel::x86::current_core_index() {
-    // CPUID leaf 1: the initial APIC id of the executing core is reported in EBX bits 31:24.
-    uint32_t eax, ebx, ecx, edx;
-    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1U), "c"(0U));
-    const uint32_t lapic_id = ebx >> 24;
+    // Before core_init installs GS local state, early boot is single-core and CPUID is the only
+    // per-CPU identity source available.  Once installed, GS avoids a CPUID on every scheduler
+    // and interrupt-context lookup.
+    uint64_t base = rdmsr(MSR_GS_BASE);
+    if (base != 0) { return reinterpret_cast<kernel::x86::cpu_local*>(base)->index; }
 
-    // g_cpu_cores[] is keyed by the dense bootloader CPU-list position with the LAPIC id stored as
-    // data (see core_init()); scan for the matching id to recover this core's dense index.
-    for (auto [i, core] : ktl::views::enumerate(ktl::span(g_cpu_cores))) {
-        if (core.lapic_id == lapic_id) { return i; }
+    uint32_t eax, ebx, ecx, edx;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1U), "c"(0U));
+    uint32_t lapic_id = ebx >> 24;
+    for (size_t i = 0; i < CONFIG_MAX_CORES; ++i) {
+        if (g_cpu_cores[i].lapic_id == lapic_id) { return i; }
     }
     return 0;
 }

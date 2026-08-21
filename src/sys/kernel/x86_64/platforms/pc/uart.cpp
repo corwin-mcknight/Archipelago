@@ -2,7 +2,7 @@
 #include <kernel/x86/ioport.h>
 
 // 16550 register access for the legacy COM1 port; the driver logic lives in
-// core/uart_16550.cpp.
+// core/drivers/uart_16550.cpp.
 namespace kernel::driver {
 
 namespace { constexpr uint16_t UART0_PORT = 0x3f8; }

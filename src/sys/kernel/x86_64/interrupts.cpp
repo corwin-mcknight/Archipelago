@@ -9,6 +9,7 @@
 #include <kernel/x86/descriptor_tables.h>
 
 extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
+extern "C" void x86_note_reschedule_ipi();
 
 extern "C" [[noreturn]] void x86_trap_stack_overflow() { panic("kernel stack overflow (trap below stack floor)"); }
 
@@ -46,6 +47,13 @@ extern "C" void k_irq_handler(register_frame_t* regs) {
     // EOI first: the tick handler may switch threads and not return here for a while. The LAPIC
     // timer is edge-triggered, so early EOI cannot re-raise a level.
     kernel::x86::lapic_eoi();
+
+    if (regs->int_no == kernel::x86::RESCHEDULE_IPI) {
+        x86_note_reschedule_ipi();
+        kernel::synchronization::request_preemption();
+        kernel::synchronization::interrupt_exit();
+        return;
+    }
 
     g_interrupt_manager.dispatch_interrupt((unsigned int)regs->int_no, regs);
     kernel::synchronization::interrupt_exit();

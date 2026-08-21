@@ -8,10 +8,10 @@
 #include <ktl/deque>
 #include <ktl/ref>
 
-// Scheduler-private interfaces shared by the core/sched/ translation units (scheduler, sleep,
+// Scheduler-private interfaces shared by the task/ translation units (scheduler, sleep,
 // spawn, reaper, stats). Everything here -- the run queues, sleeper, timed-wait and zombie lists,
 // counters and the trace ring -- is guarded by g_sched_lock; per-core state is touched only by its
-// own core with interrupts off. Nothing outside core/sched/ may include this header.
+// own core with interrupts off. Nothing outside task/ may include this header.
 
 namespace kernel::sched {
 

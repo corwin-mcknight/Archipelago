@@ -1,3 +1,4 @@
+#include <kernel/arch.h>
 #include <kernel/boot.h>
 #include <kernel/config.h>
 #include <kernel/cpu.h>
@@ -25,4 +26,14 @@ KTEST_CASE(cpu_smp_cores_initialized) {
         KTEST_EXPECT_TRUE(g_cpu_cores[i].initialized.load(ktl::memory_order::acquire));
         KTEST_EXPECT_EQUAL((size_t)g_cpu_cores[i].lapic_id, (size_t)kernel::boot::cpu_hw_id(i));
     }
+}
+
+// Exercise the full LAPIC fixed-IPI path through the IDT and deferred-preemption hook. Sending
+// to ourselves avoids assuming which sibling is idle while still proving the local APIC accepts
+// the reschedule vector on every scheduler-capable CPU.
+KTEST_CASE(cpu_reschedule_ipi_round_trip) {
+    uint64_t before = kernel::x86::reschedule_ipi_count();
+    kernel::arch::send_reschedule_ipi(kernel::arch::current_core_index());
+    for (int i = 0; i < 1000000 && kernel::x86::reschedule_ipi_count() == before; ++i) { asm volatile("pause"); }
+    KTEST_EXPECT_TRUE(kernel::x86::reschedule_ipi_count() > before);
 }

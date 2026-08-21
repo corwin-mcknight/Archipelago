@@ -23,7 +23,7 @@ SAN   := -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all
 FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden -fstrict-aliasing $(SAN)
 
-DEMANGLE_SRCS := $(KSRC)/core/demangle.cpp $(KSRC)/tests/fuzz/demangle_fuzz.cpp
+DEMANGLE_SRCS := $(KSRC)/crash/demangle.cpp $(KSRC)/tests/fuzz/demangle_fuzz.cpp
 DEMANGLE_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(DEMANGLE_SRCS)))))
 
 pkg_get_source:
@@ -42,7 +42,7 @@ pkg_build:
 	done
 	$(CXX) $(SAN) -fuse-ld=lld $(DEMANGLE_OBJS) -o $(FUZZ_DEMANGLE)
 	# stdlib.o supplies itoa for the formatter.
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/std/stdlib.cpp -o $(OBJDIR)/stdlib.o
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/std/stdlib.cpp -o $(OBJDIR)/stdlib.o
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/fmt_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/fmt_fuzz.cpp -o $(OBJDIR)/fmt_fuzz.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/fmt_fuzz.o $(OBJDIR)/stdlib.o -o $(FUZZ_FMT)
@@ -52,12 +52,12 @@ pkg_build:
 	# ELF parser lives in symbols.cpp (pure logic, no hardware deps); link it in for the parser under test.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp -o $(OBJDIR)/elf_symbols_fuzz.o
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/symbols.cpp -o $(OBJDIR)/symbols.o
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/crash/symbols.cpp -o $(OBJDIR)/symbols.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
 	# The loader's parse half is its own translation unit precisely so it links without the VMM.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_loader_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_loader_fuzz.cpp -o $(OBJDIR)/elf_loader_fuzz.o
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/elf_parse.cpp -o $(OBJDIR)/elf_parse.o
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/elf/elf_parse.cpp -o $(OBJDIR)/elf_parse.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_loader_fuzz.o $(OBJDIR)/elf_parse.o -o $(FUZZ_ELF_LOADER)
 	# rb_tree is header-only (intrusive, no allocation), so the fuzzer is self-contained.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp"

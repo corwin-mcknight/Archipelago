@@ -1,19 +1,12 @@
-; SYSCALL entry with interrupts masked by FMASK. Scheduling is single-core, so
-; stack pointers use globals until SMP scheduling supplies per-CPU GS state.
-; ponytail: replace these globals with KERNEL_GS_BASE/swapgs for SMP scheduling.
 global syscall_entry
-global g_syscall_kernel_rsp
 extern syscall_dispatch
-
-section .bss
-g_syscall_kernel_rsp: resq 1
-g_syscall_user_rsp:   resq 1
 
 section .text
 syscall_entry:
-    mov [rel g_syscall_user_rsp], rsp
-    mov rsp, [rel g_syscall_kernel_rsp]
-    push qword [rel g_syscall_user_rsp]
+    ; GS points at cpu_local: kernel_rsp is +8 and user_rsp scratch is +16.
+    mov [gs:16], rsp
+    mov rsp, [gs:8]
+    push qword [gs:16]
     push rcx
     push r11
     ; syscall_dispatch is a SysV C function and clobbers the caller-saved argument

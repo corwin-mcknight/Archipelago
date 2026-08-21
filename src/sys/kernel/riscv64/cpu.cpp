@@ -19,10 +19,6 @@
 namespace kernel::riscv {
 void trap_init();  // riscv64/trap.cpp
 }
-namespace kernel::platform {
-void timer_start_local();  // riscv64/timer.cpp
-}
-
 kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
 size_t kernel::arch::current_core_index() { return kernel::riscv::current_core().index; }

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 // Arch-neutral CPU and platform primitives, implemented by each architecture in its own
-// directory. Generic code (core/, mm/, std/, shell/) must use these instead of inline
+// directory. Generic code (core/, task/, obj/, crash/, elf/, syscalls/, mm/, shell/) must use these instead of inline
 // assembly; the host test runner stubs them, so they must stay out-of-line.
 namespace kernel::arch {
 

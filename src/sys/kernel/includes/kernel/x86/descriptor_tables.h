@@ -6,7 +6,9 @@ namespace kernel {
 namespace x86 {
 
 // LAPIC timer tick vector (first vector past the CPU exceptions).
-constexpr uint8_t IRQ0 = 32;
+constexpr uint8_t IRQ0           = 32;
+// Local APIC fixed IPI used to wake an idle scheduling core.
+constexpr uint8_t RESCHEDULE_IPI = 48;
 
 struct gdt_entry {
     uint16_t limit_low;

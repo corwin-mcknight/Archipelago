@@ -1,4 +1,4 @@
-// src/sys/kernel/core/sched/stats.cpp
+// src/sys/kernel/task/stats.cpp
 #include <kernel/arch.h>
 #include <kernel/config.h>
 #include <kernel/sched/internal.h>

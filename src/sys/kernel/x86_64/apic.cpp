@@ -6,26 +6,29 @@ extern uintptr_t g_hhdm_offset;
 namespace kernel::x86 {
 
 namespace {
-constexpr uint32_t MSR_APIC_BASE   = 0x1B;
+constexpr uint32_t MSR_APIC_BASE        = 0x1B;
 // Handled by the dedicated spurious stub in interrupt_handlers.s, which returns without
 // dispatching or EOIing (a spurious interrupt sets no ISR bit, so an EOI would dismiss the
 // interrupt actually in service). The low four bits must be set for old APICs.
-constexpr uint32_t SPURIOUS_VECTOR = 0x2F;
+constexpr uint32_t SPURIOUS_VECTOR      = 0x2F;
 
 // Register byte offsets into the 4 KiB LAPIC window.
-constexpr uintptr_t REG_SPURIOUS   = 0x0F0;
-constexpr uintptr_t REG_EOI        = 0x0B0;
-constexpr uintptr_t REG_LVT_TIMER  = 0x320;
-constexpr uintptr_t REG_TIMER_INIT = 0x380;
-constexpr uintptr_t REG_TIMER_CUR  = 0x390;
-constexpr uintptr_t REG_TIMER_DIV  = 0x3E0;
+constexpr uintptr_t REG_SPURIOUS        = 0x0F0;
+constexpr uintptr_t REG_EOI             = 0x0B0;
+constexpr uintptr_t REG_LVT_TIMER       = 0x320;
+constexpr uintptr_t REG_TIMER_INIT      = 0x380;
+constexpr uintptr_t REG_TIMER_CUR       = 0x390;
+constexpr uintptr_t REG_TIMER_DIV       = 0x3E0;
+constexpr uintptr_t REG_ICR_LOW         = 0x300;
+constexpr uintptr_t REG_ICR_HIGH        = 0x310;
 
-constexpr uint32_t SOFTWARE_ENABLE = 1u << 8;
-constexpr uint32_t LVT_MASKED      = 1u << 16;
-constexpr uint32_t LVT_PERIODIC    = 1u << 17;
-constexpr uint32_t DIVIDE_BY_16    = 0x3;
+constexpr uint32_t SOFTWARE_ENABLE      = 1u << 8;
+constexpr uint32_t LVT_MASKED           = 1u << 16;
+constexpr uint32_t LVT_PERIODIC         = 1u << 17;
+constexpr uint32_t DIVIDE_BY_16         = 0x3;
+constexpr uint32_t ICR_DELIVERY_PENDING = 1u << 12;
 
-volatile uint32_t* g_lapic         = nullptr;
+volatile uint32_t* g_lapic              = nullptr;
 
 void reg_write(uintptr_t offset, uint32_t value) { g_lapic[offset / 4] = value; }
 uint32_t reg_read(uintptr_t offset) { return g_lapic[offset / 4]; }
@@ -55,6 +58,15 @@ void lapic_timer_start_periodic(uint8_t vector, uint32_t initial_count) {
     reg_write(REG_TIMER_DIV, DIVIDE_BY_16);
     reg_write(REG_LVT_TIMER, LVT_PERIODIC | vector);
     reg_write(REG_TIMER_INIT, initial_count);
+}
+
+void lapic_send_ipi(uint32_t destination, uint8_t vector) {
+    // xAPIC's ICR destination field is eight bits. Limine's x86 MP interface supplies LAPIC ids
+    // in that format; reject a malformed id instead of silently targeting a different CPU.
+    if (destination > 0xff) { return; }
+    while (reg_read(REG_ICR_LOW) & ICR_DELIVERY_PENDING) { asm volatile("pause"); }
+    reg_write(REG_ICR_HIGH, destination << 24);
+    reg_write(REG_ICR_LOW, vector);
 }
 
 }  // namespace kernel::x86

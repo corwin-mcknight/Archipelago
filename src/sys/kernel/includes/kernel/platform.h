@@ -48,6 +48,10 @@ unsigned int console_uart_interrupt_id();
 /// registers an interrupt handler and starts delivering ticks immediately.
 void timer_init();
 
+/// Arm this CPU's local kernel tick after the boot CPU has calibrated the shared timer rate.
+/// Called by secondary CPUs only after the scheduler has come online.
+void timer_start_local();
+
 /// Signal test-harness exit through the board's debug-exit device (QEMU's
 /// isa-debug-exit on pc, the sifive_test finisher on virt). Returns on
 /// hardware that has no such device, so callers must halt afterwards.

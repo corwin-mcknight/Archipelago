@@ -22,7 +22,7 @@ struct wait_node {
 };
 
 // The kernel's blocking primitive: a lock plus parked threads. Blocking/waking methods are
-// defined in core/sched/wait_queue.cpp and link only in kernel builds; the type itself is
+// defined in task/wait_queue.cpp and link only in kernel builds; the type itself is
 // host-safe so Object can embed it.
 class wait_queue {
    public:
@@ -33,7 +33,7 @@ class wait_queue {
     // A wait_queue outliving its parked waiters would leave dangling nodes on parked threads'
     // stacks, so tearing one down non-empty must fail loudly. This uses panic(), not the
     // assert()/kernel_assert() macro: kernel_assert reaches for g_log/kernel::crash::dispatch,
-    // which the host test runner does not link (only core/object.cpp's Object subsystem is host-
+    // which the host test runner does not link (only obj/object.cpp's Object subsystem is host-
     // built, not the logging/crash machinery). panic() is already the host-safe escape hatch
     // ktl reaches for (see ktl::maybe, ktl::result, ktl::ref) -- the host runner longjmps out of
     // the test instead of halting. On the host nothing ever calls block_if/wake_*, so the list is

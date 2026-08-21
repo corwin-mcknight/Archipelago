@@ -29,7 +29,7 @@ class Object {
     kernel::sched::wait_queue& waiters() { return m_waiters; }
 
     /// Block the calling thread until any signal bit in mask is set; returns the signals
-    /// observed. mask must be nonzero. Kernel-only (defined in core/sched/wait_queue.cpp).
+    /// observed. mask must be nonzero. Kernel-only (defined in task/wait_queue.cpp).
     uint32_t wait_signals(uint32_t mask);
     // Same, but gives up at `deadline` (a tick count). Returns the signals observed at return:
     // a value not intersecting the mask means the deadline passed first.
@@ -44,7 +44,7 @@ class Object {
     const char* m_name = nullptr;
     ktl::atomic<uint32_t> m_signals{0};
     kernel::sched::wait_queue m_waiters;
-    // Port bindings watching this object's signals (core/port.cpp), guarded by the port
+    // Port bindings watching this object's signals (obj/port.cpp), guarded by the port
     // subsystem's lock. Each binding holds a strong reference to this object, so a non-empty
     // list means the object cannot be mid-destruction.
     struct port_binding* m_bindings = nullptr;
@@ -58,7 +58,7 @@ void obj_init();
 /// layer in kernel builds and stubbed by the host runner (hosted tests see signal bits only).
 void object_signal_wake(Object* obj);
 
-/// Deliver a signal transition to the port bindings watching `object` (core/port.cpp). Called by
+/// Deliver a signal transition to the port bindings watching `object` (obj/port.cpp). Called by
 /// signal_set only when the binding list is (racily) non-empty; bind's asserted-at-bind check
 /// covers the transition a racing bind could miss.
 void port_notify(Object* object, uint32_t previous, uint32_t current);

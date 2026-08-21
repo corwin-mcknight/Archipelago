@@ -18,4 +18,7 @@ void lapic_timer_start_counting();
 uint32_t lapic_timer_elapsed();
 void lapic_timer_start_periodic(uint8_t vector, uint32_t initial_count);
 
+/// Deliver a fixed interrupt vector to the LAPIC id named by `destination`.
+void lapic_send_ipi(uint32_t destination, uint8_t vector);
+
 }  // namespace kernel::x86

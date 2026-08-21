@@ -768,7 +768,7 @@ def machine_args(arch, iso, firmware=None, exit_device: bool = False) -> List[st
             "-device", "scsi-cd,drive=cd0,bus=scsi0.0",
         ]
 
-    args = ["--cdrom", str(iso)]
+    args = ["-smp", "6", "--cdrom", str(iso)]
     if exit_device:
         args.extend(["-device", "isa-debug-exit,iobase=0x604,iosize=0x02"])
     return args

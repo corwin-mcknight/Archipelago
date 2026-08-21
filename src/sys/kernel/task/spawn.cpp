@@ -1,4 +1,4 @@
-// src/sys/kernel/core/sched/spawn.cpp
+// src/sys/kernel/task/spawn.cpp
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/config.h>

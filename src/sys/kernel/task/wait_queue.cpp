@@ -1,4 +1,4 @@
-// src/sys/kernel/core/sched/wait_queue.cpp
+// src/sys/kernel/task/wait_queue.cpp
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/log.h>

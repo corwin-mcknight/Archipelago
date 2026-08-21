@@ -3,7 +3,7 @@
 // QEMU virt's 16550 lives at physical 0x10000000 with byte-wide registers,
 // reached through the HHDM (Limine maps the first 4 GiB there). main.cpp
 // publishes the offset before calling init(). The driver logic lives in
-// core/uart_16550.cpp.
+// core/drivers/uart_16550.cpp.
 extern uintptr_t g_hhdm_offset;
 
 namespace kernel::driver {

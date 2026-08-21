@@ -1,4 +1,4 @@
-// src/sys/kernel/core/sched/scheduler.cpp
+// src/sys/kernel/task/scheduler.cpp
 #include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/boot.h>
@@ -27,7 +27,7 @@ bool on_boot_core() { return kernel::arch::current_core_index() == kernel::boot:
 
 namespace {
 
-bool g_started = false;
+ktl::atomic<bool> g_started{false};
 
 // One FIFO under g_sched_lock; any core picks from it.
 // ponytail: one shared queue, per-core queues if the lock shows up in profiles.
@@ -180,7 +180,7 @@ void adopt_idle() {
 
 }  // namespace
 
-bool started() { return g_started; }
+bool started() { return g_started.load(ktl::memory_order::acquire); }
 
 ktl::ref<Thread> current() {
     uint64_t flags     = kernel::arch::save_and_disable_interrupts();
@@ -287,7 +287,7 @@ void yield() {
 }
 
 void on_tick() {
-    if (!g_started) { return; }
+    if (!g_started.load(ktl::memory_order::acquire)) { return; }
     sched_guard guard(g_sched_lock);
     auto& c = cur_cpu();
     // Wake due sleepers and expired timed waits first so a woken thread can be this tick's
@@ -308,7 +308,7 @@ void on_tick() {
 }
 
 void service_pending_preemption() {
-    if (!g_started) { return; }
+    if (!g_started.load(ktl::memory_order::acquire)) { return; }
     // switch_to must run with interrupts masked (see yield/schedule_out). This hook is reached from
     // preempt_enable on the plain critical_section path, where interrupts are still enabled, so an
     // unmasked switch could be re-entered by a timer tick mid-switch. Nesting-safe for the already-
@@ -377,13 +377,13 @@ void init(uint32_t boot_core_index) {
     adopt_idle();
     kernel::synchronization::set_deferred_preempt_hook(service_pending_preemption);
     g_stats.boot_ts = kernel::arch::timestamp();
-    g_started       = true;
+    g_started.store(true, ktl::memory_order::release);
     reaper_start();
     g_log.info("sched: online (core {0})", boot_core_index);
 }
 
 void join_secondary(uint32_t core_index) {
-    assert(g_started, "join_secondary: scheduler not started");
+    assert(g_started.load(ktl::memory_order::acquire), "join_secondary: scheduler not started");
     adopt_idle();
     g_log.info("sched: core {0} online", core_index);
 }

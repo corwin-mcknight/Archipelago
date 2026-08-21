@@ -49,12 +49,12 @@ HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
 
 # Kernel logic the hosted tests link against, compiled with the amplifier. Pure data structures and
 # freestanding helpers only -- anything hardware-coupled must be a freestanding (QEMU-tier) test instead.
-# std/stdlib.cpp also supplies itoa for the formatter the assertion machinery uses.
-SUPPORT_SRCS := $(KSRC)/std/stdlib.cpp $(KSRC)/core/object.cpp $(KSRC)/core/handle_table.cpp \
-	$(KSRC)/core/channel.cpp $(KSRC)/core/socket.cpp $(KSRC)/core/type_registry.cpp $(KSRC)/core/sched/task.cpp \
-	$(KSRC)/core/synchronization/execution_context.cpp $(KSRC)/core/synchronization/lockdep.cpp \
-	$(KSRC)/core/synchronization/mutex.cpp $(KSRC)/core/elf_parse.cpp $(KSRC)/core/handle_dispatch.cpp \
-	$(KSRC)/core/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
+# core/std/stdlib.cpp also supplies itoa for the formatter the assertion machinery uses.
+SUPPORT_SRCS := $(KSRC)/core/std/stdlib.cpp $(KSRC)/obj/object.cpp $(KSRC)/obj/handle_table.cpp \
+	$(KSRC)/obj/channel.cpp $(KSRC)/obj/socket.cpp $(KSRC)/obj/type_registry.cpp $(KSRC)/task/task.cpp \
+	$(KSRC)/task/sync/execution_context.cpp $(KSRC)/task/sync/lockdep.cpp \
+	$(KSRC)/task/sync/mutex.cpp $(KSRC)/elf/elf_parse.cpp $(KSRC)/obj/handle_dispatch.cpp \
+	$(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))

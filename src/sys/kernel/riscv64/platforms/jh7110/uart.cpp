@@ -4,7 +4,7 @@
 // physical 0x10000000, but with registers on a 4-byte stride accessed as
 // 32-bit words (the DTS's reg-shift = 2, reg-io-width = 4). Reached through
 // the HHDM; main.cpp publishes the offset before calling init(). The driver
-// logic lives in core/uart_16550.cpp.
+// logic lives in core/drivers/uart_16550.cpp.
 extern uintptr_t g_hhdm_offset;
 
 namespace kernel::driver {

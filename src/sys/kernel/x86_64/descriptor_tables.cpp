@@ -15,7 +15,7 @@ extern "C" void kernel_x86_install_gdt(uintptr_t);
     X(30) X(31)
 #define IRQ_LIST(X) \
     X(0)  X(1)  X(2)  X(3)  X(4)  X(5)  X(6)  X(7) \
-    X(8)  X(9)  X(10) X(11) X(12) X(13) X(14) X(15)
+    X(8)  X(9)  X(10) X(11) X(12) X(13) X(14) X(15) X(16)
 
 #define DECLARE_ISR(n) extern "C" void interrupt_isr##n();
 #define DECLARE_IRQ(n) extern "C" void interrupt_irq##n();

@@ -7,7 +7,6 @@
 #include "kernel/x86/descriptor_tables.h"
 #include "kernel/x86/ioport.h"
 
-extern "C" uint64_t g_syscall_kernel_rsp;
 extern "C" void syscall_entry();
 
 namespace {
@@ -36,7 +35,7 @@ namespace kernel::arch {
 
 void set_kernel_stack(uintptr_t top) {
     kernel::x86::set_tss_rsp0(top);
-    g_syscall_kernel_rsp = top;
+    kernel::x86::local().syscall_kernel_rsp = top;
 }
 
 void syscall_init() {
