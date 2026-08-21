@@ -1,3 +1,4 @@
+#include <kernel/log.h>
 #include <kernel/panic.h>
 #include <kernel/synchronization/execution_context.h>
 #include <kernel/synchronization/lockdep.h>
@@ -21,9 +22,26 @@ struct edge_record {
 lock_record g_locks[CONFIG_LOCKDEP_MAX_LOCKS];
 edge_record g_edges[CONFIG_LOCKDEP_MAX_EDGES];
 uint32_t g_free_list[CONFIG_LOCKDEP_MAX_LOCKS];
-uint32_t g_next_identity = 1;
-size_t g_edge_count      = 0;
-size_t g_free_count      = 0;
+uint32_t g_next_identity      = 1;
+size_t g_edge_count           = 0;
+size_t g_free_count           = 0;
+volatile uint8_t g_table_lock = 0;
+
+// Serializes the tables across cores. A raw spin, since lockdep cannot instrument itself;
+// interrupts off so the holder cannot be preempted (or migrated) while inside.
+class table_guard {
+   public:
+    table_guard() : m_flags(kernel::arch::save_and_disable_interrupts()) {
+        while (__atomic_exchange_n(&g_table_lock, 1, __ATOMIC_ACQUIRE)) {}
+    }
+    ~table_guard() {
+        __atomic_store_n(&g_table_lock, 0, __ATOMIC_RELEASE);
+        kernel::arch::restore_interrupts(m_flags);
+    }
+
+   private:
+    uint64_t m_flags;
+};
 
 lock_record& record(uint32_t identity) {
     if (identity == 0 || identity >= g_next_identity || identity > CONFIG_LOCKDEP_MAX_LOCKS) {
@@ -48,7 +66,13 @@ void learn_edge(uint32_t from, uint32_t to) {
         if (g_edges[i].from == from && g_edges[i].to == to) { return; }
     }
     bool visited[CONFIG_LOCKDEP_MAX_LOCKS] = {};
-    if (path_exists(to, from, visited)) { panic("lockdep: dependency cycle detected"); }
+    if (path_exists(to, from, visited)) {
+#if defined(ARCH_X86_64) || defined(ARCH_RISCV64)
+        g_log.error("lockdep: cycle: {0} at 0x{1:p} held, acquiring {2} at 0x{3:p}", record(from).name,
+                    (uintptr_t)record(from).address, record(to).name, (uintptr_t)record(to).address);
+#endif
+        panic("lockdep: dependency cycle detected");
+    }
     if (g_edge_count == CONFIG_LOCKDEP_MAX_EDGES) { panic("lockdep: dependency edge capacity exhausted"); }
     g_edges[g_edge_count++] = edge_record{from, to};
 }
@@ -57,9 +81,7 @@ void learn_edge(uint32_t from, uint32_t to) {
 
 uint32_t allocate_identity(const void* address, const char* name) {
 #ifndef NDEBUG
-    // Single-hart today; interrupt disable serializes the free-list/counter update against a
-    // preemption that constructs another lock mid-allocation. ponytail: raw IRQ mask, revisit if SMP.
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    table_guard guard;
     uint32_t identity;
     if (g_free_count > 0) {
         identity = g_free_list[--g_free_count];
@@ -70,7 +92,6 @@ uint32_t allocate_identity(const void* address, const char* name) {
     g_locks[identity - 1]         = lock_record{};
     g_locks[identity - 1].address = address;
     g_locks[identity - 1].name    = name;
-    kernel::arch::restore_interrupts(flags);
     return identity;
 #else
     (void)address;
@@ -82,7 +103,7 @@ uint32_t allocate_identity(const void* address, const char* name) {
 void release_identity(uint32_t identity) {
 #ifndef NDEBUG
     if (identity == 0) { return; }
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    table_guard guard;
     // Drop edges naming this identity so a reused slot cannot inherit stale ordering.
     for (size_t i = 0; i < g_edge_count;) {
         if (g_edges[i].from == identity || g_edges[i].to == identity) {
@@ -93,7 +114,6 @@ void release_identity(uint32_t identity) {
     }
     g_locks[identity - 1]       = lock_record{};
     g_free_list[g_free_count++] = identity;
-    kernel::arch::restore_interrupts(flags);
 #else
     (void)identity;
 #endif
@@ -101,6 +121,7 @@ void release_identity(uint32_t identity) {
 
 void acquired(const void* address, uint32_t identity) {
 #ifndef NDEBUG
+    table_guard guard;
     auto& context = current_execution_context();
     for (size_t i = 0; i < context.held_count; ++i) {
         if (context.held[i].address == address) { panic("lockdep: recursive lock acquisition"); }
@@ -123,6 +144,7 @@ void acquired(const void* address, uint32_t identity) {
 
 void released(const void* address, uint32_t identity) {
 #ifndef NDEBUG
+    table_guard guard;
     auto& context = current_execution_context();
     if (context.held_count == 0 || context.held[context.held_count - 1].address != address) {
         panic("lockdep: unbalanced or out-of-order lock release");
@@ -130,9 +152,8 @@ void released(const void* address, uint32_t identity) {
     --context.held_count;
     if (identity != 0) {
         auto& lock = record(identity);
-        if (!lock.owned || lock.owner_cpu != context.cpu_index || lock.owner_thread != context.thread_id) {
-            panic("lockdep: lock released by non-owner");
-        }
+        // By thread, not core: a mutex holder may be preempted and resume on another core.
+        if (!lock.owned || lock.owner_thread != context.thread_id) { panic("lockdep: lock released by non-owner"); }
         lock.owned = false;
     }
 #else
@@ -144,6 +165,7 @@ void released(const void* address, uint32_t identity) {
 void assert_not_owned(const void* address, uint32_t identity) {
 #ifndef NDEBUG
     (void)address;
+    table_guard guard;
     if (identity != 0 && record(identity).owned) { panic("lockdep: destroying an owned lock"); }
 #else
     (void)address;

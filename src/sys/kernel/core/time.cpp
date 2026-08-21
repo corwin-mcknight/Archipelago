@@ -10,8 +10,9 @@ ktl::atomic<uint64_t> kernel::time::_timestamp_hz = 0;
 uint64_t kernel::time::_anchor_timestamp          = 0;
 time_ns_t kernel::time::_anchor_ns                = 0;
 
+// Every scheduling core ticks for preemption; only the boot core advances kernel time.
 void kernel::time::tick() {
-    _now.fetch_add(1, ktl::memory_order::relaxed);
+    if (kernel::sched::on_boot_core()) { _now.fetch_add(1, ktl::memory_order::relaxed); }
     kernel::sched::on_tick();
 }
 ktime_t kernel::time::now() { return _now.load(ktl::memory_order::relaxed); }

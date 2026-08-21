@@ -14,6 +14,10 @@ class Task;
 // the reaper is spawned. Requires obj_init() and a ticking timer.
 void init(uint32_t boot_core_index);
 bool started();
+// Bring the calling secondary core into scheduling once init() has run: its context becomes that
+// core's idle thread. The caller then starts its tick, enables interrupts, and enters idle_loop().
+void join_secondary(uint32_t core_index);
+bool on_boot_core();
 
 ktl::ref<Thread> current();
 // True if the current thread is the idle thread. The idle thread must never block: it is the
@@ -47,7 +51,14 @@ void service_pending_preemption();
 void schedule_out(switch_reason reason);
 void make_ready(ktl::ref<Thread> thread);
 
-// Global scheduler counters plus live queue depths, snapshotted with interrupts disabled.
+struct core_stats {
+    bool online          = false;
+    uint64_t switches    = 0;
+    uint64_t idle_cycles = 0;
+    uint64_t current_id  = 0;  // thread running there at the snapshot
+};
+
+// Global scheduler counters plus live queue depths, snapshotted under the scheduler lock.
 struct global_stats {
     uint64_t switches       = 0;
     uint64_t preempts       = 0;
@@ -63,6 +74,7 @@ struct global_stats {
     size_t runq_depth       = 0;
     size_t sleepers         = 0;
     size_t zombies          = 0;
+    core_stats cores[CONFIG_MAX_CORES];
 };
 global_stats stats_snapshot();
 

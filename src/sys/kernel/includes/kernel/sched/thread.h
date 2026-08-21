@@ -9,6 +9,7 @@
 #include <kernel/synchronization/execution_context.h>
 #include <std/new.h>
 
+#include <ktl/atomic>
 #include <ktl/ref>
 #include <ktl/result>
 
@@ -21,15 +22,19 @@ enum class thread_state : uint32_t { READY = 0, RUNNING, BLOCKED, DEAD };
 // Per-thread scheduler accounting. Plain data: mutated only by the scheduler with interrupts
 // disabled on the scheduling core; read by the shell via snapshots.
 struct thread_stats {
-    uint64_t cpu_cycles       = 0;
-    uint64_t scheduled        = 0;
-    uint64_t preemptions      = 0;
-    uint64_t yields           = 0;
-    uint64_t blocks           = 0;
-    uint64_t sleeps           = 0;
-    uint64_t wakes            = 0;
-    uint64_t lat_total_cycles = 0;
-    uint64_t lat_max_cycles   = 0;
+    uint64_t cpu_cycles               = 0;
+    uint64_t scheduled                = 0;
+    uint64_t preemptions              = 0;
+    uint64_t yields                   = 0;
+    uint64_t blocks                   = 0;
+    uint64_t sleeps                   = 0;
+    uint64_t wakes                    = 0;
+    uint64_t lat_total_cycles         = 0;
+    uint64_t lat_max_cycles           = 0;
+    uint64_t migrations               = 0;        // resumed on a different core than it last ran on
+    uint32_t last_core                = NO_CORE;  // core that last ran (or is running) the thread
+
+    static constexpr uint32_t NO_CORE = UINT32_MAX;
 };
 
 class Thread : public kernel::obj::Object {
@@ -70,6 +75,13 @@ class Thread : public kernel::obj::Object {
     thread_state state() const { return m_state; }
     void set_state(thread_state s) { m_state = s; }
 
+    // Set while a core runs this thread, cleared by sched_finish_switch once the outgoing state is
+    // fully saved. A thread found READY but still on-cpu is mid-switch on another core: the picker
+    // leaves it for later rather than resuming state that is still being written, and the reaper
+    // waits for it before freeing a dead thread's stack.
+    bool on_cpu() const { return m_on_cpu.load(ktl::memory_order::acquire); }
+    void set_on_cpu(bool on) { m_on_cpu.store(on, ktl::memory_order::release); }
+
     // Set once by task kill, never cleared. A killed thread is forced onto the exit path at its
     // next kernel boundary: the syscall dispatcher and the preemption service check it, blocked
     // threads are woken by the killer, and the wait primitives refuse to park it on a wait whose
@@ -90,6 +102,7 @@ class Thread : public kernel::obj::Object {
 
     uintptr_t kstack_phys() const { return m_kstack_phys; }
     uintptr_t kstack_floor() const { return m_kstack_floor; }
+    void set_kstack_floor(uintptr_t floor) { m_kstack_floor = floor; }
     uintptr_t kstack_top() const { return m_kstack_top; }
 
     ktl::ref<kernel::obj::Object>& owner() { return m_owner; }
@@ -109,6 +122,11 @@ class Thread : public kernel::obj::Object {
         if (m_slice > 0) { --m_slice; }
         return m_slice;
     }
+
+    // Syscall nesting travels with the thread: it blocks mid-syscall on one core and may resume on
+    // another, so the switch carries it between the cores' execution contexts.
+    uint32_t syscall_depth() const { return m_syscall_depth; }
+    void set_syscall_depth(uint32_t depth) { m_syscall_depth = depth; }
 
     thread_stats& stats() { return m_stats; }
     const thread_stats& stats() const { return m_stats; }
@@ -135,8 +153,9 @@ class Thread : public kernel::obj::Object {
     }
 
    private:
-    // Mutated only with interrupts disabled on the scheduling core; no atomics until SMP scheduling.
+    // Mutated under the scheduler lock (block_if additionally holds the wait queue's lock).
     thread_state m_state       = thread_state::READY;
+    ktl::atomic<bool> m_on_cpu = false;
     bool m_killed              = false;
     wait_queue* m_parked_queue = nullptr;
     wait_node* m_parked_node   = nullptr;
@@ -145,7 +164,8 @@ class Thread : public kernel::obj::Object {
     uintptr_t m_kstack_top     = 0;
     uintptr_t m_saved_sp       = 0;
     ktl::ref<kernel::obj::Object> m_owner;
-    uint32_t m_slice = CONFIG_SCHED_TIMESLICE_TICKS;
+    uint32_t m_slice         = CONFIG_SCHED_TIMESLICE_TICKS;
+    uint32_t m_syscall_depth = 0;
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
     ipc_buffer m_ipc;

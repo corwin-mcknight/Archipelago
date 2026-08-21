@@ -13,6 +13,13 @@
 
 kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
+// Stack tripwire floor consumed by the interrupt stubs. One global: only the boot processor
+// schedules on x86_64, and the APs park.
+extern "C" uintptr_t g_kstack_floor = 0;
+
+void kernel::arch::set_kstack_floor(uintptr_t floor) { g_kstack_floor = floor; }
+uintptr_t kernel::arch::kstack_floor() { return g_kstack_floor; }
+
 [[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id);  // x86_64/main.cpp
 
 size_t kernel::x86::current_core_index() {

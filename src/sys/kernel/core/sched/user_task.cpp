@@ -323,25 +323,26 @@ ktl::result<void> task_kill(const ktl::ref<Task>& task) {
 
     task->record_exit(::abi::syscall::TASK_EXIT_KILLED, 0);
 
-    // Interrupts off: thread states are stable on the single scheduling core, and no marked thread
-    // can run (and possibly park somewhere new) until the scan is complete.
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    for (size_t i = 0; i < threads.size(); i++) {
-        Thread* thread = threads[i].get();
-        if (thread->state() == thread_state::DEAD) { continue; }
-        thread->set_killed();
-        if (thread->state() != thread_state::BLOCKED) { continue; }
-        // Parked on a wait queue: claim resolves the race against ordinary wakers under the
-        // queue's own lock, exactly as the timed-wait expiry scan does. Not parked and not
-        // sleeping means the thread is between a wake and its next run; it will observe the mark.
-        if (auto* queue = thread->parked_queue()) {
-            ktl::ref<Thread> woken = queue->claim(thread->parked_node());
-            if (woken) { make_ready(ktl::move(woken)); }
-        } else {
-            (void)wake_sleeper(thread);
+    // Under the scheduler lock thread states are stable and no thread can park somewhere new (block_if
+    // and sleep_ticks take the same lock), so nothing marked here slips past the scan.
+    {
+        sched_guard guard(g_sched_lock);
+        for (size_t i = 0; i < threads.size(); i++) {
+            Thread* thread = threads[i].get();
+            if (thread->state() == thread_state::DEAD) { continue; }
+            thread->set_killed();
+            if (thread->state() != thread_state::BLOCKED) { continue; }
+            // Parked on a wait queue: claim resolves the race against ordinary wakers under the
+            // queue's own lock, exactly as the timed-wait expiry scan does. Not parked and not
+            // sleeping means the thread is between a wake and its next run; it will observe the mark.
+            if (auto* queue = thread->parked_queue()) {
+                ktl::ref<Thread> woken = queue->claim(thread->parked_node());
+                if (woken) { make_ready_locked(ktl::move(woken)); }
+            } else {
+                (void)wake_sleeper(thread);
+            }
         }
     }
-    kernel::arch::restore_interrupts(flags);
 
     if (lifecycle_log_enabled()) { g_log.debug("task: killed id={0}", task->id()); }
     return ktl::result<void>::ok();

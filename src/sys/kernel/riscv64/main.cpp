@@ -20,17 +20,13 @@ extern "C" void init_global_constructors_array(void);
 extern uintptr_t _initial_heap_start;
 extern uintptr_t _initial_heap_end;
 
-// Published per running thread by the scheduler; defined in core/sched/scheduler.cpp.
-extern "C" uintptr_t g_kstack_floor;
-
-// The trap entry compares sp against g_kstack_floor, so it has to describe the stack in use before
-// interrupts are enabled. Limine guarantees at least 64 KiB below the entry sp and this runs near
-// its top, so 48 KiB down is legitimately reachable and the last 16 KiB is the tripwire. Boot hart
-// only: one global floor cannot describe the secondary harts' stacks too, and they park.
+// The trap entry compares sp against the hart's kstack floor, so it has to describe the stack in
+// use before interrupts are enabled. Limine guarantees at least 64 KiB below the entry sp and this
+// runs near its top, so 48 KiB down is legitimately reachable and the last 16 KiB is the tripwire.
 static void arm_boot_stack_tripwire() {
     uintptr_t sp;
     asm volatile("mv %0, sp" : "=r"(sp));
-    g_kstack_floor = sp - 48 * 1024;
+    kernel::arch::set_kstack_floor(sp - 48 * 1024);
 }
 
 extern "C" [[noreturn]] void _start(void) {

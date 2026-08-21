@@ -3,6 +3,7 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/arch.h>
+#include <kernel/boot.h>
 #include <kernel/config.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
@@ -95,13 +96,28 @@ void cmd_stats(kernel::shell::ShellOutput& output) {
     auto s         = stats_snapshot();
     uint64_t hz    = kernel::platform::timestamp_hz();
     uint64_t total = kernel::arch::timestamp() - s.boot_ts;
+    size_t online  = 0;
+    for (size_t i = 0; i < CONFIG_MAX_CORES; ++i) { online += s.cores[i].online ? 1 : 0; }
     output.print("uptime: ");
     print_human(output, total, hz);
-    if (total > 0) { output.print("  idle: {0}%", s.idle_cycles * 100 / total); }
+    if (total > 0 && online > 0) {
+        output.print("  idle: {0}%  cores: {1}", s.idle_cycles * 100 / (total * online), online);
+    }
     output.print("\nswitches: {0} (preempt {1}, yield {2}, block {3}, sleep {4}, exit {5})\n", s.switches, s.preempts,
                  s.yields, s.block_switches, s.sleep_switches, s.exit_switches);
     output.print("wakes: {0}  spawned: {1}  reaped: {2}\n", s.wakes, s.spawned, s.reaped);
     output.print("runq: {0}  sleepers: {1}  zombies: {2}\n", s.runq_depth, s.sleepers, s.zombies);
+
+    ktl::vector<ktl::ref<Thread>> threads;
+    snapshot_all_threads(threads);
+    for (size_t i = 0; i < CONFIG_MAX_CORES; ++i) {
+        const auto& core = s.cores[i];
+        if (!core.online) { continue; }
+        const char* running = name_of(threads, core.current_id);
+        output.print("cpu{0} (hw {1}): running {2}", i, kernel::boot::cpu_hw_id(i), core.current_id);
+        if (running != nullptr) { output.print("'{0}'", running); }
+        output.print("  idle {0}%  switches {1}\n", total > 0 ? core.idle_cycles * 100 / total : 0, core.switches);
+    }
 }
 
 void cmd_trace_dump(kernel::shell::ShellOutput& output, size_t n) {

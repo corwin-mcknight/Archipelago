@@ -6,7 +6,8 @@
 ## Second Architecture (riscv64)
 - Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
   CLINT software-interrupt routing remains future work.
-- Schedule on the secondary harts: they park after Limine MP bring-up (per-hart kstack floor, timer, and PLIC context still boot-hart only).
+- Secondary harts schedule kernel threads (shared run queue, per-hart SBI tick) but wake only on their own tick: add an SBI IPI
+  so a newly runnable thread reaches an idle hart immediately, and TLB shootdown so user threads can leave the boot hart.
 - Grow the riscv64/tests/ suite beyond the JH7110 UART-to-PLIC claim/complete test (more sfence/TLB behavior and
   multi-source/per-hart external-interrupt coverage).
 - Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
@@ -79,8 +80,8 @@
 - Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs LAPIC timer ticks on the APs (the LAPIC timer driver landed, but only the BSP's fires), wake IPIs, and a reaper switch-completed handshake.
 - Per-CPU trace rings and accounting once AP scheduling lands (today's ring and stats assume a single scheduling core).
 - Latency percentiles and richer `sched` shell views if thread counts grow beyond what the flat per-thread tables can show at a glance.
-- Cross-CPU load balancing, once multi-core scheduling lands.
-- SMP park/wake handshake (decided: per-thread on-cpu flag, Linux style): block_if's unlock-to-switch window is safe only on a single scheduling core. When AP scheduling lands, each thread gets an on-cpu flag cleared from sched_finish_switch once its state is fully saved; a waker that finds the thread parked spins until the flag clears before running it. Chosen over holding the queue lock across the switch so the never-switch-while-holding-a-lock discipline stays intact.
+- Per-core run queues and load balancing if the single scheduler lock shows up in profiles; today one shared FIFO plus a
+  boot-core-only queue for user threads.
 - Back per-core identity with a GS-based per-CPU pointer before AP scheduling replaces the current x86 CPUID/dense-index lookup; make per-core lapic_id atomic to close the bring-up read/write race.
 - VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
 - The per-thread FPU area is embedded in Thread (512 bytes on x86_64, dropping the thread arena from 7 to 3 slots per page); kernel threads carry it dead. Move to a slab-heap pointer allocated only for user threads (the aspace test spawn already uses for IPC buffers) when thread counts or memory pressure make it matter -- needs a Thread teardown hook to free it.

@@ -7,17 +7,24 @@
 #include "kernel/arch.h"
 #include "kernel/config.h"
 #include "kernel/log.h"
+#include "kernel/mm/vm_aspace.h"
 #include "kernel/platform.h"
 #include "kernel/riscv/cpu.h"
+#include "kernel/sched/scheduler.h"
 #include "kernel/synchronization/execution_context.h"
 
 namespace kernel::riscv {
 void trap_init();  // riscv64/trap.cpp
 }
+namespace kernel::platform {
+void timer_start_local();  // riscv64/timer.cpp
+}
 
 kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
 size_t kernel::arch::current_core_index() { return kernel::riscv::current_core().index; }
+void kernel::arch::set_kstack_floor(uintptr_t floor) { kernel::riscv::current_core().kstack_floor = floor; }
+uintptr_t kernel::arch::kstack_floor() { return kernel::riscv::current_core().kstack_floor; }
 
 namespace {
 
@@ -26,20 +33,29 @@ size_t started_core_count() {
     return count > CONFIG_MAX_CORES ? CONFIG_MAX_CORES : count;
 }
 
-// Secondary-hart entry, released by cpu_start_cores() via kernel::boot::start_cpu(). Limine hands the
-// hart the boot hart's page tables and a fresh stack; everything in CSRs is ours to set. The hart
-// parks with interrupts masked: nothing routes to it yet (timer unprogrammed, PLIC context unclaimed)
-// and g_kstack_floor describes only the boot stack, so a trap here would trip the wrong tripwire.
-// ponytail: parked harts; per-hart kstack floor, timer and PLIC context come with AP scheduling.
+// Secondary-hart entry, released by cpu_start_cores() via kernel::boot::start_cpu(). Limine hands
+// the hart the bootloader's page tables (reclaimable memory, so the kernel's own come first) and a
+// fresh 64 KiB stack; every CSR is ours to set. Once the boot hart has the scheduler up, the hart
+// joins it as its idle thread, arms its own tick, and runs whatever the shared queue offers.
+// External interrupts stay with the boot hart (its PLIC context is the only one claimed).
 [[noreturn]] void hart_entry(size_t core_index, uint64_t hartid) {
     auto& core  = g_cpu_cores[core_index];
     core.hartid = hartid;
     kernel::riscv::set_current_core(core);
+    kernel::mm::kernel_aspace().activate();
     kernel::synchronization::init_execution_context(core_index);
     kernel::riscv::trap_init();
-    g_log.info("cpu{0} (hart {1}): parked", core_index, hartid);
+    uintptr_t sp;
+    asm volatile("mv %0, sp" : "=r"(sp));
+    kernel::arch::set_kstack_floor(sp - 48 * 1024);
+    g_log.info("cpu{0} (hart {1}): up", core_index, hartid);
     core.initialized.store(true, ktl::memory_order::release);
-    for (;;) { asm volatile("wfi"); }
+
+    while (!kernel::sched::started()) { asm volatile("" ::: "memory"); }
+    kernel::sched::join_secondary((uint32_t)core_index);
+    kernel::platform::timer_start_local();
+    kernel::arch::enable_interrupts();
+    kernel::sched::idle_loop();
 }
 
 }  // namespace

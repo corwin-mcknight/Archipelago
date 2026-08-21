@@ -66,11 +66,10 @@ class wait_queue {
    private:
     void unlink(wait_node* node);
 
-    // m_lock protects the waiter list only. The parking protocol itself -- unlock, then switch
-    // with interrupts off -- is safe on a single scheduling core because nothing can run and wake
-    // the thread in that window. The decided SMP handshake (todo.md, scheduler section) is a
-    // per-thread on-cpu flag cleared from sched_finish_switch: a waker on another core spins
-    // until the flag clears before running a thread it found parked here.
+    // m_lock protects the waiter list only; block_if takes it inside the scheduler lock. The
+    // parking protocol -- unlock, then switch with interrupts off -- leaves a window where another
+    // core can wake and queue the thread before its state is saved; Thread::on_cpu keeps any
+    // picker from running it until the outgoing switch has finished.
     kernel::synchronization::spinlock m_lock;
     wait_node* m_waiters = nullptr;  // intrusive doubly-linked list of on-stack nodes
 };

@@ -37,13 +37,32 @@ execution_context& current_execution_context() {
 void set_current_thread_id(uint64_t thread_id) { current_execution_context().thread_id = thread_id; }
 void set_deferred_preempt_hook(deferred_preempt_hook hook) { g_preempt_hook = hook; }
 
-void preempt_disable() { ++current_execution_context().preempt_depth; }
+// The depth counters live per core but belong to the running thread, so every update runs with
+// interrupts off: a tick between locating the core's context and writing it could migrate the
+// thread and land the write on the wrong core.
+class irq_off {
+   public:
+    irq_off() : m_flags(kernel::arch::save_and_disable_interrupts()) {}
+    ~irq_off() { kernel::arch::restore_interrupts(m_flags); }
+
+   private:
+    uint64_t m_flags;
+};
+
+void preempt_disable() {
+    irq_off off;
+    ++current_execution_context().preempt_depth;
+}
 
 void preempt_enable() {
-    auto& context = current_execution_context();
-    if (context.preempt_depth == 0) { panic("preempt_enable: unbalanced enable"); }
-    --context.preempt_depth;
-    service_deferred_preemption(context);
+    {
+        irq_off off;
+        auto& context = current_execution_context();
+        if (context.preempt_depth == 0) { panic("preempt_enable: unbalanced enable"); }
+        --context.preempt_depth;
+    }
+    irq_off off;
+    service_deferred_preemption(current_execution_context());
 }
 
 bool preemption_disabled() { return current_execution_context().preempt_depth != 0; }
@@ -55,22 +74,34 @@ bool blocking_allowed() {
 
 void request_preemption() { current_execution_context().preempt_pending = true; }
 
-void interrupt_enter() { ++current_execution_context().interrupt_depth; }
+void interrupt_enter() {
+    irq_off off;
+    ++current_execution_context().interrupt_depth;
+}
 void interrupt_exit() {
+    irq_off off;
     auto& context = current_execution_context();
     if (context.interrupt_depth == 0) { panic("interrupt_exit: unbalanced exit"); }
     --context.interrupt_depth;
     service_deferred_preemption(context);
 }
-void fault_enter() { ++current_execution_context().fault_depth; }
+void fault_enter() {
+    irq_off off;
+    ++current_execution_context().fault_depth;
+}
 void fault_exit() {
+    irq_off off;
     auto& context = current_execution_context();
     if (context.fault_depth == 0) { panic("fault_exit: unbalanced exit"); }
     --context.fault_depth;
     service_deferred_preemption(context);
 }
-void syscall_enter() { ++current_execution_context().syscall_depth; }
+void syscall_enter() {
+    irq_off off;
+    ++current_execution_context().syscall_depth;
+}
 void syscall_exit() {
+    irq_off off;
     auto& context = current_execution_context();
     if (context.syscall_depth == 0) { panic("syscall_exit: unbalanced exit"); }
     --context.syscall_depth;

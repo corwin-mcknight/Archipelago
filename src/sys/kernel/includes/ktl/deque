@@ -28,6 +28,17 @@ template <typename T> class deque {
 
    public:
     deque() = default;
+    deque(const deque&)            = delete;
+    deque& operator=(const deque&) = delete;
+    deque(deque&& other) noexcept : m_blocks(ktl::move(other.m_blocks)), m_size(other.m_size) { other.m_size = 0; }
+    deque& operator=(deque&& other) noexcept {
+        if (this != &other) {
+            m_blocks     = ktl::move(other.m_blocks);
+            m_size       = other.m_size;
+            other.m_size = 0;
+        }
+        return *this;
+    }
 
     bool push_back(T value) { return emplace_back_internal(ktl::move(value)); }
     bool emplace_back(T&& value) { return emplace_back_internal(ktl::move(value)); }

@@ -26,33 +26,34 @@ void wait_queue::block_if(wait_node& node, uint32_t mask, bool (*should_block)(v
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: block id={0}", current()->id()); }
     node.mask      = mask;
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    kernel::synchronization::preempt_disable();
-    m_lock.lock();
-    // A killed thread must not park on a signal wait: its wake may never come, and the kill scan
-    // that would have claimed it has already run. Mask-0 waits (mutexes) still park -- their wake
-    // is the holder's unlock, which always comes, and refusing them would spin instead. The check
-    // lives under the queue lock so a thread that slipped past the kill scan unparked cannot then
-    // park unnoticed.
-    ktl::ref<Thread> self = current();
-    if ((mask != 0 && self->killed()) || (should_block != nullptr && !should_block(ctx))) {
-        m_lock.unlock();
-        kernel::synchronization::preempt_enable();
-        kernel::arch::restore_interrupts(flags);
-        return;
+    Thread* parked = nullptr;
+    {
+        // The scheduler lock orders this park against the kill scan, which marks threads and reads
+        // their state under it: a thread that slipped past the scan unparked cannot then park
+        // unnoticed, and a thread the scan saw parked is claimed through the queue lock below.
+        sched_guard sched(g_sched_lock);
+        kernel::synchronization::lock_guard queue(m_lock);
+        // A killed thread must not park on a signal wait: its wake may never come, and the kill
+        // scan that would have claimed it has already run. Mask-0 waits (mutexes) still park --
+        // their wake is the holder's unlock, which always comes, and refusing them would spin.
+        ktl::ref<Thread> self = current();
+        if ((mask != 0 && self->killed()) || (should_block != nullptr && !should_block(ctx))) {
+            kernel::arch::restore_interrupts(flags);
+            return;
+        }
+        self->stats().blocks += 1;
+        self->set_state(thread_state::BLOCKED);
+        parked = self.get();
+        parked->set_parked(this, &node);
+        node.thread = ktl::move(self);
+        node.next   = m_waiters;
+        node.prev   = nullptr;
+        if (m_waiters != nullptr) { m_waiters->prev = &node; }
+        m_waiters = &node;
     }
-    self->stats().blocks += 1;
-    self->set_state(thread_state::BLOCKED);
-    Thread* parked = self.get();
-    parked->set_parked(this, &node);
-    node.thread = ktl::move(self);
-    node.next   = m_waiters;
-    node.prev   = nullptr;
-    if (m_waiters != nullptr) { m_waiters->prev = &node; }
-    m_waiters = &node;
-    m_lock.unlock();
-    kernel::synchronization::preempt_enable();
-    // Interrupts stay off between unlock and the switch: on the single scheduling core nothing
-    // can run and wake us in that window.
+    // Interrupts stay off between unlock and the switch. A waker on another core may already have
+    // queued us READY; the picker there leaves us alone until this core's switch has completed
+    // (Thread::on_cpu), so the window is harmless.
     schedule_out(switch_reason::BLOCK);
     parked->set_parked(nullptr, nullptr);
     kernel::arch::restore_interrupts(flags);

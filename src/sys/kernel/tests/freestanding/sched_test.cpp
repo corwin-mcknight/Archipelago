@@ -1,4 +1,6 @@
 #include <kernel/arch.h>
+#include <kernel/boot.h>
+#include <kernel/config.h>
 #include <kernel/obj/event.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/platform.h>
@@ -57,26 +59,38 @@ KTEST_CASE(sched_exit_reaps_thread) {
     KTEST_YIELD_UNTIL(g_type_registry.live_count(Thread::TYPE_ID) <= before);
 }
 
-// One spinner fixture drives both halves of the contention story: the spinner only runs if
-// preemption works, and its accounting must record the preemptions and the wait latency.
+// Spinners drive both halves of the contention story: with one spinner per core they outnumber
+// the cores left free by this busy-waiting thread, so at least one only runs if preemption works,
+// and the accounting must record the preemptions and the wait latency.
 KTEST_CASE(sched_preempts_spinner_and_accounts_latency) {
+    size_t cores = kernel::boot::collect().cpu_count;
+    if (cores > CONFIG_MAX_CORES) { cores = CONFIG_MAX_CORES; }
     volatile uint64_t spin_count = 0;
     volatile bool spin_stop      = false;
     auto body                    = [&] {
         while (!spin_stop) { spin_count = spin_count + 1; }
     };
-    KTEST_UNWRAP(t, spawn_fn("spinner", body));
-    // Busy-wait WITHOUT yielding: only preemption can give the spinner CPU time.
+    ktl::vector<ktl::ref<Thread>> spinners;
+    for (size_t i = 0; i < cores; i++) {
+        KTEST_UNWRAP(t, spawn_fn("spinner", body));
+        KTEST_REQUIRE_TRUE(spinners.push_back(t));
+    }
+    // Busy-wait WITHOUT yielding: only preemption can give the spinners this core's time.
     ktime_t start = kernel::time::now();
     while (kernel::time::now() < start + 3 * CONFIG_SCHED_TIMESLICE_TICKS) {}
     uint64_t observed = spin_count;
     spin_stop         = true;
     KTEST_EXPECT_TRUE(observed > 0);
-    uint32_t sig = t->wait_signals(Thread::SIGNAL_TERMINATED);
-    KTEST_EXPECT_TRUE((sig & Thread::SIGNAL_TERMINATED) != 0);
-    KTEST_EXPECT_TRUE(t->state() == thread_state::DEAD);
-    KTEST_EXPECT_TRUE(t->stats().preemptions >= 1);
-    KTEST_EXPECT_TRUE(t->stats().lat_max_cycles > 0);  // waited while main held the CPU
+    uint64_t preemptions = 0, lat_max = 0;
+    for (size_t i = 0; i < spinners.size(); i++) {
+        uint32_t sig = spinners[i]->wait_signals(Thread::SIGNAL_TERMINATED);
+        KTEST_EXPECT_TRUE((sig & Thread::SIGNAL_TERMINATED) != 0);
+        KTEST_EXPECT_TRUE(spinners[i]->state() == thread_state::DEAD);
+        preemptions += spinners[i]->stats().preemptions;
+        if (spinners[i]->stats().lat_max_cycles > lat_max) { lat_max = spinners[i]->stats().lat_max_cycles; }
+    }
+    KTEST_EXPECT_TRUE(preemptions >= 1);
+    KTEST_EXPECT_TRUE(lat_max > 0);  // waited while a core was held
 }
 
 KTEST_CASE(sched_sleep_advances_time) {
@@ -169,24 +183,33 @@ KTEST_CASE(sched_mutex_blocks_and_wakes) {
     KTEST_YIELD_UNTIL(phase == 2);
 }
 
+// Spinners outnumber the other cores so one is always queued against this core; the critical
+// section must hold this thread on its core past its slice, leaving the preemption pending.
 KTEST_CASE(sched_critical_section_defers_preemption) {
+    size_t cores = kernel::boot::collect().cpu_count;
+    if (cores > CONFIG_MAX_CORES) { cores = CONFIG_MAX_CORES; }
     volatile uint64_t runs = 0;
     volatile bool stop     = false;
     auto body              = [&] {
         while (!stop) { runs = runs + 1; }
     };
-    KTEST_UNWRAP(t, spawn_fn("deferred-spinner", body));
+    ktl::vector<ktl::ref<Thread>> spinners;
+    for (size_t i = 0; i < cores; i++) {
+        KTEST_UNWRAP(t, spawn_fn("deferred-spinner", body));
+        KTEST_REQUIRE_TRUE(spinners.push_back(t));
+    }
+    auto self = current();
     {
         kernel::synchronization::critical_section critical;
-        uint64_t before = runs;
+        uint64_t before = self->stats().preemptions;
         ktime_t until   = kernel::time::now() + 2 * CONFIG_SCHED_TIMESLICE_TICKS;
         while (kernel::time::now() < until) {}
-        KTEST_EXPECT_EQUAL(runs, before);
+        KTEST_EXPECT_EQUAL(self->stats().preemptions, before);
         KTEST_EXPECT_TRUE(kernel::synchronization::current_execution_context().preempt_pending);
     }
-    KTEST_EXPECT_TRUE(runs > 0);
+    KTEST_YIELD_UNTIL(runs > 0);
     stop = true;
-    KTEST_YIELD_UNTIL(t->state() == thread_state::DEAD);
+    for (size_t i = 0; i < spinners.size(); i++) { KTEST_YIELD_UNTIL(spinners[i]->state() == thread_state::DEAD); }
 }
 
 namespace {
@@ -272,16 +295,17 @@ KTEST_CASE(sched_global_stats_advance) {
 }
 
 KTEST_CASE(sched_idle_state_truthful_while_switched_out) {
-    // We (the kshell thread) are RUNNING, so on a single scheduling core idle must report READY,
-    // never a second RUNNING.
+    // We (the kshell thread) are RUNNING on some core, so that core's idle thread must report
+    // READY: never every idle RUNNING at once.
     ktl::vector<ktl::ref<Thread>> threads;
     KTEST_REQUIRE_TRUE(kernel::sched::kernel_task()->snapshot_threads(threads));
-    bool found_idle = false;
+    size_t idles = 0, running = 0;
     for (size_t i = 0; i < threads.size(); ++i) {
-        if (threads[i]->name() != nullptr && ktl::string_view(threads[i]->name()) == "idle0") {
-            found_idle = true;
-            KTEST_EXPECT_TRUE(threads[i]->state() == thread_state::READY);
+        if (threads[i]->name() != nullptr && ktl::string_view(threads[i]->name()).starts_with("idle")) {
+            idles += 1;
+            if (threads[i]->state() == thread_state::RUNNING) { running += 1; }
         }
     }
-    KTEST_REQUIRE_TRUE(found_idle);
+    KTEST_REQUIRE_TRUE(idles >= 1);
+    KTEST_EXPECT_TRUE(running < idles);
 }

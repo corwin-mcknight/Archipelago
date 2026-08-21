@@ -44,19 +44,20 @@ void sleep_ticks(uint64_t ticks) {
     }
     if (lifecycle_log_verbose_enabled()) { g_log.debug("sched: sleep id={0} ticks={1}", current()->id(), ticks); }
     uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    auto& c        = cur_cpu();
-    assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
-    // A killed thread must not enter the sleeper list: its deadline could be arbitrarily far out,
-    // and the kill scan that wakes sleepers early has already run. Checked with interrupts off so
-    // a kill cannot slip between the check and the park; the thread exits at the syscall boundary.
-    if (c.current->killed()) {
-        kernel::arch::restore_interrupts(flags);
-        return;
+    {
+        sched_guard guard(g_sched_lock);
+        auto& c = cur_cpu();
+        assert(c.current.get() != c.idle.get(), "sleep_ticks: idle thread cannot sleep");
+        // A killed thread must not enter the sleeper list: its deadline could be arbitrarily far
+        // out, and the kill scan that wakes sleepers early has already run. Checked under the lock
+        // so a kill cannot slip between the check and the park; the thread exits at the syscall
+        // boundary.
+        if (c.current->killed()) { return; }
+        c.current->stats().sleeps += 1;
+        c.current->set_state(thread_state::BLOCKED);
+        bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
+        ensure(ok, "sleep_ticks: sleeper push failed despite reservation");
     }
-    c.current->stats().sleeps += 1;
-    c.current->set_state(thread_state::BLOCKED);
-    bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
-    ensure(ok, "sleep_ticks: sleeper push failed despite reservation");
     schedule_out(switch_reason::SLEEP);
     kernel::arch::restore_interrupts(flags);
 }
@@ -66,7 +67,7 @@ void wake_due_sleepers() {
         if (g_sleepers[i].wake_at <= kernel::time::now()) {
             ktl::ref<Thread> t = ktl::move(g_sleepers[i].thread);
             g_sleepers.swap_remove(i);
-            make_ready(ktl::move(t));
+            make_ready_locked(ktl::move(t));
         } else {
             ++i;
         }
@@ -80,28 +81,24 @@ bool wake_sleeper(Thread* thread) {
         if (g_sleepers[i].thread.get() != thread) { continue; }
         ktl::ref<Thread> woken = ktl::move(g_sleepers[i].thread);
         g_sleepers.swap_remove(i);
-        make_ready(ktl::move(woken));
+        make_ready_locked(ktl::move(woken));
         return true;
     }
     return false;
 }
 
 bool sleepers_reserve(size_t capacity) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    bool ok        = g_sleepers.reserve(capacity) && g_timed_waits.reserve(capacity);
-    kernel::arch::restore_interrupts(flags);
-    return ok;
+    return grow_under_sched_lock(g_sleepers, capacity) && grow_under_sched_lock(g_timed_waits, capacity);
 }
 
 void timed_wait_register(wait_queue* queue, wait_node* node, ktime_t wake_at) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    bool ok        = g_timed_waits.push_back(timed_wait{wake_at, queue, node});
+    sched_guard guard(g_sched_lock);
+    bool ok = g_timed_waits.push_back(timed_wait{wake_at, queue, node});
     ensure(ok, "timed_wait_register: push failed despite reservation");
-    kernel::arch::restore_interrupts(flags);
 }
 
 void timed_wait_unregister(wait_node* node) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    sched_guard guard(g_sched_lock);
     for (size_t i = 0; i < g_timed_waits.size(); i++) {
         if (g_timed_waits[i].node == node) {
             g_timed_waits.swap_remove(i);
@@ -109,7 +106,6 @@ void timed_wait_unregister(wait_node* node) {
         }
     }
     // Absent is normal: the expiry scan already removed the entry when it claimed the thread.
-    kernel::arch::restore_interrupts(flags);
 }
 
 void wake_due_timed_waits() {
@@ -127,7 +123,7 @@ void wake_due_timed_waits() {
             continue;
         }
         g_timed_waits.swap_remove(i);
-        make_ready(ktl::move(woken));
+        make_ready_locked(ktl::move(woken));
     }
 }
 

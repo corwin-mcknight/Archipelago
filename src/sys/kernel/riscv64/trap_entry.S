@@ -1,7 +1,7 @@
 // Supervisor trap entry: build a register_frame_t on the kernel stack and hand
 // it to riscv_trap_handler. Byte offsets must match the field order in
 // includes/kernel/riscv/registers.h exactly. tp addresses the hart's cpu_core
-// (includes/kernel/riscv/cpu.h: kstack_top at 0, user_sp at 8) in supervisor
+// (includes/kernel/riscv/cpu.h: kstack_top at 0, user_sp at 8, kstack_floor at 16) in supervisor
 // mode; sscratch is zero in supervisor mode and parks that pointer while user
 // mode is running, so the entry swaps it back into tp.
 
@@ -16,8 +16,7 @@ riscv_trap_entry:
     // first frame store below, which would recurse here forever. t0 is stashed
     // register-only in sscratch (zero in supervisor mode) across the check.
     csrw sscratch, t0
-    la   t0, g_kstack_floor
-    ld   t0, 0(t0)
+    ld   t0, 16(tp)
     bltu sp, t0, trap_sp_overflow
     csrrw t0, sscratch, zero
     addi sp, sp, -288
@@ -91,16 +90,19 @@ riscv_trap_entry:
     ld t0, 256(sp)
     csrw sstatus, t0
     andi t0, t0, 256
+    // Returning to supervisor mode keeps the live tp: the frame's copy names the hart this thread
+    // was interrupted on, which after a migration is no longer the hart it resumes on.
     bnez t0, .Lrestore_frame
-    // Returning to user: publish this stack as the next trap's landing and park tp in sscratch.
+    // Returning to user: publish this stack as the next trap's landing, park tp in sscratch, and
+    // hand back the user's tp.
     addi t0, sp, 288
     sd t0, 0(tp)
     csrw sscratch, tp
+    ld tp, 24(sp)
 
 .Lrestore_frame:
     ld ra, 0(sp)
     ld gp, 16(sp)
-    ld tp, 24(sp)
     ld t1, 40(sp)
     ld t2, 48(sp)
     ld s0, 56(sp)

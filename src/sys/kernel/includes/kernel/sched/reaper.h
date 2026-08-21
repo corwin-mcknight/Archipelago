@@ -19,17 +19,18 @@ class Thread;
 // Spawn the reaper thread. Called by sched::init() once the scheduler is online.
 void reaper_start();
 
-// Queue a dead thread for reaping and wake the reaper. The caller must have interrupts disabled
-// (exit_current is mid-teardown and never returns); the ref is taken by value so the dying thread
-// stays pinned through its final context switch.
+// Queue a dead thread for reaping; the caller holds the scheduler lock (exit_current is
+// mid-teardown and never returns). The ref is taken by value so the dying thread stays pinned
+// through its final context switch. reaper_kick() wakes the reaper and takes no locks on entry.
 void reaper_enqueue(ktl::ref<Thread> zombie);
+void reaper_kick();
 
-// Live counts for stats_snapshot(). Both snapshot with interrupts disabled.
+// Live counts for stats_snapshot(); read with the scheduler lock held.
 size_t reaper_zombie_count();
 uint64_t reaper_reaped_count();
 
 // Recycled kernel-stack pool. acquire() returns a cached stack or nothing (the caller then
-// allocates a fresh one); release() returns a stack to the pool. Both manage interrupts internally.
+// allocates a fresh one); release() returns a stack to the pool. Both lock internally.
 ktl::maybe<kernel::mm::vm_paddr_t> stack_pool_acquire();
 void stack_pool_release(kernel::mm::vm_paddr_t phys);
 

@@ -80,12 +80,15 @@ void thread_discard(ktl::ref<Thread> thread) {
 }
 
 ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    thread->set_ready_ts(kernel::arch::timestamp());
-    g_stats.spawned += 1;
-    trace_push(trace_kind::SPAWN, switch_reason::NONE, cur_cpu().current ? cur_cpu().current->id() : 0, thread->id());
-    bool ok = cur_cpu().run_queue.push_back(thread);
-    kernel::arch::restore_interrupts(flags);
+    bool ok;
+    {
+        sched_guard guard(g_sched_lock);
+        thread->set_ready_ts(kernel::arch::timestamp());
+        g_stats.spawned += 1;
+        auto& c = cur_cpu();
+        trace_push(trace_kind::SPAWN, switch_reason::NONE, c.current ? c.current->id() : 0, thread->id());
+        ok = push_runnable_locked(thread);
+    }
     if (!ok) {
         thread_discard(thread);
         return ktl::err(ktl::errc::oom);

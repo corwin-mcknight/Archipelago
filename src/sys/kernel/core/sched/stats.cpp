@@ -17,7 +17,6 @@ bool g_lifecycle_log_verbose = false;
 }  // namespace
 
 global_stats g_stats;
-uint64_t g_last_switch_ts = 0;
 
 void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t to) {
     trace_record r;
@@ -30,35 +29,40 @@ void trace_push(trace_kind kind, switch_reason reason, uint64_t from, uint64_t t
 }
 
 global_stats stats_snapshot() {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    sched_guard guard(g_sched_lock);
     global_stats s = g_stats;
-    auto& c        = cur_cpu();
-    s.runq_depth   = c.run_queue.size();
+    s.runq_depth   = run_queue_depth_locked();
     s.sleepers     = sleeper_count();
     s.zombies      = reaper_zombie_count();
     s.reaped       = reaper_reaped_count();
-    // Charge the running thread's in-progress slice so idle/busy shares are current.
-    if (c.current) {
-        uint64_t now = kernel::arch::timestamp();
-        c.current->stats().cpu_cycles += now - g_last_switch_ts;
-        g_last_switch_ts = now;
+    // Charge every core's running thread its in-progress slice so idle/busy shares are current;
+    // the anchors are scheduler-lock state, so another core's switch_to cannot race this.
+    uint64_t now   = kernel::arch::timestamp();
+    for (size_t i = 0; i < CONFIG_MAX_CORES; i++) {
+        auto& c = cpu_at(i);
+        if (c.current) {
+            c.current->stats().cpu_cycles += now - c.last_switch_ts;
+            c.last_switch_ts      = now;
+            s.cores[i].online     = true;
+            s.cores[i].switches   = c.switches;
+            s.cores[i].current_id = c.current->id();
+        }
+        if (c.idle) {
+            s.cores[i].idle_cycles = c.idle->stats().cpu_cycles;
+            s.idle_cycles += c.idle->stats().cpu_cycles;
+        }
     }
-    if (c.idle) { s.idle_cycles = c.idle->stats().cpu_cycles; }
-    kernel::arch::restore_interrupts(flags);
     return s;
 }
 
 size_t trace_copy_newest(trace_record* out, size_t max) {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
-    size_t n       = g_trace.copy_newest(out, max);
-    kernel::arch::restore_interrupts(flags);
-    return n;
+    sched_guard guard(g_sched_lock);
+    return g_trace.copy_newest(out, max);
 }
 
 void trace_clear() {
-    uint64_t flags = kernel::arch::save_and_disable_interrupts();
+    sched_guard guard(g_sched_lock);
     g_trace.clear();
-    kernel::arch::restore_interrupts(flags);
 }
 
 void set_lifecycle_log(bool enabled) { g_lifecycle_log = enabled; }

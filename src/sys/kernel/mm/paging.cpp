@@ -1,3 +1,5 @@
+#include "kernel/arch.h"
+#include "kernel/config.h"
 #include "kernel/mm/arch_paging.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vm_aspace.h"
@@ -11,10 +13,8 @@ namespace kernel::mm {
 
 namespace {
 
-// The one currently active address space on this CPU. A plain global until
-// per-CPU storage exists; single-CPU scoped. The fault handler resolves
-// against it.
-vm_aspace* g_active_space = nullptr;
+// The address space active on each core. The fault handler resolves against the calling core's.
+vm_aspace* g_active_space[CONFIG_MAX_CORES];
 
 inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
 
@@ -195,7 +195,9 @@ void vm_aspace::arch_destroy() {
     for (size_t i = 0; i < 256; ++i) { free_subtree(root[i], arch::PT_LEVELS); }
     g_page_frame_allocator.free(m_arch.root_phys);
     m_arch.root_phys = 0;
-    if (g_active_space == this) { g_active_space = nullptr; }
+    for (auto& active : g_active_space) {
+        if (active == this) { active = nullptr; }
+    }
 }
 
 bool vm_aspace::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache) {
@@ -259,10 +261,10 @@ ktl::maybe<vm_paddr_t> vm_aspace::unmap_page(uintptr_t vaddr) {
 
 void vm_aspace::activate() {
     arch::set_root(m_arch.root_phys);
-    g_active_space = this;
+    g_active_space[kernel::arch::current_core_index()] = this;
 }
 
-vm_aspace* vm_aspace::active() { return g_active_space; }
+vm_aspace* vm_aspace::active() { return g_active_space[kernel::arch::current_core_index()]; }
 
 // End of the canonical low half: the sign-extension boundary of the walk's
 // top consumed bit (bit 47 on x86_64, bit 38 on riscv64 Sv39).

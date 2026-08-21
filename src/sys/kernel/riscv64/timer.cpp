@@ -30,6 +30,7 @@ int64_t sbi_set_timer(uint64_t deadline) {
 class sbi_timer : public kernel::hal::IInterruptHandler {
    public:
     void init();
+    void start_local();
     time_ns_t resolution_ns();
     bool handle_interrupt(register_frame_t* regs);
 
@@ -43,13 +44,19 @@ sbi_timer g_timer;
 }  // namespace
 
 void timer_init() { g_timer.init(); }
+void timer_start_local() { g_timer.start_local(); }
 
 void sbi_timer::init() {
     m_ticks_per_interval = timestamp_hz() / TICK_HZ;
     kernel::time::init(resolution_ns());
     g_interrupt_manager.register_interrupt(SUPERVISOR_TIMER_CAUSE, this, 0);
+    start_local();
+}
+
+// The supervisor timer is per hart: every hart that schedules arms its own.
+void sbi_timer::start_local() {
     if (sbi_set_timer(kernel::arch::timestamp() + m_ticks_per_interval) != 0) {
-        g_log.error("timer: SBI TIME extension unavailable; kernel time will not advance");
+        g_log.error("timer: SBI TIME extension unavailable; this hart will not tick");
         return;
     }
     asm volatile("csrs sie, %0" ::"r"(SIE_STIE));

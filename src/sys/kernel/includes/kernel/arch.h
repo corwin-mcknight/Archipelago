@@ -34,6 +34,11 @@ uintptr_t active_translation_root();
 /// Halt until the next interrupt (hlt / wfi). Call with interrupts enabled.
 void wait_for_interrupt();
 
+/// Stack-overflow tripwire for the calling core: the trap entry faults on any kernel sp below
+/// it. The scheduler publishes the running thread's floor on every switch; zero disables it.
+void set_kstack_floor(uintptr_t floor);
+uintptr_t kstack_floor();
+
 /// Fabricate the initial callee-saved switch frame on a fresh stack so the first
 /// arch_context_switch into it lands in the arch's entry trampoline, which enables
 /// interrupts, calls entry(arg), and falls into sched_thread_exit(). Returns the initial sp.

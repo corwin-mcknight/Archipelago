@@ -45,6 +45,7 @@ thread_stats aggregate(const ktl::vector<ktl::ref<Thread>>& threads) {
         agg.blocks += st.blocks;
         agg.sleeps += st.sleeps;
         agg.wakes += st.wakes;
+        agg.migrations += st.migrations;
         agg.lat_total_cycles += st.lat_total_cycles;
         if (st.lat_max_cycles > agg.lat_max_cycles) { agg.lat_max_cycles = st.lat_max_cycles; }
     }
