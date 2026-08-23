@@ -32,11 +32,11 @@ class early_heap {
     early_heap_stats stats();
 
    private:
-    early_heap_block* m_head;
-    uintptr_t heap_start;
-    uintptr_t heap_end;
-    uint64_t m_alloc_calls = 0;
-    uint64_t m_free_calls  = 0;
+    early_heap_block* m_head = nullptr;
+    uintptr_t heap_start     = 0;
+    uintptr_t heap_end       = 0;
+    uint64_t m_alloc_calls   = 0;
+    uint64_t m_free_calls    = 0;
 };
 }  // namespace kernel::mm
 

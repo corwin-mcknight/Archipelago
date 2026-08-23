@@ -2,7 +2,7 @@
 #include "kernel/log.h"
 #include "kernel/platform.h"
 
-kernel::hal::interrupt_manager g_interrupt_manager;
+constinit kernel::hal::interrupt_manager g_interrupt_manager;
 
 namespace kernel {
 namespace hal {

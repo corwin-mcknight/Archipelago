@@ -10,8 +10,8 @@
 namespace kernel {
 
 struct cpu_core {
-    ktl::atomic<bool> initialized;
-    uint32_t lapic_id;
+    ktl::atomic<bool> initialized{false};
+    uint32_t lapic_id = 0;
 };
 
 namespace x86 {

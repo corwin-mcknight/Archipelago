@@ -10,10 +10,10 @@
 
 namespace kernel::mm {
 
-kernel::synchronization::spinlock g_vmm_lock;
+[[clang::no_destroy]] kernel::synchronization::spinlock g_vmm_lock;
 
 namespace {
-vm_aspace g_kernel_aspace;
+[[clang::no_destroy]] vm_aspace g_kernel_aspace;
 vm_paddr_t g_zero_page = 0;
 }  // namespace
 

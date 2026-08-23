@@ -6,7 +6,7 @@
 #include "ktl/algorithm"
 #include "ktl/fixed_string"
 
-kernel::system_log g_log;
+constinit kernel::system_log g_log;
 
 struct loglevel_config_static {
     const char status;

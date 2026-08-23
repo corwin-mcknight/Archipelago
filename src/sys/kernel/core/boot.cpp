@@ -113,8 +113,8 @@ void init_memory() {
     // kernel ranges stay WIRED. Fixed capacity -- boot memory maps are small;
     // overflow only costs descriptor precision, so warn and drop.
     constexpr size_t MAX_MEMMAP_RANGES = 48;
-    kernel::mm::vm_page_region usable_ranges[MAX_MEMMAP_RANGES];
-    kernel::mm::vm_page_region wired_ranges[MAX_MEMMAP_RANGES];
+    static kernel::mm::vm_page_region usable_ranges[MAX_MEMMAP_RANGES]{};
+    static kernel::mm::vm_page_region wired_ranges[MAX_MEMMAP_RANGES]{};
     size_t usable_range_count   = 0;
     size_t wired_range_count    = 0;
 

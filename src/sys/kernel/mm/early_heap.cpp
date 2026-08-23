@@ -85,7 +85,6 @@ void* early_heap::alloc(size_t size, size_t alignment) {
     if (!ktl::is_power_of_two(alignment)) {
         g_log.error("Alignment must be a power of two");
         panic("Early heap allocation alignment error");
-        return nullptr;
     }
 
     if (alignment < heap_alignment_fallback) { alignment = heap_alignment_fallback; }
@@ -151,7 +150,6 @@ void* early_heap::alloc(size_t size, size_t alignment) {
 
     g_log.error("Early heap out of memory (allocation of {0} bytes with alignment {1})", size, alignment);
     panic("Early heap out of memory");
-    return nullptr;
 }
 
 void early_heap::free(void* ptr) {
@@ -198,4 +196,4 @@ void early_heap::free(void* ptr) {
 
 }  // namespace kernel::mm
 
-kernel::mm::early_heap g_early_heap;
+constinit kernel::mm::early_heap g_early_heap;

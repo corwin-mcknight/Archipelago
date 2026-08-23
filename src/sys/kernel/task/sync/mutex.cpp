@@ -38,9 +38,9 @@ void mutex::lock() {
         m_waiters.block_if(
             0,
             [](void* argument) {
-                auto* context     = static_cast<acquire_context*>(argument);
-                context->acquired = context->lock->try_acquire();
-                return !context->acquired;
+                auto* acquire     = static_cast<acquire_context*>(argument);
+                acquire->acquired = acquire->lock->try_acquire();
+                return !acquire->acquired;
             },
             &context);
         if (context.acquired) { return; }

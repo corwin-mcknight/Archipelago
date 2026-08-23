@@ -30,7 +30,7 @@ template <typename T, size_t Capacity> class log_ring {
         FLUSHED = 3,  // emitted; payload retained as history until reclaimed
     };
 
-    log_ring()                           = default;
+    constexpr log_ring()                 = default;
     log_ring(const log_ring&)            = delete;
     log_ring& operator=(const log_ring&) = delete;
 

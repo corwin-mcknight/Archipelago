@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+extern uintptr_t g_hhdm_offset;
+
 // Arch-neutral boot sequence (core/boot.cpp). Each arch's _start does its own
 // bring-up (heap, ctors, UART, CPUs, traps) and calls these in order; every
 // function panics on an unusable boot_info.

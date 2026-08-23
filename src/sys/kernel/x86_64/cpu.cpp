@@ -13,13 +13,15 @@
 #include "kernel/x86/cpu.h"
 #include "kernel/x86/descriptor_tables.h"
 
-kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
+constinit kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 
 namespace {
 kernel::x86::cpu_local g_cpu_locals[CONFIG_MAX_CORES];
 constexpr uint32_t MSR_GS_BASE = 0xC0000101;
 ktl::atomic<uint64_t> g_reschedule_ipi_count{0};
 }  // namespace
+
+extern "C" void x86_note_reschedule_ipi();
 
 void kernel::x86::install_local(size_t index) {
     if (index >= CONFIG_MAX_CORES) { panic("x86: CPU index out of range"); }

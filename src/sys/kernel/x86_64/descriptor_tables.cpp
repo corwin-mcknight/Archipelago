@@ -26,12 +26,14 @@ IRQ_LIST(DECLARE_IRQ)
 // clang-format on
 
 // Each CPU has it's own GDT.
+namespace {
 kernel::x86::gdt gdts[CONFIG_MAX_CORES];
 
 // They share the same IDT, which is initialized by the BP.
 __attribute__((aligned(0x10))) struct kernel::x86::idt_entry idt[256];
 __attribute__((aligned(0x10))) struct kernel::x86::idt_ptr idtptr;
 bool idt_initialized = false;
+}  // namespace
 
 void kernel::x86::init_gdt(int corenum) {
     gdts[corenum].entries[0]     = {0x0000, 0x00, 0x00, 0x00, 0x00, 0x00};  // Null Entry

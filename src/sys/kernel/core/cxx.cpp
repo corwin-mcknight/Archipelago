@@ -6,6 +6,14 @@
 typedef void initfunc_t(void);
 extern initfunc_t *__init_array_start[], *__init_array_end[];
 
+extern "C" void init_global_constructors_array(void);
+extern "C" void __cxa_atexit(void (*f)(void*), void* obj, void* d);
+extern "C" [[noreturn]] void __cxa_pure_virtual();
+extern "C" void* __cxa_begin_catch(void*);
+extern "C" [[noreturn]] void __cxa_end_catch();
+
+namespace std { [[noreturn]] void terminate() noexcept; }
+
 extern "C" void init_global_constructors_array(void) {
     for (initfunc_t** p = __init_array_start; p != __init_array_end; p++) (*p)();
 }

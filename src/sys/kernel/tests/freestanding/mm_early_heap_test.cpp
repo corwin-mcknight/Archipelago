@@ -16,7 +16,7 @@ namespace {
 
 constexpr size_t shared_heap_size = 4096;
 alignas(max_align_t) uint8_t g_shared_heap_storage[shared_heap_size];
-kernel::mm::early_heap g_test_heap;
+constinit kernel::mm::early_heap g_test_heap;
 
 void reset_shared_heap(size_t bytes) {
     uintptr_t start = reinterpret_cast<uintptr_t>(g_shared_heap_storage);

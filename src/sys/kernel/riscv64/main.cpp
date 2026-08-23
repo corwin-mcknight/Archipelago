@@ -16,6 +16,7 @@ void trap_init();  // riscv64/trap.cpp
 }
 
 extern "C" void init_global_constructors_array(void);
+extern "C" [[noreturn]] void _start(void);
 
 extern uintptr_t _initial_heap_start;
 extern uintptr_t _initial_heap_end;

@@ -235,7 +235,7 @@ ktl::result<ktl::ref<Task>> launch_coordinator() {
         return ktl::err(ktl::errc::invalid_operation);
     }
     auto created = create_user_task("init", module->data, module->size);
-    if (created.is_err()) { return created; }
+    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
     auto task    = created.unwrap();
     auto endowed = endow_boot_modules(task);
     if (endowed.is_err()) { g_log.warn("task: coordinator endowment incomplete"); }
@@ -293,7 +293,7 @@ ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
         auto mailbox = task->mailbox();
         if (!mailbox) {
             g_log.warn("task: module '{0}' not endowed: coordinator gone", module.role);
-            return outcome.is_ok() ? ktl::err(ktl::errc::peer_closed) : outcome;
+            return outcome.is_ok() ? ktl::err(ktl::errc::peer_closed) : ktl::err(outcome.unwrap_err());
         }
         auto sent = mailbox->write(ktl::move(mail));
         if (sent.is_err()) {
@@ -301,7 +301,7 @@ ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
             if (outcome.is_ok()) { outcome = ktl::err(sent.unwrap_err()); }
         }
     }
-    return outcome;
+    return outcome.is_ok() ? ktl::result<void>::ok() : ktl::err(outcome.unwrap_err());
 }
 
 ktl::result<void> task_kill(const ktl::ref<Task>& task) {

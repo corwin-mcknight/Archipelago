@@ -97,7 +97,7 @@ void reboot() {
     reg(WDOG_PADDR + WDT_LOCK)   = 0;
     // Reset arrives within microseconds if the watchdog is armed; give it
     // ample time, then return so the caller can report a dead reset path.
-    for (volatile uint32_t spins = 0; spins < 100'000'000; ++spins) {}
+    for (volatile uint32_t spins = 0; spins < 100'000'000; spins = spins + 1) {}
 }
 
 }  // namespace kernel::platform

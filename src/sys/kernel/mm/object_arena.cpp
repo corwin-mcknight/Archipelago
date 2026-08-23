@@ -189,7 +189,8 @@ object_arena_stats object_arena::stats() {
 // translation units) so the host test runner, which builds only a subset of kernel sources,
 // always links the symbols the client headers declare.
 
-object_arena g_thread_arena("thread", sizeof(kernel::sched::Thread), alignof(kernel::sched::Thread));
+[[clang::no_destroy]] object_arena g_thread_arena("thread", sizeof(kernel::sched::Thread),
+                                                  alignof(kernel::sched::Thread));
 
 }  // namespace kernel::mm
 

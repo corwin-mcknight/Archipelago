@@ -6,7 +6,7 @@
 
 namespace kernel::mm {
 
-slab_heap g_slab_heap;
+[[clang::no_destroy]] slab_heap g_slab_heap;
 
 namespace {
 

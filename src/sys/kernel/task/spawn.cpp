@@ -99,7 +99,7 @@ ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
 
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
     auto created = thread_create_in(kernel_task(), name, entry, arg);
-    if (created.is_err()) { return created; }
+    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
     auto thread = created.unwrap();
     auto queued = thread_enqueue(thread);
     if (queued.is_err()) { return ktl::err(queued.unwrap_err()); }

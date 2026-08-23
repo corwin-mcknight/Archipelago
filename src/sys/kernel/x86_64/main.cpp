@@ -17,6 +17,9 @@
 #include "kernel/x86/descriptor_tables.h"
 
 extern "C" void init_global_constructors_array(void);
+void core_init(uint32_t core_index, uint32_t lapic_id, bool is_boot_processor);
+[[noreturn]] void ap_entry(size_t core_index, uint64_t hw_id);
+extern "C" [[noreturn]] void _start(void);
 
 // The interrupt stubs compare rsp against the calling CPU's GS-local floor. It has to describe the
 // stack in use before interrupts are enabled; left at zero the comparison never trips and the boot

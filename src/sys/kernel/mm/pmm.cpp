@@ -173,6 +173,6 @@ pmm_stats page_frame_allocator::stats() {
     };
 }
 
-page_frame_allocator g_page_frame_allocator;
+[[clang::no_destroy]] page_frame_allocator g_page_frame_allocator;
 
 }  // namespace kernel::mm

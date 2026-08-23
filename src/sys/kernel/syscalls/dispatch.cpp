@@ -27,7 +27,6 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
             }
             kernel::synchronization::syscall_exit();
             kernel::sched::exit_current();
-            break;
         }
         case kernel::syscall::SYS_YIELD: kernel::sched::yield(); break;
         case kernel::syscall::SYS_SLEEP: kernel::sched::sleep_ticks(a0); break;

@@ -22,7 +22,7 @@ constexpr uintptr_t low_vaddr = 0x100000;    // 1 MiB -- user half, empty in a f
 constexpr uintptr_t mid_vaddr = 0x40000000;  // 1 GiB -- different second-level entry
 // Halfway up the low half: a different top-level entry on both arches (bit 46
 // on x86_64, bit 37 on riscv64 Sv39) while staying canonical on each.
-const uintptr_t high_vaddr    = vm_aspace::low_limit() / 2;
+uintptr_t high_vaddr() { return vm_aspace::low_limit() / 2; }
 
 }  // namespace
 
@@ -172,11 +172,11 @@ KTEST_CASE(paging_independent_mappings_across_levels) {
 
     KTEST_REQUIRE_TRUE(space.map_page(low_vaddr, p1, vm_prot::READ | vm_prot::WRITE));
     KTEST_REQUIRE_TRUE(space.map_page(mid_vaddr, p2, vm_prot::READ | vm_prot::WRITE));
-    KTEST_REQUIRE_TRUE(space.map_page(high_vaddr, p3, vm_prot::READ | vm_prot::WRITE));
+    KTEST_REQUIRE_TRUE(space.map_page(high_vaddr(), p3, vm_prot::READ | vm_prot::WRITE));
 
     KTEST_EXPECT_VALUE(space.walk(low_vaddr), p1);
     KTEST_EXPECT_VALUE(space.walk(mid_vaddr), p2);
-    KTEST_EXPECT_VALUE(space.walk(high_vaddr), p3);
+    KTEST_EXPECT_VALUE(space.walk(high_vaddr()), p3);
 
     kernel::mm::g_page_frame_allocator.free(p1);
     kernel::mm::g_page_frame_allocator.free(p2);

@@ -150,7 +150,7 @@ ktl::maybe<vm_paddr_t> deep_copy_table(vm_paddr_t table_phys, int level) {
         }
         dst[i] = entry;
     }
-    return copy;
+    return copy.value();
 }
 
 }  // namespace

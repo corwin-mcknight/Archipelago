@@ -16,8 +16,9 @@
 
 namespace kernel::sched {
 
-kernel::synchronization::spinlock g_sched_lock;
-cpu_sched g_cpus[CONFIG_MAX_CORES];
+[[clang::no_destroy]] kernel::synchronization::spinlock g_sched_lock;
+
+namespace { [[clang::no_destroy]] cpu_sched g_cpus[CONFIG_MAX_CORES]; }
 
 cpu_sched& cur_cpu() { return g_cpus[kernel::arch::current_core_index()]; }
 cpu_sched& cpu_at(size_t index) { return g_cpus[index]; }
@@ -31,7 +32,7 @@ ktl::atomic<bool> g_started{false};
 
 // One FIFO under g_sched_lock; any core picks from it.
 // ponytail: one shared queue, per-core queues if the lock shows up in profiles.
-ktl::deque<ktl::ref<Thread>> g_run_queue;
+[[clang::no_destroy]] ktl::deque<ktl::ref<Thread>> g_run_queue;
 
 // Pop the first thread whose previous core has finished switching it out; one still on-cpu rotates
 // to the back so no core ever waits on another inside the lock.
@@ -149,13 +150,16 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
 void create_idle(uint32_t core_index) {
     static char names[CONFIG_MAX_CORES][8];
     char* name = names[core_index];
-    name[0] = 'i', name[1] = 'd', name[2] = 'l', name[3] = 'e';
-    size_t n = 4;
+    name[0]    = 'i';
+    name[1]    = 'd';
+    name[2]    = 'l';
+    name[3]    = 'e';
+    size_t n   = 4;
     if (core_index >= 10) { name[n++] = (char)('0' + core_index / 10); }
     name[n++] = (char)('0' + core_index % 10);
     name[n]   = '\0';
 
-    auto idle = ktl::make_ref<Thread>(name, kernel_task(), 0);
+    auto idle = ktl::make_ref<Thread>(name, kernel_task(), uintptr_t{0});
     assert(static_cast<bool>(idle), "sched: idle thread allocation failed");
     kernel_task()->add_thread(idle).expect("sched: task zero rejected the idle thread");
     idle->set_state(thread_state::READY);

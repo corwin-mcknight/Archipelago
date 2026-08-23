@@ -16,6 +16,7 @@ constexpr uint32_t FDT_NOP             = 4;
 constexpr uint32_t FDT_END             = 9;
 constexpr uint32_t SUPERVISOR_EXTERNAL = 9;
 constexpr uint64_t UART0_PHYSICAL_BASE = 0x10000000;
+constexpr size_t MAX_NODE_DEPTH        = 16;
 
 struct FdtHeader {
     uint32_t magic;
@@ -111,22 +112,22 @@ bool discover(uint64_t boot_hart) {
         return false;
     }
 
-    const auto* blob             = reinterpret_cast<const uint8_t*>(header);
-    const uint8_t* cursor        = blob + struct_offset;
-    const uint8_t* structure_end = cursor + struct_size;
-    const char* strings          = reinterpret_cast<const char*>(blob + strings_offset);
-    const char* strings_end      = strings + strings_size;
-    NodeState nodes[32]          = {};
-    size_t depth                 = 0;
-    uint32_t boot_intc_phandle   = 0;
-    NodeState plic               = {};
-    uint32_t uart_source         = 0;
+    const auto* blob                = reinterpret_cast<const uint8_t*>(header);
+    const uint8_t* cursor           = blob + struct_offset;
+    const uint8_t* structure_end    = cursor + struct_size;
+    const char* strings             = reinterpret_cast<const char*>(blob + strings_offset);
+    const char* strings_end         = strings + strings_size;
+    NodeState nodes[MAX_NODE_DEPTH] = {};
+    size_t depth                    = 0;
+    uint32_t boot_intc_phandle      = 0;
+    NodeState plic                  = {};
+    uint32_t uart_source            = 0;
 
     while (cursor + 4 <= structure_end) {
         uint32_t token = read_be32(cursor);
         cursor += 4;
         if (token == FDT_BEGIN_NODE) {
-            if (depth == 32) { return false; }
+            if (depth == MAX_NODE_DEPTH) { return false; }
             const char* node_name = reinterpret_cast<const char*>(cursor);
             size_t length         = bounded_length(node_name, reinterpret_cast<const char*>(structure_end));
             if (cursor + length == structure_end) { return false; }

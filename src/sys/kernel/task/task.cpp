@@ -3,9 +3,9 @@
 namespace kernel::sched {
 
 namespace {
-ktl::ref<Task> g_kernel_task;
-ktl::vector<ktl::ref<Task>> g_tasks;
-kernel::synchronization::mutex g_tasks_lock;
+[[clang::no_destroy]] ktl::ref<Task> g_kernel_task;
+[[clang::no_destroy]] ktl::vector<ktl::ref<Task>> g_tasks;
+[[clang::no_destroy]] kernel::synchronization::mutex g_tasks_lock;
 }  // namespace
 
 ktl::ref<Task> kernel_task() {

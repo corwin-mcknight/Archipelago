@@ -23,7 +23,7 @@ namespace {
 kernel::testing::ktest* g_current_test = nullptr;
 bool g_current_test_failed             = false;
 bool g_failure_reason_recorded         = false;
-ktl::fixed_string<256> g_failure_reason{};
+char g_failure_reason[256]{};
 
 kernel::testing::ktest* tests_begin() { return __start__ktests; }
 kernel::testing::ktest* tests_end() { return __stop__ktests; }
@@ -33,19 +33,19 @@ ktl::maybe<kernel::testing::ktest&> find_test(ktl::string_view name) {
 }
 
 void reset_test_state() {
-    g_current_test_failed        = false;
-    g_failure_reason_recorded    = false;
-    g_failure_reason.m_buffer[0] = '\0';
+    g_current_test_failed     = false;
+    g_failure_reason_recorded = false;
+    g_failure_reason[0]       = '\0';
 }
 
 void record_failure(const char* message) {
     g_current_test_failed = true;
     if (!g_failure_reason_recorded) {
         ktl::string_view msg_view(message);
-        size_t copy_len = ktl::min(msg_view.size(), sizeof(g_failure_reason.m_buffer) - 1);
-        msg_view.copy(g_failure_reason.m_buffer, copy_len);
-        g_failure_reason.m_buffer[copy_len] = '\0';
-        g_failure_reason_recorded           = true;
+        size_t copy_len = ktl::min(msg_view.size(), sizeof(g_failure_reason) - 1);
+        msg_view.copy(g_failure_reason, copy_len);
+        g_failure_reason[copy_len] = '\0';
+        g_failure_reason_recorded  = true;
     }
     kernel::shell::shell_output().event("{{\"event\":\"error\",\"message\":\"{0}\"}}", message);
 }
@@ -78,7 +78,7 @@ void execute_test(kernel::shell::ShellOutput& output, kernel::testing::ktest& te
     test.fn();
 
     if (g_current_test_failed) {
-        send_test_end(output, test, "fail", g_failure_reason_recorded ? g_failure_reason.c_str() : nullptr);
+        send_test_end(output, test, "fail", g_failure_reason_recorded ? g_failure_reason : nullptr);
     } else {
         send_test_end(output, test, "pass");
     }
@@ -152,7 +152,7 @@ void kernel::testing::abort(unsigned char exit_code) {
                                               static_cast<unsigned>(exit_code));
             record_failure(reason.c_str());
         }
-        send_test_end(output, *g_current_test, "fail", g_failure_reason_recorded ? g_failure_reason.c_str() : nullptr);
+        send_test_end(output, *g_current_test, "fail", g_failure_reason_recorded ? g_failure_reason : nullptr);
         g_current_test = nullptr;
     }
 

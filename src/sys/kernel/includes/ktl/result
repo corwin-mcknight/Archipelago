@@ -108,6 +108,8 @@ template <typename E> struct [[nodiscard]] result<void, E> {
     union Storage {
         E err;
         Storage() {}
+        Storage(const Storage&)            = default;
+        Storage& operator=(const Storage&) = default;
         ~Storage() requires detail::all_trivial<E> = default;
         ~Storage() {}
     } value;

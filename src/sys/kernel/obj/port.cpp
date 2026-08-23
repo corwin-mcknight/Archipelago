@@ -12,9 +12,10 @@ namespace {
 // queue -- and a plain (non-IRQ) guard, because nothing signals objects from interrupt context
 // yet. Both are ceilings: split the lock if contention shows, switch to the IRQ guard when
 // interrupt objects start signaling from handlers.
-kernel::synchronization::spinlock g_port_lock;
+[[clang::no_destroy]] kernel::synchronization::spinlock g_port_lock;
 
-kernel::mm::object_arena g_binding_arena("port-binding", sizeof(port_binding), alignof(port_binding));
+[[clang::no_destroy]] kernel::mm::object_arena g_binding_arena("port-binding", sizeof(port_binding),
+                                                               alignof(port_binding));
 
 void destroy_binding(port_binding* binding) {
     binding->~port_binding();  // drops the object reference

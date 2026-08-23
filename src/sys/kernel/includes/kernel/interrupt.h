@@ -21,12 +21,12 @@ struct InterruptHandlerEntry {
     union Handler {
         bool (*function)(register_frame_t*);
         IInterruptHandler* object;
-        Handler() : function(nullptr) {}
+        constexpr Handler() : function(nullptr) {}
     } handler;
 
     constexpr static uint64_t ENABLED_MASK    = 0b01;
     const static uint64_t OBJECT_HANDLER_MASK = 0b10;
-    uint64_t flags;
+    uint64_t flags                            = 0;
 };
 
 class interrupt_manager {

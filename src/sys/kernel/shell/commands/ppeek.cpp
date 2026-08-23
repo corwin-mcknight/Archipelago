@@ -24,11 +24,11 @@ ktl::maybe<uint64_t> parse_hex(ktl::string_view sv) {
         char c = sv[i];
         uint64_t d;
         if (c >= '0' && c <= '9') {
-            d = c - '0';
+            d = static_cast<uint64_t>(c - '0');
         } else if (c >= 'a' && c <= 'f') {
-            d = c - 'a' + 10;
+            d = static_cast<uint64_t>(c - 'a' + 10);
         } else if (c >= 'A' && c <= 'F') {
-            d = c - 'A' + 10;
+            d = static_cast<uint64_t>(c - 'A' + 10);
         } else {
             return ktl::nothing;
         }
@@ -105,6 +105,7 @@ void ppoke_handler(int argc, const ktl::string_view argv[], kernel::shell::Shell
         case 2: mmio_write<uint16_t>(addr.value(), (uint16_t)value.value()); break;
         case 4: mmio_write<uint32_t>(addr.value(), (uint32_t)value.value()); break;
         case 8: mmio_write<uint64_t>(addr.value(), value.value()); break;
+        default: return;  // validated above
     }
     output.print("ok\n");
 }

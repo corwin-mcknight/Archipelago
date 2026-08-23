@@ -272,7 +272,7 @@ KTEST_CASE(sched_trace_records_thread_life) {
     KTEST_UNWRAP(t, spawn_fn("traced", body));
     uint64_t tid = t->id();
     t->wait_signals(Thread::SIGNAL_TERMINATED);
-    kernel::sched::trace_record recs[64];
+    static kernel::sched::trace_record recs[64];
     size_t n = kernel::sched::trace_copy_newest(recs, 64);
     KTEST_REQUIRE_TRUE(n > 0);
     bool saw_spawn = false, saw_switch_in = false, saw_exit = false;

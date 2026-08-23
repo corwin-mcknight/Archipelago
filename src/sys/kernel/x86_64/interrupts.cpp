@@ -10,6 +10,9 @@
 
 extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
 extern "C" void x86_note_reschedule_ipi();
+extern "C" [[noreturn]] void x86_trap_stack_overflow();
+extern "C" void k_exception_handler(register_frame_t* regs);
+extern "C" void k_irq_handler(register_frame_t* regs);
 
 extern "C" [[noreturn]] void x86_trap_stack_overflow() { panic("kernel stack overflow (trap below stack floor)"); }
 

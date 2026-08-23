@@ -29,7 +29,8 @@ struct channel_state {
     message_queue inbound[2];
 };
 
-kernel::mm::object_arena g_channel_state_arena("channel-state", sizeof(channel_state), alignof(channel_state));
+[[clang::no_destroy]] static kernel::mm::object_arena g_channel_state_arena("channel-state", sizeof(channel_state),
+                                                                            alignof(channel_state));
 
 void* channel_state::operator new(size_t size, const std::nothrow_t&) noexcept {
     return size <= sizeof(channel_state) ? g_channel_state_arena.alloc() : nullptr;

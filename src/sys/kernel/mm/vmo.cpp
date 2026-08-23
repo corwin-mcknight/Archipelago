@@ -108,7 +108,7 @@ void vmo::remove_mapping(region_child& binding) {
 
 // All anonymous VMOs share one stateless zero-fill pager. Global-scope so the
 // initializer runs from the global-ctor pass (no __cxa_guard in the kernel).
-namespace { ktl::ref<pager> g_anonymous_pager = ktl::make_ref<anonymous_pager>(); }  // namespace
+namespace { [[clang::no_destroy]] ktl::ref<pager> g_anonymous_pager = ktl::make_ref<anonymous_pager>(); }  // namespace
 
 ktl::ref<vmo> create_anonymous_vmo(size_t pages) { return ktl::make_ref<vmo>(pages, g_anonymous_pager); }
 

@@ -11,6 +11,10 @@
 #include "kernel/mm/vm_aspace.h"
 
 extern "C" void riscv_trap_entry();
+extern "C" [[noreturn]] void riscv_trap_stack_overflow(uintptr_t sepc, uintptr_t stval);
+extern "C" void riscv_trap_handler(register_frame_t* regs);
+
+namespace kernel::riscv { void trap_init(); }
 
 namespace {
 

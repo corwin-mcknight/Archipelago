@@ -5,7 +5,7 @@
 
 namespace kernel::obj {
 
-TypeRegistry g_type_registry;
+[[clang::no_destroy]] TypeRegistry g_type_registry;
 
 ktl::result<void> TypeRegistry::register_type(TypeId id, ktl::string_view name, Rights valid_rights,
                                               Rights default_rights) {

@@ -79,21 +79,27 @@ override ASFLAGS += -g -f elf64
 override CWARNINGS += -Wall -Weffc++ -pedantic  \
 -Wextra -Waggregate-return -Wcast-align \
 -Wcast-qual -Wconversion \
+-Wcomma \
+-Wdeprecated-copy-with-dtor \
 -Wdisabled-optimization \
+-Wexit-time-destructors \
 -Wfloat-equal -Wformat=2 \
 -Wformat-nonliteral -Wformat-security  \
 -Wformat-y2k \
 -Wimplicit  -Wimport  -Winit-self  -Winline \
 -Winvalid-pch   \
+-Wglobal-constructors \
 -Wlong-long \
 -Wmissing-field-initializers -Wmissing-format-attribute   \
--Wmissing-include-dirs -Wmissing-noreturn \
+-Wmissing-include-dirs -Wmissing-noreturn -Wmissing-prototypes \
+-Wmissing-variable-declarations \
+-Wnewline-eof -Wnrvo \
 -Wpointer-arith \
 -Wredundant-decls \
--Wshadow -Wstack-protector \
+-Wshadow -Wshadow-uncaptured-local -Wstack-protector \
 -Wstrict-aliasing=2 -Wswitch-default \
 -Wswitch-enum \
--Wunreachable-code -Wunused \
+-Wunreachable-code -Wunreachable-code-break -Wunreachable-code-return -Wunused \
 -Wunused-parameter \
 -Wvariadic-macros \
 -Wwrite-strings \

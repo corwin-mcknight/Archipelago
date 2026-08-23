@@ -31,7 +31,8 @@ struct socket_state {
     }
 };
 
-kernel::mm::object_arena g_socket_state_arena("socket-state", sizeof(socket_state), alignof(socket_state));
+[[clang::no_destroy]] static kernel::mm::object_arena g_socket_state_arena("socket-state", sizeof(socket_state),
+                                                                           alignof(socket_state));
 
 void* socket_state::operator new(size_t size, const std::nothrow_t&) noexcept {
     return size <= sizeof(socket_state) ? g_socket_state_arena.alloc() : nullptr;

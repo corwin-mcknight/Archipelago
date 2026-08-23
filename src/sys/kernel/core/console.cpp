@@ -38,7 +38,7 @@ using kernel::synchronization::spinlock;
 constexpr size_t RING_SIZE = 1u << 14;  // 16 KiB
 constexpr size_t RING_MASK = RING_SIZE - 1;
 
-spinlock g_lock;
+[[clang::no_destroy]] spinlock g_lock;
 char g_ring[RING_SIZE];
 size_t g_head              = 0;
 size_t g_tail              = 0;
@@ -222,13 +222,19 @@ int param(int i, int def) { return i < t.nparams ? t.params[i] : def; }
 
 void do_sgr() {
     if (t.nparams == 0) {  // bare CSI m == reset
-        t.fg = DEFAULT_FG, t.bg = DEFAULT_BG, t.bold = false, t.reverse = false;
+        t.fg      = DEFAULT_FG;
+        t.bg      = DEFAULT_BG;
+        t.bold    = false;
+        t.reverse = false;
         return;
     }
     for (int i = 0; i < t.nparams; ++i) {
         int n = t.params[i];
         if (n == 0) {
-            t.fg = DEFAULT_FG, t.bg = DEFAULT_BG, t.bold = false, t.reverse = false;
+            t.fg      = DEFAULT_FG;
+            t.bg      = DEFAULT_BG;
+            t.bold    = false;
+            t.reverse = false;
         } else if (n == 1) {
             t.bold = true;
         } else if (n == 22) {

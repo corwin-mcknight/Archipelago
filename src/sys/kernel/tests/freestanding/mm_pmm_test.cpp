@@ -93,7 +93,7 @@ KTEST_CASE(pmm_allocation_lifecycle) {
         pmm.free(addr);
 
         constexpr size_t MAX_ALLOCS = 256;
-        kernel::mm::vm_paddr_t taken[MAX_ALLOCS];
+        static kernel::mm::vm_paddr_t taken[MAX_ALLOCS];
         size_t taken_count = 0;
         bool found         = false;
         while (taken_count < MAX_ALLOCS) {

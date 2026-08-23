@@ -2,6 +2,8 @@
 
 #include "kernel/mm/vm_aspace.h"
 
+extern "C" bool x86_try_resolve_page_fault(register_frame_t* regs);
+
 // x86_64 #PF glue: pull the faulting address from CR2, decode the error code,
 // and hand an arch-neutral fault description to the VMM resolver. Returns
 // true when resolved (the iret retries the access); false falls through to

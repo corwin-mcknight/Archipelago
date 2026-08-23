@@ -13,6 +13,8 @@
 
 namespace kernel::syscalls {
 
+namespace {
+
 // ponytail: one global line buffer; per-task buffers when concurrent user tasks interleave output.
 constexpr size_t k_debug_line_max = 120;
 char g_debug_line[k_debug_line_max + 1];
@@ -34,6 +36,8 @@ void log_putc(char c) {
     g_debug_line[g_debug_len++] = c;
     if (g_debug_len == k_debug_line_max) { log_flush_line(); }
 }
+
+}  // namespace
 
 // Emit [offset, offset + length) of the calling thread's IPC buffer. Output goes through the log
 // rather than straight at the UART so it stays serialized against kernel log output and the test
