@@ -5,6 +5,7 @@
 #include <ktl/result>
 
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/region.h"
 #include "kernel/mm/vm_aspace.h"
@@ -16,8 +17,6 @@
 // each against one fresh VM. Phases inside a story snapshot the PMM counters
 // they compare against at their own start, so they hold on a VM warmed by
 // earlier phases.
-
-extern uintptr_t g_hhdm_offset;
 
 KTEST_MODULE("mm/vmo");
 
@@ -50,7 +49,8 @@ KTEST_CASE(vmo_residency_lifecycle) {
         for (uint64_t page = 2; page < 5; ++page) {
             auto frame = v->resident_frame(page);
             KTEST_REQUIRE_TRUE(frame.has_value());
-            KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(frame.value() + g_hhdm_offset),
+            KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(
+                                   kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(frame.value()))),
                                static_cast<uint64_t>(0));
 
             page_descriptor* desc = g_page_descriptors.lookup(frame.value());

@@ -1,28 +1,28 @@
 #include <kernel/config.h>
 #include <kernel/mm/page_descriptor.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/slab_heap.h>
 #include <kernel/panic.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
 uintptr_t heap_pages_alloc(size_t pages) {
     if (pages == 1) {
         auto frame = g_page_frame_allocator.alloc();
-        return frame.has_value() ? frame.value() + g_hhdm_offset : 0;
+        return frame.has_value() ? direct_map_address(physical_address(frame.value())) : 0;
     }
     // ponytail: multi-page runs carve untouched region tails and are returned below as single
     // pages, so heavy multi-page alloc/free traffic slowly consumes contiguous capacity; a PMM
     // that tracks free runs (buddy or equivalent) lifts this ceiling.
     auto frame = g_page_frame_allocator.alloc_contiguous(pages);
-    return frame.has_value() ? frame.value() + g_hhdm_offset : 0;
+    return frame.has_value() ? direct_map_address(physical_address(frame.value())) : 0;
 }
 
 void heap_pages_free(uintptr_t base, size_t pages) {
     for (size_t i = 0; i < pages; ++i) {
-        g_page_frame_allocator.free(base - g_hhdm_offset + i * KERNEL_MINIMUM_PAGE_SIZE);
+        g_page_frame_allocator.free(direct_map_physical(reinterpret_cast<void*>(base)).value() +
+                                    i * KERNEL_MINIMUM_PAGE_SIZE);
     }
 }
 
@@ -35,7 +35,7 @@ constexpr uint64_t RUN_TAG_MASK  = 0xFFFFFFFFull << 32;
 constexpr uint64_t RUN_PAGE_MASK = 0xFFFFFFFFull;
 
 page_descriptor* run_descriptor(uintptr_t base) {
-    page_descriptor* descriptor = g_page_descriptors.lookup(base - g_hhdm_offset);
+    page_descriptor* descriptor = g_page_descriptors.lookup(direct_map_physical(reinterpret_cast<void*>(base)).value());
     if (descriptor == nullptr) { panic("heap: large run page has no descriptor"); }
     return descriptor;
 }

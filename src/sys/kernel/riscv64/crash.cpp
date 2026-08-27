@@ -1,12 +1,10 @@
 #include "kernel/crash.h"
 
+#include <kernel/mm/physmap.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <ktl/fmt>
-
-// HHDM (higher-half direct map) offset published by the Limine boot path (riscv64/main.cpp).
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::crash::arch {
 
@@ -36,7 +34,7 @@ bool probe_readable(uintptr_t vaddr) {
     if (!is_canonical(vaddr)) { return false; }
     // Before the HHDM offset is known we cannot reach the page tables; report unmapped
     // so the dumper degrades (skips the read) instead of faulting.
-    if (g_hhdm_offset == 0) { return false; }
+    if (!kernel::mm::direct_map_ready()) { return false; }
 
     uint64_t satp = 0;
     asm volatile("csrr %0, satp" : "=r"(satp));
@@ -45,8 +43,9 @@ bool probe_readable(uintptr_t vaddr) {
     // Bounded 3-level Sv39 walk, shifts 30 -> 21 -> 12. An entry with any of
     // R/W/X set is a leaf at that level; a valid pointer entry has none.
     for (int shift = 30; shift >= 12; shift -= 9) {
-        const uint64_t* table = reinterpret_cast<const uint64_t*>(table_phys + g_hhdm_offset);
-        uint64_t entry        = table[(vaddr >> shift) & 0x1FF];
+        const uint64_t* table = reinterpret_cast<const uint64_t*>(
+            kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(table_phys)));
+        uint64_t entry = table[(vaddr >> shift) & 0x1FF];
         if (!(entry & PTE_VALID)) { return false; }
         if (entry & PTE_RWX) { return (entry & PTE_READ) != 0; }
         table_phys = pte_paddr(entry);

@@ -1,5 +1,7 @@
 #include <kernel/drivers/uart.h>
 #include <kernel/log.h>
+#include <kernel/mm/mmio.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/platform.h>
 
 extern kernel::driver::uart uart;
@@ -10,8 +12,6 @@ extern kernel::driver::uart uart;
 //
 // MMIO devices are reached through the HHDM (the bootloader maps at least the
 // first 4 GiB of physical space there); published by riscv64/main.cpp at boot.
-extern uintptr_t g_hhdm_offset;
-
 namespace kernel::platform {
 
 namespace {
@@ -40,11 +40,12 @@ bool dispatch_external_interrupt(::register_frame*) { return false; }
 void interrupt_set_source_enabled(unsigned int, bool) {}
 
 unsigned int console_uart_interrupt_id() { return 0; }
+int console_input_read() { return -1; }
 
 void harness_exit(uint8_t code) {
-    if (g_hhdm_offset == 0) { return; }  // MMIO unreachable before the HHDM is known
-    volatile uint32_t* finisher = reinterpret_cast<volatile uint32_t*>(g_hhdm_offset + SIFIVE_TEST_PADDR);
-    *finisher                   = code == 0 ? FINISHER_PASS : ((static_cast<uint32_t>(code) << 16) | FINISHER_FAIL);
+    if (!kernel::mm::direct_map_ready()) { return; }
+    auto finisher = kernel::mm::map_mmio({kernel::mm::physical_address(SIFIVE_TEST_PADDR), sizeof(uint32_t)});
+    finisher.write32(0, code == 0 ? FINISHER_PASS : ((static_cast<uint32_t>(code) << 16) | FINISHER_FAIL));
 }
 
 uint64_t timestamp_hz() { return TIMEBASE_FREQ_HZ; }

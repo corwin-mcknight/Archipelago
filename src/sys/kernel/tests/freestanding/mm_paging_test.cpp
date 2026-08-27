@@ -1,12 +1,8 @@
 #include <kernel/mm/paging.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/testing/testing.h>
-
-// HHDM base, set during boot from the Limine response. Its virtual range is a
-// kernel-half mapping the bootloader installs (huge pages on QEMU), so it lets
-// us exercise kernel-clone visibility and huge-intermediate collision.
-extern uintptr_t g_hhdm_offset;
 
 KTEST_MODULE("mm/paging");
 
@@ -193,11 +189,12 @@ KTEST_CASE(paging_kernel_half_cloned) {
     vm_aspace space;
     KTEST_REQUIRE_TRUE(space.init());
 
-    uintptr_t kaddr = g_hhdm_offset + 0x1000;  // HHDM maps physical 0x1000 here
+    uintptr_t kaddr = kernel::mm::direct_map_address(kernel::mm::physical_address(0x1000));
     KTEST_EXPECT_VALUE(space.walk(kaddr), static_cast<vm_paddr_t>(0x1000));
 
     KTEST_REQUIRE_VALUE(frame, kernel::mm::g_page_frame_allocator.alloc());
-    uintptr_t hhdm_kaddr = (g_hhdm_offset + 0x200000) & ~static_cast<uintptr_t>(0xFFF);
+    uintptr_t hhdm_kaddr =
+        kernel::mm::direct_map_address(kernel::mm::physical_address(0x200000)) & ~static_cast<uintptr_t>(0xFFF);
     KTEST_EXPECT_FALSE(space.map_page(hhdm_kaddr, frame, vm_prot::READ | vm_prot::WRITE));
 
     kernel::mm::g_page_frame_allocator.free(frame);

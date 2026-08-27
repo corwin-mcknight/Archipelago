@@ -6,6 +6,7 @@
 #include <kernel/config.h>
 #include <kernel/elf_loader.h>
 #include <kernel/log.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/sched/internal.h>
@@ -13,10 +14,6 @@
 #include <kernel/sched/user_task.h>
 #include <std/new.h>
 #include <std/string.h>
-
-// The physmap offset, published by kernel::boot::resolve_hhdm(); how module virtual addresses
-// translate back to the physical range a wired VMO wraps.
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
@@ -187,7 +184,8 @@ ktl::result<spawn_handles> task_spawn(Task& caller, ktl::ref<kernel::mm::vmo> im
     if (first.is_err()) { return ktl::err(first.unwrap_err()); }
     auto base = image->resident_frame(0);
     if (!base.has_value()) { return ktl::err(ktl::errc::invalid_operation); }
-    const auto* head = reinterpret_cast<const uint8_t*>(*base + g_hhdm_offset);
+    const auto* head =
+        reinterpret_cast<const uint8_t*>(kernel::mm::direct_map_address(kernel::mm::physical_address(*base)));
     if (head[0] != 0x7F || head[1] != 'E' || head[2] != 'L' || head[3] != 'F') {
         return ktl::err(ktl::errc::invalid_operation);
     }
@@ -206,7 +204,8 @@ ktl::result<spawn_handles> task_spawn(Task& caller, ktl::ref<kernel::mm::vmo> im
     // the bootstrap channel's parent end comes back here instead of settling in Task::mailbox --
     // the child's orphan signal (PEER_CLOSED) tracks the caller's handle from birth.
     const char* name = image->name() != nullptr ? image->name() : "task";
-    const void* elf  = reinterpret_cast<const void*>(*base + g_hhdm_offset);
+    const void* elf =
+        reinterpret_cast<const void*>(kernel::mm::direct_map_address(kernel::mm::physical_address(*base)));
     ktl::ref<Channel> parent_end;
     auto created = create_user_task(name, elf, pages * KERNEL_MINIMUM_PAGE_SIZE, &parent_end);
     if (created.is_err()) { return ktl::err(created.unwrap_err()); }
@@ -248,7 +247,7 @@ ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
     ktl::result<void> outcome = ktl::result<void>::ok();
     for (size_t i = 0; i < info.module_count; i++) {
         const auto& module = info.modules[i];
-        uintptr_t phys     = reinterpret_cast<uintptr_t>(module.data) - g_hhdm_offset;
+        uintptr_t phys     = kernel::mm::direct_map_physical(module.data).value();
         if ((phys & (KERNEL_MINIMUM_PAGE_SIZE - 1)) != 0 || module.size == 0) {
             g_log.warn("task: module '{0}' unaligned or empty; not endowed", module.role);
             continue;

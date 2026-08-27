@@ -15,6 +15,7 @@
 #include "kernel/config.h"
 #include "kernel/drivers/uart.h"
 #include "kernel/log.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/slab_heap.h"
 #include "kernel/mm/vm_aspace.h"
@@ -22,8 +23,6 @@
 #include "kernel/symbols.h"
 
 kernel::driver::uart uart;
-
-uintptr_t g_hhdm_offset = 0;
 
 namespace kernel::boot {
 
@@ -85,10 +84,7 @@ const boot_module* find_module(const char* role) {
     return nullptr;
 }
 
-void resolve_hhdm() {
-    g_hhdm_offset = collect().physmap_base;
-    if (g_hhdm_offset == 0) { panic("bootloader supplied no physical map base -- direct map unavailable"); }
-}
+void resolve_hhdm() { kernel::mm::direct_map_initialize(collect().physmap_base); }
 
 void snapshot_symbols() {
     // Snapshot the kernel ELF's symbol table before PMM reclaims bootloader memory.

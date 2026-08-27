@@ -112,6 +112,11 @@ Splitting into per-address-space and per-VMO locks is deferred until scheduler-e
 **Security**: W^X enforcement, SMEP/SMAP.
 Kernel mappings are never visible to user mode.
 The Higher-Half Direct Map (HHDM) provides a full-RAM direct map in the kernel's higher half.
+Its bootloader-provided base is private to the memory subsystem and published once during boot.
+Ordinary clients use bounded frame operations; code that needs pointer identity crosses an explicit typed physical-address
+boundary, while crash recovery and trusted physical-memory diagnostics use the visibly unsafe `kernel::mm::unsafe` API.
+In-kernel device drivers receive bounded `mmio_region` values with explicit-width reads and writes rather than raw device
+pointers. The region currently uses the HHDM underneath; dedicated cache-correct device mappings are planned.
 
 **Observability**: Per-address-space fault counters, per-VMO residency stats, debug dumps printable to serial.
 

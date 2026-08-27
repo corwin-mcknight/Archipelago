@@ -1,10 +1,9 @@
 #include <kernel/config.h>
 #include <kernel/elf_loader.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
 #include <string.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::elf {
 
@@ -32,7 +31,7 @@ ktl::result<void> fill_segment(kernel::mm::vmo& backing, const uint8_t* bytes, u
 
         uint64_t offset = page * PAGE_SIZE;
         uint64_t chunk  = filesz - offset < PAGE_SIZE ? filesz - offset : PAGE_SIZE;
-        memcpy(reinterpret_cast<void*>(frame.value() + g_hhdm_offset), bytes + offset, chunk);
+        kernel::mm::copy_to_frame(frame.value(), 0, bytes + offset, chunk);
     }
     return ktl::result<void>::ok();
 }

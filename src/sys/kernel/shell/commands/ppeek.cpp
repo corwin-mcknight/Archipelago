@@ -2,6 +2,7 @@
 
 #if CONFIG_KERNEL_SHELL
 
+#include <kernel/mm/physmap.h>
 #include <stdint.h>
 
 #include <ktl/maybe>
@@ -10,8 +11,6 @@
 // ppeek/ppoke: raw physical-address read/write through the physmap, for board
 // bring-up and hardware experiments from the console. No range checking by
 // design -- the operator is trusted, and a bad address can hang the bus.
-
-extern uintptr_t g_hhdm_offset;
 
 namespace {
 
@@ -39,7 +38,8 @@ ktl::maybe<uint64_t> parse_hex(ktl::string_view sv) {
 
 // Same I/O ordering pattern as the UART driver: fence after reads, before writes.
 template <typename T> T mmio_read(uintptr_t paddr) {
-    T value = *reinterpret_cast<volatile T*>(g_hhdm_offset + paddr);
+    uintptr_t address = kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(paddr));
+    T value           = *reinterpret_cast<volatile T*>(address);
 #if defined(__riscv)
     asm volatile("fence i,r" ::: "memory");
 #endif
@@ -50,7 +50,8 @@ template <typename T> void mmio_write(uintptr_t paddr, T value) {
 #if defined(__riscv)
     asm volatile("fence w,o" ::: "memory");
 #endif
-    *reinterpret_cast<volatile T*>(g_hhdm_offset + paddr) = value;
+    uintptr_t address = kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(paddr));
+    *reinterpret_cast<volatile T*>(address) = value;
 }
 
 void ppeek_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {

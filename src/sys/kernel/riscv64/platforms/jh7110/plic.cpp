@@ -1,9 +1,8 @@
 #include <kernel/boot.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.h>
+#include <kernel/mm/mmio.h>
 #include <kernel/platform.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::platform {
 namespace {
@@ -49,10 +48,9 @@ struct NodeState {
 };
 
 struct PlicState {
-    volatile uint32_t* priorities;
-    volatile uint32_t* enables;
-    volatile uint32_t* threshold;
-    volatile uint32_t* claim;
+    kernel::mm::mmio_region registers;
+    size_t enables_offset;
+    size_t threshold_offset;
     uint32_t source_count;
     bool ready;
 };
@@ -214,14 +212,14 @@ bool discover(uint64_t boot_hart) {
 
     // JH7110 uses two address cells and two size cells for this node. Accept a
     // one-cell synthetic tree as well, which keeps the parser testable in QEMU.
-    uint32_t address_cells = plic.reg_length >= 16 ? 2 : 1;
-    uint64_t physical_base = read_cells(plic.reg, address_cells);
-    uintptr_t virtual_base = g_hhdm_offset + physical_base;
-    g_plic.priorities      = reinterpret_cast<volatile uint32_t*>(virtual_base);
-    g_plic.enables         = reinterpret_cast<volatile uint32_t*>(virtual_base + 0x2000 + context * 0x80);
-    g_plic.threshold       = reinterpret_cast<volatile uint32_t*>(virtual_base + 0x200000 + context * 0x1000);
-    g_plic.claim           = g_plic.threshold + 1;
-    g_plic.source_count    = plic.source_count != 0 ? plic.source_count : 127;
+    uint32_t address_cells  = plic.reg_length >= 16 ? 2 : 1;
+    uint64_t physical_base  = read_cells(plic.reg, address_cells);
+    g_plic.enables_offset   = 0x2000 + context * 0x80;
+    g_plic.threshold_offset = 0x200000 + context * 0x1000;
+    size_t window_size      = g_plic.threshold_offset + 2 * sizeof(uint32_t);
+    g_plic.registers =
+        kernel::mm::map_mmio({kernel::mm::physical_address(static_cast<uintptr_t>(physical_base)), window_size});
+    g_plic.source_count = plic.source_count != 0 ? plic.source_count : 127;
     if (g_plic.source_count >= IM_MAX_HANDLERS - BOARD_INTERRUPT_BASE) { return false; }
     if (uart_source != 0 && uart_source <= g_plic.source_count) {
         g_uart_interrupt_id = BOARD_INTERRUPT_BASE + uart_source;
@@ -240,10 +238,11 @@ void interrupt_init() {
         return;
     }
     for (uint32_t source = 1; source <= g_plic.source_count; ++source) {
-        g_plic.priorities[source] = 1;
-        g_plic.enables[source / 32] &= ~(1u << (source % 32));
+        g_plic.registers.write32(source * sizeof(uint32_t), 1);
+        size_t enable_offset = g_plic.enables_offset + (source / 32) * sizeof(uint32_t);
+        g_plic.registers.write32(enable_offset, g_plic.registers.read32(enable_offset) & ~(1u << (source % 32)));
     }
-    *g_plic.threshold = 0;
+    g_plic.registers.write32(g_plic.threshold_offset, 0);
     asm volatile("csrs sie, %0" : : "r"(1ull << SUPERVISOR_EXTERNAL));
     g_plic.ready = true;
     g_log.info("jh7110: PLIC ready ({0} sources)", g_plic.source_count);
@@ -253,19 +252,20 @@ void interrupt_set_source_enabled(unsigned int id, bool enabled) {
     if (!g_plic.ready || id <= BOARD_INTERRUPT_BASE) { return; }
     unsigned int source = id - BOARD_INTERRUPT_BASE;
     if (source > g_plic.source_count) { return; }
-    volatile uint32_t& word = g_plic.enables[source / 32];
-    uint32_t mask           = 1u << (source % 32);
-    word                    = enabled ? word | mask : word & ~mask;
+    size_t offset = g_plic.enables_offset + (source / 32) * sizeof(uint32_t);
+    uint32_t word = g_plic.registers.read32(offset);
+    uint32_t mask = 1u << (source % 32);
+    g_plic.registers.write32(offset, enabled ? word | mask : word & ~mask);
 }
 
 unsigned int console_uart_interrupt_id() { return g_uart_interrupt_id; }
 
 bool dispatch_external_interrupt(::register_frame* regs) {
     if (!g_plic.ready) { return false; }
-    uint32_t source = *g_plic.claim;
+    uint32_t source = g_plic.registers.read32(g_plic.threshold_offset + sizeof(uint32_t));
     if (source == 0) { return true; }
     g_interrupt_manager.dispatch_interrupt(BOARD_INTERRUPT_BASE + source, regs);
-    *g_plic.claim = source;
+    g_plic.registers.write32(g_plic.threshold_offset + sizeof(uint32_t), source);
     return true;
 }
 

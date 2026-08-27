@@ -1,4 +1,7 @@
+#include <kernel/config.h>
 #include <kernel/log.h>
+#include <kernel/mm/mmio.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 
@@ -9,10 +12,6 @@
 // power button. The SYSCRG gates the block's clocks off at power-on, so
 // init must open them first.
 //
-// MMIO devices are reached through the HHDM; published by riscv64/main.cpp
-// at boot.
-extern uintptr_t g_hhdm_offset;
-
 namespace kernel::platform {
 
 namespace {
@@ -45,13 +44,21 @@ constexpr uint64_t TIMEOUT_S         = 60;
 constexpr uint32_t LOAD_COUNT        = static_cast<uint32_t>(TIMEOUT_S * WDT_CORE_HZ / 2);
 constexpr uint64_t FEED_PERIOD_TICKS = 10'000;  // 1 tick = 1 ms
 
-volatile uint32_t& reg(uintptr_t paddr) { return *reinterpret_cast<volatile uint32_t*>(g_hhdm_offset + paddr); }
+kernel::mm::mmio_region g_syscrg;
+kernel::mm::mmio_region g_watchdog;
+
+void prepare_regions() {
+    if (!g_syscrg.valid()) {
+        g_syscrg   = kernel::mm::map_mmio({kernel::mm::physical_address(SYSCRG_PADDR), KERNEL_MINIMUM_PAGE_SIZE});
+        g_watchdog = kernel::mm::map_mmio({kernel::mm::physical_address(WDOG_PADDR), KERNEL_MINIMUM_PAGE_SIZE});
+    }
+}
 
 void feed() {
-    reg(WDOG_PADDR + WDT_LOCK)   = UNLOCK_KEY;
-    reg(WDOG_PADDR + WDT_INTCLR) = 1;
-    reg(WDOG_PADDR + WDT_LOAD)   = LOAD_COUNT;
-    reg(WDOG_PADDR + WDT_LOCK)   = 0;
+    g_watchdog.write32(WDT_LOCK, UNLOCK_KEY);
+    g_watchdog.write32(WDT_INTCLR, 1);
+    g_watchdog.write32(WDT_LOAD, LOAD_COUNT);
+    g_watchdog.write32(WDT_LOCK, 0);
 }
 
 // Feeding from a scheduled thread, not the timer interrupt, is the point:
@@ -67,18 +74,19 @@ void feed() {
 }  // namespace
 
 void watchdog_arm() {
-    if (g_hhdm_offset == 0) { return; }  // MMIO unreachable before the HHDM is known
+    if (!kernel::mm::direct_map_ready()) { return; }
+    prepare_regions();
 
-    reg(SYSCRG_PADDR + CLK_WDT_APB)  = reg(SYSCRG_PADDR + CLK_WDT_APB) | CLK_ENABLE;
-    reg(SYSCRG_PADDR + CLK_WDT_CORE) = reg(SYSCRG_PADDR + CLK_WDT_CORE) | CLK_ENABLE;
-    reg(SYSCRG_PADDR + RST_ASSERT)   = reg(SYSCRG_PADDR + RST_ASSERT) & ~RST_WDT_MASK;
+    g_syscrg.write32(CLK_WDT_APB, g_syscrg.read32(CLK_WDT_APB) | CLK_ENABLE);
+    g_syscrg.write32(CLK_WDT_CORE, g_syscrg.read32(CLK_WDT_CORE) | CLK_ENABLE);
+    g_syscrg.write32(RST_ASSERT, g_syscrg.read32(RST_ASSERT) & ~RST_WDT_MASK);
 
-    reg(WDOG_PADDR + WDT_LOCK)       = UNLOCK_KEY;
-    reg(WDOG_PADDR + WDT_CONTROL)    = 0;
-    reg(WDOG_PADDR + WDT_INTCLR)     = 1;
-    reg(WDOG_PADDR + WDT_LOAD)       = LOAD_COUNT;
-    reg(WDOG_PADDR + WDT_CONTROL)    = CONTROL_RUN;
-    reg(WDOG_PADDR + WDT_LOCK)       = 0;
+    g_watchdog.write32(WDT_LOCK, UNLOCK_KEY);
+    g_watchdog.write32(WDT_CONTROL, 0);
+    g_watchdog.write32(WDT_INTCLR, 1);
+    g_watchdog.write32(WDT_LOAD, LOAD_COUNT);
+    g_watchdog.write32(WDT_CONTROL, CONTROL_RUN);
+    g_watchdog.write32(WDT_LOCK, 0);
 }
 
 void watchdog_init() {
@@ -90,11 +98,12 @@ void watchdog_init() {
 // over an I2C bus whose clocks U-Boot gates off at EFI handoff. The watchdog
 // is a reset line the kernel already owns, so ask it for an immediate expiry.
 void reboot() {
-    if (g_hhdm_offset == 0) { return; }
-    reg(WDOG_PADDR + WDT_LOCK)   = UNLOCK_KEY;
-    reg(WDOG_PADDR + WDT_LOAD)   = 1;
-    reg(WDOG_PADDR + WDT_INTCLR) = 1;  // reload the counter from LOAD now
-    reg(WDOG_PADDR + WDT_LOCK)   = 0;
+    if (!kernel::mm::direct_map_ready()) { return; }
+    prepare_regions();
+    g_watchdog.write32(WDT_LOCK, UNLOCK_KEY);
+    g_watchdog.write32(WDT_LOAD, 1);
+    g_watchdog.write32(WDT_INTCLR, 1);  // reload the counter from LOAD now
+    g_watchdog.write32(WDT_LOCK, 0);
     // Reset arrives within microseconds if the watchdog is armed; give it
     // ample time, then return so the caller can report a dead reset path.
     for (volatile uint32_t spins = 0; spins < 100'000'000; spins = spins + 1) {}

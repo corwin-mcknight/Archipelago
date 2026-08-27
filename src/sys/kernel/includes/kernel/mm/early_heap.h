@@ -15,6 +15,8 @@ struct early_heap_stats {
     uint64_t free_calls;
 };
 
+/// The earliest mark-and-move on heap. Can't free, but has very little overhead and requires
+/// very little complexity for the pre-boot environment.
 class early_heap {
    public:
     void on_boot(uintptr_t start, uintptr_t end);
@@ -22,8 +24,7 @@ class early_heap {
     void* alloc(size_t size, size_t alignment = 1);
     void free(void* ptr);
 
-    // Whether ptr came from this heap's region -- how operator delete routes frees between the
-    // early heap and the slab heap after the switchover.
+    // Whether ptr came from this heap's region
     bool contains(const void* ptr) const {
         uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
         return address >= heap_start && address < heap_end;

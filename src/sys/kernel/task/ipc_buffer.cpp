@@ -1,8 +1,7 @@
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/sched/ipc_buffer.h>
 #include <kernel/sched/task.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
@@ -43,7 +42,7 @@ ktl::result<ipc_buffer> ipc_buffer::create(kernel::mm::vm_aspace& aspace, size_t
     for (size_t page = 0; page < pages; ++page) {
         auto frame = backing->resident_frame(page);
         if (!frame.has_value()) { return ktl::err(ktl::errc::oom); }
-        buffer.m_frames[page] = frame.value() + g_hhdm_offset;
+        buffer.m_frames[page] = kernel::mm::direct_map_address(kernel::mm::physical_address(frame.value()));
     }
 
     uintptr_t base = IPC_BUFFER_REGION_BASE + slot * IPC_BUFFER_SLOT_BYTES;

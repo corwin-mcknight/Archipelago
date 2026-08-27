@@ -2,9 +2,8 @@
 
 #include "kernel/config.h"
 #include "kernel/log.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
@@ -32,7 +31,7 @@ bool page_descriptor_table::init(const vm_page_region* usable, size_t usable_cou
 
     // Frames arrive zeroed: every descriptor starts {nullptr, 0, 0, MMIO},
     // so holes and firmware ranges default to not-memory.
-    m_array = reinterpret_cast<page_descriptor*>(base.value() + g_hhdm_offset);
+    m_array = reinterpret_cast<page_descriptor*>(direct_map_address(physical_address(base.value())));
 
     for (size_t i = 0; i < usable_count; ++i) { mark_range(usable[i].start, usable[i].count, page_state::FREE); }
     for (size_t i = 0; i < wired_count; ++i) { mark_range(wired[i].start, wired[i].count, page_state::WIRED); }

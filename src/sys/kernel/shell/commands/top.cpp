@@ -4,7 +4,7 @@
 
 #include <kernel/arch.h>
 #include <kernel/config.h>
-#include <kernel/drivers/uart.h>
+#include <kernel/input.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
@@ -16,8 +16,6 @@
 #include <ktl/ref>
 #include <ktl/string_view>
 #include <ktl/vector>
-
-extern kernel::driver::uart uart;
 
 namespace {
 
@@ -125,8 +123,8 @@ void cmd_top(ShellOutput& out) {
         return;
     }
     for (;;) {
-        while (uart.received_data() != 0) {
-            char c = uart.read();
+        for (int input = kernel::input::try_read_char(); input >= 0; input = kernel::input::try_read_char()) {
+            char c = static_cast<char>(input);
             if (c == 'x' || c == 'q') {
                 out.write("\x1b[?2026l\x1b[0m\n");
                 return;

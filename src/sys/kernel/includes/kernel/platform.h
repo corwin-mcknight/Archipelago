@@ -43,6 +43,12 @@ void interrupt_set_source_enabled(unsigned int id, bool enabled);
 /// Zero means the board has no routed UART interrupt description.
 unsigned int console_uart_interrupt_id();
 
+/// Return one byte of board-local console input, or -1 when none is ready. PC
+/// polls its legacy i8042 keyboard here; boards whose console is UART-only
+/// return -1. This is deliberately nonblocking so the shared input layer can
+/// arbitrate between the UART and local devices.
+int console_input_read();
+
 /// Bring up the board's kernel tick source. Called once by the boot CPU after
 /// the interrupt manager is up and interrupts are enabled, since the timer
 /// registers an interrupt handler and starts delivering ticks immediately.

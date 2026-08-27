@@ -3,6 +3,7 @@
 
 #include "kernel/arch.h"
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vm_aspace.h"
 #include "kernel/testing/testing.h"
@@ -14,8 +15,6 @@
 // address space adopted from the boot page tables. Every fact asserted here is
 // a standing invariant of a running kernel (the image stays wired, MMIO holes
 // stay MMIO), so the phases can safely share the VM.
-
-extern uintptr_t g_hhdm_offset;
 
 KTEST_MODULE("mm/descriptor");
 
@@ -92,7 +91,7 @@ KTEST_CASE(kernel_aspace_adopted_from_boot_tables) {
     {
         KTEST_REQUIRE_VALUE(probe, g_page_frame_allocator.alloc());
 
-        auto paddr = kernel_aspace().walk(g_hhdm_offset + probe + 0x123);
+        auto paddr = kernel_aspace().walk(direct_map_address(physical_address(probe + 0x123)));
         KTEST_REQUIRE_TRUE(paddr.has_value());
         KTEST_EXPECT_EQUAL(paddr.value(), probe + 0x123);
 

@@ -2,15 +2,13 @@
 
 #if CONFIG_KERNEL_SHELL
 
-#include <kernel/drivers/uart.h>
+#include <kernel/input.h>
 #include <kernel/sched/scheduler.h>
 
 #include <ktl/algorithm>
 #include <ktl/maybe>
 #include <ktl/string_view>
 #include <ktl/utf8>
-
-extern kernel::driver::uart uart;
 
 extern "C" kernel::shell::shell_command __start__kshell_cmds[], __stop__kshell_cmds[];
 
@@ -28,11 +26,11 @@ char g_history[kHistoryDepth][kCommandBufferSize];
 size_t g_history_count = 0;
 
 char read_char() {
-    // Sleep-poll instead of busy-waiting in uart.read() so idle absorbs the wait between
-    // keystrokes; buffered bytes drain back-to-back because received_data() stays set.
-    // QEMU's chardev backpressure holds input while we sleep, so a 1 ms gap loses nothing.
-    while (uart.received_data() == 0) { kernel::sched::sleep_ticks(1); }
-    return uart.read();
+    // Sleep-poll instead of busy-waiting so idle absorbs the wait between
+    // keystrokes. Buffered serial or keyboard bytes drain back-to-back.
+    int c;
+    while ((c = kernel::input::try_read_char()) < 0) { kernel::sched::sleep_ticks(1); }
+    return static_cast<char>(c);
 }
 
 // Erases the visible line, then loads src (empty when nullptr) into buffer and echoes it.

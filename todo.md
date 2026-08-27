@@ -50,6 +50,9 @@
 - Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
 - Boot modules are never reclaimed. They are classified `KERNEL` (wired) because Limine reports the kernel image and every module under one memmap type, so a module range is not distinguishable from the memmap alone. `boot_info::modules` carries each module's address and size, which is what a future initrd path needs to hand the page-aligned interior to `pmm::add_region()` once it has consumed it; a `memory_kind::MODULE` should land with that reclaim path rather than before it.
 - Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
+- Finish physical-address typing: replace the integer `vm_paddr_t` representation throughout PMM/VMM and remove the
+  public `direct_map_address()` migration seam once pointer-identity clients have narrower frame APIs.
+- Give kernel MMIO dedicated cache-correct virtual mappings instead of backing `mmio_region` with the bootloader HHDM.
 - Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
 - Memory-pressure signal userspace can wait on: a kernel Event with level bits (low, critical) sampled where the zeroer already runs, so servers drop caches before allocations start failing -- the kernel cannot reclaim server-held memory itself and anonymous memory is never swapped. Open questions: hysteresis at the boundary, global level versus per-task, and whether ignoring it has a consequence.
 - VMM follow-ups:

@@ -3,13 +3,12 @@
 #include <kernel/assert.h>
 #include <kernel/config.h>
 #include <kernel/log.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/pmm.h>
 #include <kernel/sched/internal.h>
 #include <kernel/sched/reaper.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::sched {
 
@@ -21,7 +20,7 @@ ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* 
     if (!phys.has_value()) { phys = kernel::mm::g_page_frame_allocator.alloc_contiguous(STACK_PAGES); }
     if (!phys.has_value()) { return ktl::err(ktl::errc::oom); }
 
-    uintptr_t virt_base = g_hhdm_offset + *phys;
+    uintptr_t virt_base = kernel::mm::direct_map_address(kernel::mm::physical_address(*phys));
     auto thread         = ktl::make_ref<Thread>(name, task, *phys, virt_base);
     if (!thread) {
         stack_pool_release(*phys);

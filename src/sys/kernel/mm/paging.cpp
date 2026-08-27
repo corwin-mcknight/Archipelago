@@ -1,10 +1,9 @@
 #include "kernel/arch.h"
 #include "kernel/config.h"
 #include "kernel/mm/arch_paging.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vm_aspace.h"
-
-extern uintptr_t g_hhdm_offset;
 
 // Arch-neutral page-walk machinery and the vm_aspace paging methods.
 // Everything that depends on the PTE encoding or MMU instructions goes
@@ -27,7 +26,9 @@ uint64_t remote_cores_with(const vm_aspace* space) {
     return mask;
 }
 
-inline uint64_t* table_at(vm_paddr_t paddr) { return reinterpret_cast<uint64_t*>(paddr + g_hhdm_offset); }
+inline uint64_t* table_at(vm_paddr_t paddr) {
+    return reinterpret_cast<uint64_t*>(direct_map_address(physical_address(paddr)));
+}
 
 constexpr size_t level_index(uintptr_t vaddr, int level) { return (vaddr >> (arch::VA_BITS - 9 - 9 * level)) & 0x1FF; }
 

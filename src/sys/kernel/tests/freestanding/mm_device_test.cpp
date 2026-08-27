@@ -5,6 +5,7 @@
 #include <ktl/result>
 
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/region.h"
 #include "kernel/mm/vm_aspace.h"
@@ -17,8 +18,6 @@
 // binding's cache request can only degrade, never upgrade, the pager's mode.
 // The free-page delta check runs in the first phase, while MAP_BASE's corner
 // of the address space is still untouched by any page tables.
-
-extern uintptr_t g_hhdm_offset;
 
 KTEST_MODULE("mm/device");
 
@@ -73,8 +72,11 @@ KTEST_CASE(device_vmo_window_and_cache_mode) {
         KTEST_EXPECT_TRUE(t1.value().cache == vm_cache_mode::DEVICE);
 
         // Writes went to the caller's physical range.
-        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
-        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + PAGE + g_hhdm_offset),
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(
+                               kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(phys))),
+                           0x11D0'11CE'0000'0001ull);
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(
+                               kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(phys + PAGE))),
                            0x11D0'11CE'0000'0002ull);
 
         // Teardown: the binding unmaps; window frames stay wired and intact.
@@ -82,7 +84,9 @@ KTEST_CASE(device_vmo_window_and_cache_mode) {
         KTEST_EXPECT_FALSE(kernel_aspace().walk(MAP_BASE).has_value());
         v = ktl::ref<vmo>{};
         KTEST_EXPECT_TRUE(desc->state == page_state::WIRED);
-        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(phys + g_hhdm_offset), 0x11D0'11CE'0000'0001ull);
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(
+                               kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(phys))),
+                           0x11D0'11CE'0000'0001ull);
     }
 
     // Phase 2: a binding can only degrade the cache mode.

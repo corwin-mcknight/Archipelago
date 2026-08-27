@@ -53,8 +53,8 @@ void uart::write_byte(char c) {
     write_raw(c);
 }
 
-int uart::received_data() { return uart_reg_read(5) & 1; }
-bool uart::transmit_empty() { return uart_reg_read(5) & 0x20; }
+int uart::received_data() { return m_healthy && (uart_reg_read(5) & 1); }
+bool uart::transmit_empty() { return m_healthy && (uart_reg_read(5) & 0x20); }
 
 char uart::read() {
     while (received_data() == 0) {}

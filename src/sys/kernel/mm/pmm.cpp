@@ -5,8 +5,7 @@
 #include "kernel/config.h"
 #include "kernel/mm/page.h"
 #include "kernel/mm/page_descriptor.h"
-
-extern uintptr_t g_hhdm_offset;
+#include "kernel/mm/physmap.h"
 
 namespace kernel::mm {
 
@@ -34,15 +33,15 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::alloc() {
 }
 
 void page_frame_allocator::frame_stack::push(vm_paddr_t addr) {
-    *reinterpret_cast<vm_paddr_t*>(addr + g_hhdm_offset) = m_head;
-    m_head                                               = addr;
+    *reinterpret_cast<vm_paddr_t*>(direct_map_address(physical_address(addr))) = m_head;
+    m_head                                                                     = addr;
     ++m_count;
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::frame_stack::pop() {
     if (m_head == NIL) { return ktl::nothing; }
     vm_paddr_t addr = m_head;
-    auto* link      = reinterpret_cast<vm_paddr_t*>(addr + g_hhdm_offset);
+    auto* link      = reinterpret_cast<vm_paddr_t*>(direct_map_address(physical_address(addr)));
     m_head          = *link;
     *link           = 0;  // the link word was a zeroed page's only nonzero bytes
     --m_count;
@@ -124,9 +123,7 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::pop_free_page(bool& pre_zeroed) {
     return ktl::nothing;
 }
 
-void page_frame_allocator::zero_page(vm_paddr_t addr) {
-    memset(reinterpret_cast<void*>(addr + g_hhdm_offset), 0, PAGE_SIZE);
-}
+void page_frame_allocator::zero_page(vm_paddr_t addr) { zero_frame(addr); }
 
 bool page_frame_allocator::zero_one_page() {
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);

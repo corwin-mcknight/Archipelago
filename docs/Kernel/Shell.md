@@ -1,6 +1,8 @@
 # Kernel Shell
 
-The kernel shell is an interactive command interface for developers, accessible over the UART serial port.
+The kernel shell is an interactive command interface for developers. It accepts UART serial input on every target and
+polls the legacy i8042/PS/2 keyboard on x86_64 PCs; output is mirrored to the UART and a firmware framebuffer when one
+is available.
 It provides diagnostics, testing, memory inspection, and boot flow control from a single prompt.
 
 ## Overview

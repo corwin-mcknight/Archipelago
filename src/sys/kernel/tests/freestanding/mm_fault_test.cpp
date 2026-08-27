@@ -5,6 +5,7 @@
 #include <ktl/result>
 
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/region.h"
 #include "kernel/mm/vm_aspace.h"
 #include "kernel/mm/vmo.h"
@@ -16,8 +17,6 @@
 // single fresh VM; each phase maps its own VMO and snapshots the fault
 // counters it compares against. The out-of-binding fault stays its own crash
 // test because it takes the VM down.
-
-extern uintptr_t g_hhdm_offset;
 
 KTEST_MODULE("mm/fault");
 
@@ -81,7 +80,8 @@ KTEST_CASE(fault_demand_paging_story) {
         KTEST_EXPECT_TRUE((t.value().prot & vm_prot::WRITE) != 0);
 
         // The zero page itself is untouched.
-        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(vmm_zero_page() + g_hhdm_offset),
+        KTEST_EXPECT_EQUAL(*reinterpret_cast<volatile uint64_t*>(
+                               kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(vmm_zero_page()))),
                            static_cast<uint64_t>(0));
 
         // The private frame is owned by the VMO and outlives the TLB: data

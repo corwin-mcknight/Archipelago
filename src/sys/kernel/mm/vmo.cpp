@@ -2,11 +2,10 @@
 
 #include "kernel/assert.h"
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/region.h"
 #include "kernel/mm/vm_aspace.h"
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::mm {
 
@@ -32,7 +31,7 @@ vmo::~vmo() {
             // return to the PMM.
             if (m_pager->owns_frames()) { g_page_frame_allocator.free(chunk[e]); }
         }
-        g_page_frame_allocator.free(reinterpret_cast<uintptr_t>(chunk) - g_hhdm_offset);
+        g_page_frame_allocator.free(direct_map_physical(chunk).value());
     }
 }
 
@@ -43,7 +42,7 @@ uint64_t* vmo::chunk_for(uint64_t page, bool allocate) {
         // Chunk frames arrive zeroed from the PMM: all entries start absent.
         auto frame = g_page_frame_allocator.alloc();
         if (!frame.has_value()) { return nullptr; }
-        m_chunks[index] = reinterpret_cast<uint64_t*>(frame.value() + g_hhdm_offset);
+        m_chunks[index] = reinterpret_cast<uint64_t*>(direct_map_address(physical_address(frame.value())));
     }
     return m_chunks[index];
 }

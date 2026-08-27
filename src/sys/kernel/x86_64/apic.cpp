@@ -1,7 +1,7 @@
+#include <kernel/config.h>
+#include <kernel/mm/mmio.h>
 #include <kernel/x86/apic.h>
 #include <kernel/x86/cpu.h>
-
-extern uintptr_t g_hhdm_offset;
 
 namespace kernel::x86 {
 
@@ -28,21 +28,22 @@ constexpr uint32_t LVT_PERIODIC         = 1u << 17;
 constexpr uint32_t DIVIDE_BY_16         = 0x3;
 constexpr uint32_t ICR_DELIVERY_PENDING = 1u << 12;
 
-volatile uint32_t* g_lapic              = nullptr;
+kernel::mm::mmio_region g_lapic;
 
-void reg_write(uintptr_t offset, uint32_t value) { g_lapic[offset / 4] = value; }
-uint32_t reg_read(uintptr_t offset) { return g_lapic[offset / 4]; }
+void reg_write(uintptr_t offset, uint32_t value) { g_lapic.write32(offset, value); }
+uint32_t reg_read(uintptr_t offset) { return g_lapic.read32(offset); }
 }  // namespace
 
 void lapic_init() {
     uint64_t base = rdmsr(MSR_APIC_BASE);
     wrmsr(MSR_APIC_BASE, base | (1ull << 11));  // global enable; normally already set by firmware
-    g_lapic = reinterpret_cast<volatile uint32_t*>((base & 0x000FFFFFFFFFF000ull) + g_hhdm_offset);
+    g_lapic =
+        kernel::mm::map_mmio({kernel::mm::physical_address(base & 0x000FFFFFFFFFF000ull), KERNEL_MINIMUM_PAGE_SIZE});
     reg_write(REG_SPURIOUS, SOFTWARE_ENABLE | SPURIOUS_VECTOR);
 }
 
 void lapic_eoi() {
-    if (g_lapic == nullptr) { return; }
+    if (!g_lapic.valid()) { return; }
     reg_write(REG_EOI, 0);
 }
 

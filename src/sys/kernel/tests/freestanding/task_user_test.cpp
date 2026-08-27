@@ -2,6 +2,7 @@
 #include <kernel/boot.h>
 #include <kernel/elf.h>
 #include <kernel/log.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/obj/channel.h>
 #include <kernel/sched/scheduler.h>
@@ -15,8 +16,6 @@
 
 #include <ktl/string_view>
 #include <ktl/vector>
-
-extern uintptr_t g_hhdm_offset;
 
 using namespace kernel::sched;
 
@@ -244,7 +243,7 @@ KTEST_CASE(task_spawn_from_vmo) {
     const auto* module = kernel::boot::find_module("selftest");
     KTEST_REQUIRE_TRUE(module != nullptr);
 
-    uintptr_t phys = reinterpret_cast<uintptr_t>(module->data) - g_hhdm_offset;
+    uintptr_t phys = kernel::mm::direct_map_physical(module->data).value();
     size_t pages   = (module->size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
     auto image     = kernel::mm::create_wired_vmo(phys, pages);
     KTEST_REQUIRE_TRUE(image);
@@ -335,7 +334,7 @@ KTEST_CASE(boot_module_endowment) {
         // nothing else references.
         auto frame = image->get_or_fill_page(0);
         KTEST_REQUIRE_TRUE(frame.is_ok());
-        KTEST_EXPECT_EQUAL(frame.unwrap(), reinterpret_cast<uintptr_t>(module.data) - g_hhdm_offset);
+        KTEST_EXPECT_EQUAL(frame.unwrap(), kernel::mm::direct_map_physical(module.data).value());
     }
 
     // No stragglers: exactly one message per module.

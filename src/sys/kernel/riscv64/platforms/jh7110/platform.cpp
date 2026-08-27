@@ -1,12 +1,10 @@
 #include <kernel/drivers/uart.h>
 #include <kernel/log.h>
+#include <kernel/mm/mmio.h>
+#include <kernel/mm/physmap.h>
 #include <kernel/platform.h>
 
 extern kernel::driver::uart uart;
-
-// MMIO devices (the composable cache below) are reached through the HHDM,
-// published by riscv64/main.cpp at boot.
-extern uintptr_t g_hhdm_offset;
 
 // Board facts for the StarFive JH7110 (Orange Pi RV, VisionFive 2). The
 // counter itself (rdtime) is a CPU register and lives in riscv64/arch.cpp;
@@ -33,6 +31,8 @@ constexpr size_t CACHE_LINE_BYTES   = 64;
 // run before this.
 void console_init() { uart.init(); }
 
+int console_input_read() { return -1; }
+
 // No debug-exit device on real hardware, and SBI SRST dead-ends in OpenSBI's
 // pm-reset (the PMIC sits on an I2C bus whose clocks U-Boot gates off at EFI
 // handoff). The exit code has nowhere to go, but the contract's intent --
@@ -51,16 +51,16 @@ uint64_t firmware_fenced_memory_base() { return 1ull << 32; }
 // The timebase is a fixed board constant, so there is nothing to measure.
 void timestamp_calibrate() {}
 
-// vaddr is a physmap pointer; subtract the HHDM offset to recover the physical
+// vaddr is a physmap pointer; recover the physical
 // line addresses the Flush64 register expects. One uncached MMIO store per
 // 64-byte line, then a fence so the writebacks retire before the next scanout.
 void dcache_clean_range(const void* vaddr, size_t bytes) {
-    if (g_hhdm_offset == 0 || bytes == 0) { return; }
-    uintptr_t phys             = reinterpret_cast<uintptr_t>(vaddr) - g_hhdm_offset;
-    volatile uint64_t* flush64 = reinterpret_cast<volatile uint64_t*>(g_hhdm_offset + CCACHE_FLUSH64);
-    uintptr_t end              = phys + bytes;
+    if (!kernel::mm::direct_map_ready() || bytes == 0) { return; }
+    uintptr_t phys = kernel::mm::direct_map_physical(vaddr).value();
+    auto flush64   = kernel::mm::map_mmio({kernel::mm::physical_address(CCACHE_FLUSH64), sizeof(uint64_t)});
+    uintptr_t end  = phys + bytes;
     for (uintptr_t line = phys & ~(uintptr_t)(CACHE_LINE_BYTES - 1); line < end; line += CACHE_LINE_BYTES) {
-        *flush64 = line;
+        flush64.write64(0, line);
     }
     asm volatile("fence" ::: "memory");
 }

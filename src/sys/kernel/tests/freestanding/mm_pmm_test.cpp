@@ -4,6 +4,7 @@
 #include "kernel/config.h"
 #include "kernel/mm/page.h"
 #include "kernel/mm/page_descriptor.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/testing/testing.h"
 
@@ -16,10 +17,6 @@
 // phase may assume which pool a page comes from -- only end-state invariants
 // (counts, zeroed contents) are asserted.
 
-// Set during boot from the Limine HHDM response; lets us touch a physical page
-// through its higher-half identity mapping.
-extern uintptr_t g_hhdm_offset;
-
 KTEST_MODULE("mm/pmm");
 
 namespace {
@@ -29,7 +26,8 @@ constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE;
 // Reads a freshly allocated page through the HHDM mapping and reports whether
 // every byte is zero.
 bool page_is_zeroed(kernel::mm::vm_paddr_t addr) {
-    auto* words = reinterpret_cast<volatile uint64_t*>(addr + g_hhdm_offset);
+    auto* words = reinterpret_cast<volatile uint64_t*>(
+        kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(addr)));
     for (size_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); ++i) {
         if (words[i] != 0) { return false; }
     }
@@ -37,7 +35,8 @@ bool page_is_zeroed(kernel::mm::vm_paddr_t addr) {
 }
 
 void dirty_page(kernel::mm::vm_paddr_t addr) {
-    auto* words = reinterpret_cast<volatile uint64_t*>(addr + g_hhdm_offset);
+    auto* words = reinterpret_cast<volatile uint64_t*>(
+        kernel::mm::unsafe::direct_map_address(kernel::mm::physical_address(addr)));
     for (size_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); ++i) { words[i] = 0xDEADBEEFCAFEF00DULL; }
 }
 

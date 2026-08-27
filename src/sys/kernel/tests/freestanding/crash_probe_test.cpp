@@ -3,10 +3,8 @@
 #include <stdint.h>
 
 #include "kernel/crash.h"
+#include "kernel/mm/physmap.h"
 #include "kernel/testing/testing.h"
-
-// HHDM offset published by the Limine boot path (x86_64/main.cpp).
-extern uintptr_t g_hhdm_offset;
 
 namespace { uint64_t g_probe_anchor = 0xa5a5'a5a5'a5a5'a5a5ULL; }  // namespace
 
@@ -30,8 +28,9 @@ KTEST_CASE(crash_probe_rejects_null) { KTEST_EXPECT_FALSE(kernel::crash::arch::p
 KTEST_CASE(crash_probe_rejects_far_unmapped) {
     // 64 GiB past the HHDM base: canonical higher-half, but far beyond the test
     // VM's RAM and Limine's 4 GiB direct map, so provably unmapped.
-    KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
-    KTEST_EXPECT_FALSE(kernel::crash::arch::probe_readable(g_hhdm_offset + (64ull << 30)));
+    KTEST_REQUIRE_TRUE(kernel::mm::direct_map_ready());
+    KTEST_EXPECT_FALSE(
+        kernel::crash::arch::probe_readable(kernel::mm::direct_map_address(kernel::mm::physical_address(64ull << 30))));
 }
 
 KTEST_CASE(crash_walk_rejects_wrapping_rbp) {
@@ -43,8 +42,9 @@ KTEST_CASE(crash_walk_rejects_wrapping_rbp) {
 KTEST_CASE(crash_walk_rejects_unmapped_rbp) {
     // Plausible-looking rbp pointing into provably unmapped higher-half memory:
     // must terminate the walk instead of dereferencing.
-    KTEST_REQUIRE_TRUE(g_hhdm_offset != 0);
-    auto bt = kernel::crash::walk_frame_pointers(g_hhdm_offset + (64ull << 30));
+    KTEST_REQUIRE_TRUE(kernel::mm::direct_map_ready());
+    auto bt =
+        kernel::crash::walk_frame_pointers(kernel::mm::direct_map_address(kernel::mm::physical_address(64ull << 30)));
     KTEST_EXPECT_EQUAL(bt.depth, static_cast<size_t>(0));
 }
 
