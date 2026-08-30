@@ -12,6 +12,7 @@ HandleTable::~HandleTable()       = default;
 
 ktl::result<void> HandleTable::grow() {
     size_t old_size = m_entries.size();
+    if (old_size > static_cast<size_t>(INT32_MAX) - GROW_BATCH) { return ktl::err(ktl::errc::capacity_exhausted); }
     for (size_t i = 0; i < GROW_BATCH; i++) {
         HandleEntry entry;
         if (!m_entries.push_back(ktl::move(entry))) { return ktl::err(ktl::errc::oom); }
@@ -170,6 +171,7 @@ size_t HandleTable::count() {
 
 bool HandleTable::snapshot(ktl::vector<HandleInfo>& out) {
     kernel::synchronization::lock_guard guard(m_lock);
+    if (m_count > SIZE_MAX - out.size()) { return false; }
     if (!out.reserve(out.size() + m_count)) { return false; }
     for (size_t i = 0; i < m_entries.size(); i++) {
         auto& entry = m_entries[i];

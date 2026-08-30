@@ -13,17 +13,21 @@ bool page_descriptor_table::init(const vm_page_region* usable, size_t usable_cou
                                  size_t wired_count) {
     vm_paddr_t max_end = 0;
     for (size_t i = 0; i < usable_count; ++i) {
+        if (usable[i].count > (UINTPTR_MAX - usable[i].start) / PAGE_SIZE) { return false; }
         vm_paddr_t end = usable[i].start + usable[i].count * PAGE_SIZE;
         if (end > max_end) { max_end = end; }
     }
     for (size_t i = 0; i < wired_count; ++i) {
+        if (wired[i].count > (UINTPTR_MAX - wired[i].start) / PAGE_SIZE) { return false; }
         vm_paddr_t end = wired[i].start + wired[i].count * PAGE_SIZE;
         if (end > max_end) { max_end = end; }
     }
     if (max_end == 0) { return false; }
 
-    m_count            = max_end / PAGE_SIZE;
+    m_count = max_end / PAGE_SIZE;
+    if (m_count > SIZE_MAX / sizeof(page_descriptor)) { return false; }
     size_t array_bytes = m_count * sizeof(page_descriptor);
+    if (array_bytes > SIZE_MAX - (PAGE_SIZE - 1)) { return false; }
     size_t array_pages = (array_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
 
     auto base          = g_page_frame_allocator.alloc_contiguous(array_pages);

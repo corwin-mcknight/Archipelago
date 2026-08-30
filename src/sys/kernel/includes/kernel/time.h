@@ -15,6 +15,12 @@ typedef uint64_t ktime_t;
  */
 typedef int64_t time_ns_t;
 
+namespace kernel::time_detail {
+
+constexpr uint64_t divide_ceil(uint64_t value, uint64_t divisor) { return value / divisor + (value % divisor != 0); }
+
+}  // namespace kernel::time_detail
+
 namespace kernel {
 
 class time {

@@ -222,11 +222,16 @@ bool set_extended_color(int& index, int code) {
     if (code != 38 && code != 48) { return false; }
     uint8_t* color = code == 38 ? &t.fg : &t.bg;
     if (index + 2 < t.nparams && t.params[index + 1] == 5) {
+        if (t.params[index + 2] < 0 || t.params[index + 2] > 255) { return false; }
         *color = static_cast<uint8_t>(t.params[index + 2]);
         index += 2;
         return true;
     }
     if (index + 4 < t.nparams && t.params[index + 1] == 2) {
+        if (t.params[index + 2] < 0 || t.params[index + 2] > 255 || t.params[index + 3] < 0 ||
+            t.params[index + 3] > 255 || t.params[index + 4] < 0 || t.params[index + 4] > 255) {
+            return false;
+        }
         *color = rgb_to_256(t.params[index + 2], t.params[index + 3], t.params[index + 4]);
         index += 4;
         return true;
@@ -263,20 +268,20 @@ int distance_param(int index = 0) {
     return value == 0 ? 1 : value;
 }
 
-void set_cursor(int row, int column) {
-    t.cy = static_cast<uint32_t>(ktl::clamp(row - 1, 0, static_cast<int>(t.rows) - 1));
-    t.cx = static_cast<uint32_t>(ktl::clamp(column - 1, 0, static_cast<int>(t.cols) - 1));
+void set_cursor(int64_t row, int64_t column) {
+    t.cy = static_cast<uint32_t>(ktl::clamp(row - 1, int64_t{0}, static_cast<int64_t>(t.rows) - 1));
+    t.cx = static_cast<uint32_t>(ktl::clamp(column - 1, int64_t{0}, static_cast<int64_t>(t.cols) - 1));
 }
 
 void move_cursor(char command) {
     int distance = distance_param();
     switch (command) {
-        case 'A': set_cursor(static_cast<int>(t.cy) + 1 - distance, static_cast<int>(t.cx) + 1); break;
-        case 'B': set_cursor(static_cast<int>(t.cy) + 1 + distance, static_cast<int>(t.cx) + 1); break;
-        case 'C': set_cursor(static_cast<int>(t.cy) + 1, static_cast<int>(t.cx) + 1 + distance); break;
-        case 'D': set_cursor(static_cast<int>(t.cy) + 1, static_cast<int>(t.cx) + 1 - distance); break;
-        case 'G': set_cursor(static_cast<int>(t.cy) + 1, distance); break;
-        case 'd': set_cursor(distance, static_cast<int>(t.cx) + 1); break;
+        case 'A': set_cursor(static_cast<int64_t>(t.cy) + 1 - distance, static_cast<int64_t>(t.cx) + 1); break;
+        case 'B': set_cursor(static_cast<int64_t>(t.cy) + 1 + distance, static_cast<int64_t>(t.cx) + 1); break;
+        case 'C': set_cursor(static_cast<int64_t>(t.cy) + 1, static_cast<int64_t>(t.cx) + 1 + distance); break;
+        case 'D': set_cursor(static_cast<int64_t>(t.cy) + 1, static_cast<int64_t>(t.cx) + 1 - distance); break;
+        case 'G': set_cursor(static_cast<int64_t>(t.cy) + 1, distance); break;
+        case 'd': set_cursor(distance, static_cast<int64_t>(t.cx) + 1); break;
         default: break;
     }
 }
@@ -334,7 +339,8 @@ void csi_byte(char c) {
         return;
     }
     if (c >= '0' && c <= '9') {
-        t.cur      = t.cur * 10 + (c - '0');
+        int digit  = c - '0';
+        t.cur      = t.cur > (INT32_MAX - digit) / 10 ? INT32_MAX : t.cur * 10 + digit;
         t.have_cur = true;
         return;
     }
@@ -472,9 +478,22 @@ void Console::init(const boot::boot_info& info) {
         return;
     }
 
-    uint32_t cols = static_cast<uint32_t>(info.fb_width / GLYPH_W);
-    uint32_t rows = static_cast<uint32_t>(info.fb_height / GLYPH_H);
-    if (cols == 0 || rows == 0) { return; }
+    // pack_rgb() shifts an eight-bit channel inside a uint32_t. A larger shift is
+    // undefined, and would also place part of the channel beyond the pixel.
+    if (info.fb_red_shift > 24 || info.fb_green_shift > 24 || info.fb_blue_shift > 24) {
+        g_log.warn("console: ignoring invalid framebuffer colour layout");
+        return;
+    }
+
+    uint64_t cols64 = info.fb_width / GLYPH_W;
+    uint64_t rows64 = info.fb_height / GLYPH_H;
+    if (cols64 == 0 || rows64 == 0 || cols64 > INT32_MAX || rows64 > INT32_MAX) {
+        g_log.warn("console: ignoring unrepresentable framebuffer grid");
+        return;
+    }
+
+    uint32_t cols  = static_cast<uint32_t>(cols64);
+    uint32_t rows  = static_cast<uint32_t>(rows64);
 
     size_t n_cells = static_cast<size_t>(cols) * rows;
     Cell* grid     = new (std::nothrow) Cell[n_cells];

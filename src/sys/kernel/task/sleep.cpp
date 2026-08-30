@@ -55,7 +55,9 @@ void sleep_ticks(uint64_t ticks) {
         if (c.current->killed()) { return; }
         c.current->stats().sleeps += 1;
         c.current->set_state(thread_state::BLOCKED);
-        bool ok = g_sleepers.push_back(sleeper{kernel::time::now() + ticks, c.current});
+        ktime_t now     = kernel::time::now();
+        ktime_t wake_at = ticks > UINT64_MAX - now ? UINT64_MAX : now + ticks;
+        bool ok         = g_sleepers.push_back(sleeper{wake_at, c.current});
         ensure(ok, "sleep_ticks: sleeper push failed despite reservation");
     }
     schedule_out(switch_reason::SLEEP);

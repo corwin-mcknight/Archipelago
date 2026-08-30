@@ -20,8 +20,10 @@ static header* g_freep;
 #define ARENA_MIN_BYTES (16u * 1024u)
 
 static int morecore(size_t units) {
+    if (units > SIZE_MAX / sizeof(header)) { return 0; }
     size_t bytes = units * sizeof(header);
     if (bytes < ARENA_MIN_BYTES) { bytes = ARENA_MIN_BYTES; }
+    if (bytes > SIZE_MAX - (ABI_VM_PAGE_SIZE - 1)) { return 0; }
     bytes = (bytes + (ABI_VM_PAGE_SIZE - 1)) & ~(size_t)(ABI_VM_PAGE_SIZE - 1);
 
     uint64_t vmo = sys_vmo_create(bytes);
@@ -38,7 +40,11 @@ static int morecore(size_t units) {
 
 void* malloc(size_t size) {
     if (size == 0) { return NULL; }
-    size_t units = (size + sizeof(header) - 1) / sizeof(header) + 1;
+    // One unit holds the allocation header. Compute the payload ceiling without an
+    // overflowing `size + sizeof(header) - 1`, then make sure adding that header fits.
+    size_t units = size / sizeof(header) + (size % sizeof(header) != 0);
+    if (units == SIZE_MAX) { return NULL; }
+    units++;
 
     if (g_freep == NULL) {
         g_base.next  = &g_base;

@@ -97,10 +97,14 @@ memory_kind classify(uint64_t limine_type) {
 size_t g_range_count = 0;
 
 void push_range(uint64_t base, uint64_t length, memory_kind kind) {
+    if (length > UINT64_MAX - base) {
+        g_log.warn("boot: ignoring wrapping memmap range base=0x{0:p} length=0x{1:p}", base, length);
+        return;
+    }
     // Limine reports the memmap sorted by base, so contiguous same-kind entries merge
     // into the previous range instead of costing an array slot.
-    if (g_range_count > 0 && g_ranges[g_range_count - 1].kind == kind &&
-        g_ranges[g_range_count - 1].base + g_ranges[g_range_count - 1].length == base) {
+    if (g_range_count > 0 && g_ranges[g_range_count - 1].kind == kind && base >= g_ranges[g_range_count - 1].base &&
+        g_ranges[g_range_count - 1].length == base - g_ranges[g_range_count - 1].base) {
         g_ranges[g_range_count - 1].length += length;
         return;
     }
@@ -121,7 +125,14 @@ void translate_memmap() {
     uint64_t fence = platform::firmware_fenced_memory_base();
     for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
         const auto* entry = memmap_request.response->entries[i];
-        uint64_t end      = entry->base + entry->length;
+        if (entry == nullptr || entry->length > UINT64_MAX - entry->base) {
+            if (entry != nullptr) {
+                g_log.warn("boot: ignoring wrapping memmap range base=0x{0:p} length=0x{1:p}", entry->base,
+                           entry->length);
+            }
+            continue;
+        }
+        uint64_t end = entry->base + entry->length;
         if (entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE && fence != 0 && end > fence) {
             uint64_t split = entry->base > fence ? entry->base : fence;
             if (split > entry->base) { push_range(entry->base, split - entry->base, memory_kind::OTHER); }

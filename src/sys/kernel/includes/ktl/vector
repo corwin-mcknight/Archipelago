@@ -34,6 +34,7 @@ template <typename T> class vector {
     }
 
     bool push_back(T value) {
+        if (m_size == SIZE_MAX) { return false; }
         if (!ensure_capacity(m_size + 1)) { return false; }
         new (&m_data[m_size++]) T(ktl::move(value));
         return true;

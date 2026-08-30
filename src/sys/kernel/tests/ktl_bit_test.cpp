@@ -28,4 +28,5 @@ KTEST_CASE(ktl_bit_align) {
     EXPECT(ktl::align_down(uintptr_t{0x1FFF}, 0x1000) == uintptr_t{0x1000});
     EXPECT(ktl::align_down(uintptr_t{0x2000}, 0x1000) == uintptr_t{0x2000});
     static_assert(ktl::align_up(uintptr_t{17}, 8) == 24);
+    static_assert(ktl::is_unsigned_v<decltype(ktl::align_up(uintptr_t{17}, 8))>);
 }

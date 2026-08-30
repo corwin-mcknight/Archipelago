@@ -2,6 +2,7 @@
 #include <kernel/log.h>
 #include <kernel/mm/mmio.h>
 #include <kernel/mm/physmap.h>
+#include <kernel/panic.h>
 #include <kernel/platform.h>
 
 extern kernel::driver::uart uart;
@@ -57,10 +58,13 @@ void timestamp_calibrate() {}
 void dcache_clean_range(const void* vaddr, size_t bytes) {
     if (!kernel::mm::direct_map_ready() || bytes == 0) { return; }
     uintptr_t phys = kernel::mm::direct_map_physical(vaddr).value();
-    auto flush64   = kernel::mm::map_mmio({kernel::mm::physical_address(CCACHE_FLUSH64), sizeof(uint64_t)});
-    uintptr_t end  = phys + bytes;
-    for (uintptr_t line = phys & ~(uintptr_t)(CACHE_LINE_BYTES - 1); line < end; line += CACHE_LINE_BYTES) {
+    if (bytes - 1 > UINTPTR_MAX - phys) { panic("dcache: clean range wraps address space"); }
+    auto flush64  = kernel::mm::map_mmio({kernel::mm::physical_address(CCACHE_FLUSH64), sizeof(uint64_t)});
+    uintptr_t end = phys + bytes;
+    for (uintptr_t line = phys & ~(uintptr_t)(CACHE_LINE_BYTES - 1); line < end;) {
         flush64.write64(0, line);
+        if (end - line <= CACHE_LINE_BYTES) { break; }
+        line += CACHE_LINE_BYTES;
     }
     asm volatile("fence" ::: "memory");
 }
