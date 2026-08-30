@@ -259,7 +259,7 @@ void crash_write(const char* s) {
 [[noreturn]] void dispatch(trigger_kind kind, register_frame_t* regs, const char* message, const char* file, int line) {
     // Own the console for the whole report so another core's log line cannot splice into it; the
     // guard is re-entrant, so a crash raised mid-line on this core still gets through.
-    kernel::console::line_guard console_line;
+    auto console_line = kernel::g_console.lock_line();
     if (g_in_dump) {
         // Recursive crash inside the dumper -- abandon and halt.
         crash_write("\n*** RECURSIVE CRASH -- HALTING ***\n");

@@ -11,30 +11,17 @@
 #include <std/new.h>
 #include <std/string.h>
 
-// Text-output fan-out plus a small framebuffer terminal. Writers (the log, the
-// shell) call write_byte/write_string; those hit the boot UART inline and, once
-// a framebuffer exists, drop the bytes into a ring the fb_sw_log thread drains.
-//
-// The painter keeps the console as a character grid in RAM and interprets a
-// VT-ish escape stream (cursor positioning, erase, SGR colour incl. xterm
-// 256-colour), so a full-screen TUI repaints in place instead of scrolling. On
-// each drained burst it diffs the grid against a shadow of what is already on the
-// panel and blits only the cells that changed, then writes those rows back out of
-// cache (the display scans DRAM directly). Typing and in-place TUI updates touch a
-// handful of cells; only genuine scrolling costs a whole frame.
+#include <ktl/algorithm>
 
 extern kernel::driver::uart uart;
 
-namespace kernel::console {
+namespace kernel {
 namespace {
 
 using kernel::synchronization::critical_irq_lock_guard;
 using kernel::synchronization::spinlock;
 
-// --- byte ring: writers -> painter -----------------------------------------
-// Free-running head/tail counters (their difference is the fill level); when it
-// fills, the painter has fallen behind and the newest bytes are dropped -- the
-// UART holds the authoritative copy, so the panel merely misses a little.
+// The UART remains authoritative when the framebuffer queue overflows.
 constexpr size_t RING_SIZE = 1u << 14;  // 16 KiB
 constexpr size_t RING_MASK = RING_SIZE - 1;
 
@@ -44,27 +31,21 @@ size_t g_head              = 0;
 size_t g_tail              = 0;
 uint64_t g_dropped         = 0;
 
-// Set once init() has published the geometry and started the painter; until then
-// write_* only touch the UART. Release/acquire so a writer that sees it true also
-// sees the geometry.
+// Release/acquire publishes the terminal state to writers.
 bool g_ready               = false;
 
-// --- glyph + colour ---------------------------------------------------------
 constexpr uint32_t GLYPH_W = 8, GLYPH_H = 8;
 constexpr uint8_t DEFAULT_FG = 7;  // xterm light grey
 constexpr uint8_t DEFAULT_BG = 0;  // black
 
-// One screen cell: a codepoint and its 256-colour palette indices. Packed to 3
-// bytes so cells[] and the shadow together are ~200 KB at 1080p.
-struct cell {
+struct Cell {
     char ch;
     uint8_t fg;
     uint8_t bg;
-};
-bool operator==(const cell& a, const cell& b) { return a.ch == b.ch && a.fg == b.fg && a.bg == b.bg; }
 
-// The xterm 256-colour palette, resolved to this framebuffer's pixel layout at
-// init(). 0-15 base ANSI, 16-231 a 6x6x6 cube, 232-255 a grey ramp.
+    bool operator==(const Cell&) const = default;
+};
+
 uint32_t g_palette[256];
 uint32_t g_red_shift = 16, g_green_shift = 8, g_blue_shift = 0;
 
@@ -92,29 +73,27 @@ void build_palette() {
     }
 }
 
-// Nearest 6x6x6-cube index for a truecolour (38;2) request -- graceful degrade.
 uint8_t rgb_to_256(int r, int g, int b) {
     auto q = [](int v) { return (v * 5 + 127) / 255; };  // 0..5
     return static_cast<uint8_t>(16 + 36 * q(r) + 6 * q(g) + q(b));
 }
 
-// --- terminal state (painter thread only) ----------------------------------
-struct term {
+enum class ParserState { TEXT, ESCAPE, CSI };
+
+struct Terminal {
     uint8_t* fb;
-    uint64_t width, height, pitch;
+    uint64_t pitch;
     uint32_t cols, rows;
     uint32_t cx, cy;  // cursor, in cells
-    cell* grid;       // logical contents
-    cell* shadow;     // what is currently on the panel; the diff target
+    Cell* grid;       // logical contents
+    Cell* shadow;     // what is currently on the panel; the diff target
     bool dirty;       // grid changed since the last flush; gates the diff so an idle console is free
     bool hold;        // inside CSI ?2026 h..l (synchronized output): defer flushing until the frame ends
 
-    // pen
     uint8_t fg, bg;
     bool bold, reverse;
 
-    // CSI parser
-    int esc;  // 0 normal, 1 after ESC, 2 inside CSI
+    ParserState parser_state;
     int params[16];
     int nparams;
     int cur;
@@ -122,11 +101,8 @@ struct term {
     int priv;  // private-marker byte (?, >, =) or 0
 } t;
 
-cell blank_cell() { return cell{' ', DEFAULT_FG, t.bg}; }
+Cell blank_cell() { return Cell{' ', DEFAULT_FG, t.bg}; }
 
-int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-// --- byte ring helpers ------------------------------------------------------
 void push(char c) {  // caller holds g_lock
     if (g_head - g_tail >= RING_SIZE) {
         ++g_dropped;
@@ -143,10 +119,8 @@ size_t pop_batch(char* out, size_t cap) {
     return n;
 }
 
-// --- rendering --------------------------------------------------------------
-// Paint one cell to the framebuffer from its palette colours. Framebuffer writes
-// only, never a read.
-void blit(const cell& c, uint32_t gx, uint32_t gy) {
+// The scanned-out framebuffer is write-only from the kernel's point of view.
+void blit(const Cell& c, uint32_t gx, uint32_t gy) {
     auto uc = static_cast<uint8_t>(c.ch);
     if (uc < 0x20) { uc = 0x20; }
     const uint8_t* glyph = font_unscii8_bitmap[uc - 0x20];
@@ -161,8 +135,6 @@ void blit(const cell& c, uint32_t gx, uint32_t gy) {
     }
 }
 
-// Diff the grid against the shadow and repaint only what changed, writing each
-// touched row's changed span back out of cache for the display controller.
 void flush() {
     for (uint32_t gy = 0; gy < t.rows; ++gy) {
         size_t base = static_cast<size_t>(gy) * t.cols;
@@ -186,8 +158,8 @@ void flush() {
 
 void scroll() {
     size_t row_cells = t.cols;
-    memmove(t.grid, t.grid + row_cells, static_cast<size_t>(t.rows - 1) * row_cells * sizeof(cell));
-    cell* last = t.grid + static_cast<size_t>(t.rows - 1) * row_cells;
+    memmove(t.grid, t.grid + row_cells, static_cast<size_t>(t.rows - 1) * row_cells * sizeof(Cell));
+    Cell* last = t.grid + static_cast<size_t>(t.rows - 1) * row_cells;
     for (uint32_t i = 0; i < t.cols; ++i) { last[i] = blank_cell(); }
     t.dirty = true;
 }
@@ -208,7 +180,7 @@ void put(char ch) {
         fg          = bg;
         bg          = tmp;
     }
-    t.grid[static_cast<size_t>(t.cy) * t.cols + t.cx] = cell{ch, fg, bg};
+    t.grid[static_cast<size_t>(t.cy) * t.cols + t.cx] = Cell{ch, fg, bg};
     t.dirty                                           = true;
     if (++t.cx >= t.cols) { newline(); }
 }
@@ -220,116 +192,138 @@ void erase_cells(size_t from, size_t to) {  // [from, to)
 
 int param(int i, int def) { return i < t.nparams ? t.params[i] : def; }
 
-void do_sgr() {
-    if (t.nparams == 0) {  // bare CSI m == reset
-        t.fg      = DEFAULT_FG;
-        t.bg      = DEFAULT_BG;
-        t.bold    = false;
-        t.reverse = false;
-        return;
+void reset_pen() {
+    t.fg      = DEFAULT_FG;
+    t.bg      = DEFAULT_BG;
+    t.bold    = false;
+    t.reverse = false;
+}
+
+bool set_basic_color(int code) {
+    if (code >= 30 && code <= 37) {
+        t.fg = static_cast<uint8_t>(code - 30);
+    } else if (code == 39) {
+        t.fg = DEFAULT_FG;
+    } else if (code >= 40 && code <= 47) {
+        t.bg = static_cast<uint8_t>(code - 40);
+    } else if (code == 49) {
+        t.bg = DEFAULT_BG;
+    } else if (code >= 90 && code <= 97) {
+        t.fg = static_cast<uint8_t>(code - 90 + 8);
+    } else if (code >= 100 && code <= 107) {
+        t.bg = static_cast<uint8_t>(code - 100 + 8);
+    } else {
+        return false;
     }
-    for (int i = 0; i < t.nparams; ++i) {
-        int n = t.params[i];
-        if (n == 0) {
-            t.fg      = DEFAULT_FG;
-            t.bg      = DEFAULT_BG;
-            t.bold    = false;
-            t.reverse = false;
-        } else if (n == 1) {
-            t.bold = true;
-        } else if (n == 22) {
-            t.bold = false;
-        } else if (n == 7) {
-            t.reverse = true;
-        } else if (n == 27) {
-            t.reverse = false;
-        } else if (n >= 30 && n <= 37) {
-            t.fg = static_cast<uint8_t>(n - 30);
-        } else if (n == 39) {
-            t.fg = DEFAULT_FG;
-        } else if (n >= 40 && n <= 47) {
-            t.bg = static_cast<uint8_t>(n - 40);
-        } else if (n == 49) {
-            t.bg = DEFAULT_BG;
-        } else if (n >= 90 && n <= 97) {
-            t.fg = static_cast<uint8_t>(n - 90 + 8);
-        } else if (n >= 100 && n <= 107) {
-            t.bg = static_cast<uint8_t>(n - 100 + 8);
-        } else if ((n == 38 || n == 48) && i + 2 < t.nparams && t.params[i + 1] == 5) {
-            uint8_t idx             = static_cast<uint8_t>(t.params[i + 2]);
-            (n == 38 ? t.fg : t.bg) = idx;
-            i += 2;
-        } else if ((n == 38 || n == 48) && i + 4 < t.nparams && t.params[i + 1] == 2) {
-            uint8_t idx             = rgb_to_256(t.params[i + 2], t.params[i + 3], t.params[i + 4]);
-            (n == 38 ? t.fg : t.bg) = idx;
-            i += 4;
-        }
+    return true;
+}
+
+bool set_extended_color(int& index, int code) {
+    if (code != 38 && code != 48) { return false; }
+    uint8_t* color = code == 38 ? &t.fg : &t.bg;
+    if (index + 2 < t.nparams && t.params[index + 1] == 5) {
+        *color = static_cast<uint8_t>(t.params[index + 2]);
+        index += 2;
+        return true;
+    }
+    if (index + 4 < t.nparams && t.params[index + 1] == 2) {
+        *color = rgb_to_256(t.params[index + 2], t.params[index + 3], t.params[index + 4]);
+        index += 4;
+        return true;
+    }
+    return false;
+}
+
+void set_style(int code) {
+    switch (code) {
+        case 0: reset_pen(); break;
+        case 1: t.bold = true; break;
+        case 7: t.reverse = true; break;
+        case 22: t.bold = false; break;
+        case 27: t.reverse = false; break;
+        default: break;
     }
 }
 
-void dispatch(char final) {
-    if (t.priv != 0) {  // DEC private modes: only synchronized output (?2026) matters to us; swallow the rest
-        if (t.priv == '?' && param(0, 0) == 2026 && (final == 'h' || final == 'l')) { t.hold = (final == 'h'); }
+void do_sgr() {
+    if (t.nparams == 0) {
+        reset_pen();
         return;
     }
-    switch (final) {
+    for (int i = 0; i < t.nparams; ++i) {
+        int code = t.params[i];
+        if (set_basic_color(code)) { continue; }
+        if (set_extended_color(i, code)) { continue; }
+        set_style(code);
+    }
+}
+
+int distance_param(int index = 0) {
+    int value = param(index, 1);
+    return value == 0 ? 1 : value;
+}
+
+void set_cursor(int row, int column) {
+    t.cy = static_cast<uint32_t>(ktl::clamp(row - 1, 0, static_cast<int>(t.rows) - 1));
+    t.cx = static_cast<uint32_t>(ktl::clamp(column - 1, 0, static_cast<int>(t.cols) - 1));
+}
+
+void move_cursor(char command) {
+    int distance = distance_param();
+    switch (command) {
+        case 'A': set_cursor(static_cast<int>(t.cy) + 1 - distance, static_cast<int>(t.cx) + 1); break;
+        case 'B': set_cursor(static_cast<int>(t.cy) + 1 + distance, static_cast<int>(t.cx) + 1); break;
+        case 'C': set_cursor(static_cast<int>(t.cy) + 1, static_cast<int>(t.cx) + 1 + distance); break;
+        case 'D': set_cursor(static_cast<int>(t.cy) + 1, static_cast<int>(t.cx) + 1 - distance); break;
+        case 'G': set_cursor(static_cast<int>(t.cy) + 1, distance); break;
+        case 'd': set_cursor(distance, static_cast<int>(t.cx) + 1); break;
+        default: break;
+    }
+}
+
+void erase_display() {
+    size_t total  = static_cast<size_t>(t.rows) * t.cols;
+    size_t cursor = static_cast<size_t>(t.cy) * t.cols + t.cx;
+    switch (param(0, 0)) {
+        case 0: erase_cells(cursor, total); break;
+        case 1: erase_cells(0, cursor + 1); break;
+        default: erase_cells(0, total); break;
+    }
+}
+
+void erase_line() {
+    size_t row = static_cast<size_t>(t.cy) * t.cols;
+    switch (param(0, 0)) {
+        case 0: erase_cells(row + t.cx, row + t.cols); break;
+        case 1: erase_cells(row, row + t.cx + 1); break;
+        default: erase_cells(row, row + t.cols); break;
+    }
+}
+
+void dispatch_private(char command) {
+    if (t.priv != '?' || param(0, 0) != 2026) { return; }
+    if (command == 'h') { t.hold = true; }
+    if (command == 'l') { t.hold = false; }
+}
+
+void dispatch(char command) {
+    if (t.priv != 0) {
+        dispatch_private(command);
+        return;
+    }
+    switch (command) {
         case 'H':
-        case 'f': {
-            int r = param(0, 1);
-            int c = param(1, 1);
-            t.cy  = static_cast<uint32_t>(clampi((r ? r : 1) - 1, 0, static_cast<int>(t.rows) - 1));
-            t.cx  = static_cast<uint32_t>(clampi((c ? c : 1) - 1, 0, static_cast<int>(t.cols) - 1));
-            break;
-        }
+        case 'f': set_cursor(distance_param(0), distance_param(1)); break;
         case 'A':
-            t.cy = static_cast<uint32_t>(
-                clampi(static_cast<int>(t.cy) - (param(0, 1) ? param(0, 1) : 1), 0, static_cast<int>(t.rows) - 1));
-            break;
         case 'B':
-            t.cy = static_cast<uint32_t>(
-                clampi(static_cast<int>(t.cy) + (param(0, 1) ? param(0, 1) : 1), 0, static_cast<int>(t.rows) - 1));
-            break;
         case 'C':
-            t.cx = static_cast<uint32_t>(
-                clampi(static_cast<int>(t.cx) + (param(0, 1) ? param(0, 1) : 1), 0, static_cast<int>(t.cols) - 1));
-            break;
         case 'D':
-            t.cx = static_cast<uint32_t>(
-                clampi(static_cast<int>(t.cx) - (param(0, 1) ? param(0, 1) : 1), 0, static_cast<int>(t.cols) - 1));
-            break;
         case 'G':
-            t.cx = static_cast<uint32_t>(clampi((param(0, 1) ? param(0, 1) : 1) - 1, 0, static_cast<int>(t.cols) - 1));
-            break;
-        case 'd':
-            t.cy = static_cast<uint32_t>(clampi((param(0, 1) ? param(0, 1) : 1) - 1, 0, static_cast<int>(t.rows) - 1));
-            break;
-        case 'J': {
-            size_t total  = static_cast<size_t>(t.rows) * t.cols;
-            size_t cursor = static_cast<size_t>(t.cy) * t.cols + t.cx;
-            int mode      = param(0, 0);
-            if (mode == 0) {
-                erase_cells(cursor, total);
-            } else if (mode == 1) {
-                erase_cells(0, cursor + 1);
-            } else {
-                erase_cells(0, total);
-            }
-            break;
-        }
-        case 'K': {
-            size_t row = static_cast<size_t>(t.cy) * t.cols;
-            int mode   = param(0, 0);
-            if (mode == 0) {
-                erase_cells(row + t.cx, row + t.cols);
-            } else if (mode == 1) {
-                erase_cells(row, row + t.cx + 1);
-            } else {
-                erase_cells(row, row + t.cols);
-            }
-            break;
-        }
+        case 'd': move_cursor(command); break;
+        case 'J': erase_display(); break;
+        case 'K': erase_line(); break;
         case 'm': do_sgr(); break;
-        default: break;  // unhandled CSI -- ignore
+        default: break;
     }
 }
 
@@ -353,65 +347,54 @@ void csi_byte(char c) {
     if (uc >= 0x40 && uc <= 0x7e) {  // final byte
         if (t.have_cur && t.nparams < 16) { t.params[t.nparams++] = t.cur; }
         dispatch(c);
-        t.esc = 0;
+        t.parser_state = ParserState::TEXT;
         return;
     }
-    // intermediate/space bytes: stay in CSI, ignore
+}
+
+void begin_csi() {
+    t.parser_state = ParserState::CSI;
+    t.nparams      = 0;
+    t.cur          = 0;
+    t.have_cur     = false;
+    t.priv         = 0;
+}
+
+void render_text(char c) {
+    switch (c) {
+        case 0x1b: t.parser_state = ParserState::ESCAPE; break;
+        case '\n': newline(); break;
+        case '\r': t.cx = 0; break;
+        case '\b':
+            if (t.cx > 0) { --t.cx; }
+            break;
+        case '\t': {
+            uint32_t next = (t.cx & ~7u) + 8;
+            while (t.cx < next && t.cx < t.cols) { put(' '); }
+            break;
+        }
+        default:
+            if (static_cast<uint8_t>(c) >= 0x20) { put(c); }
+            break;
+    }
 }
 
 void render(char c) {
-    if (t.esc == 1) {
-        if (c == '[') {
-            t.esc      = 2;
-            t.nparams  = 0;
-            t.cur      = 0;
-            t.have_cur = false;
-            t.priv     = 0;
-        } else {
-            t.esc = 0;  // non-CSI escape (e.g. ESC(B) -- ignore its final byte too, cheaply
-        }
-        return;
+    switch (t.parser_state) {
+        case ParserState::TEXT: render_text(c); break;
+        case ParserState::ESCAPE:
+            if (c == '[') {
+                begin_csi();
+            } else {
+                t.parser_state = ParserState::TEXT;
+            }
+            break;
+        case ParserState::CSI: csi_byte(c); break;
     }
-    if (t.esc == 2) {
-        csi_byte(c);
-        return;
-    }
-    if (c == 0x1b) {
-        t.esc = 1;
-        return;
-    }
-    if (c == '\n') {
-        newline();
-        return;
-    }
-    if (c == '\r') {
-        t.cx = 0;
-        return;
-    }
-    if (c == '\b') {  // the shell erases with "\b \b"; the space overwrites between the two moves
-        if (t.cx > 0) { --t.cx; }
-        return;
-    }
-    if (c == '\t') {
-        uint32_t next = (t.cx & ~7u) + 8;
-        while (t.cx < next && t.cx < t.cols) { put(' '); }
-        return;
-    }
-    if (static_cast<uint8_t>(c) < 0x20) { return; }
-    put(c);
 }
 
-// Only flush mid-drain once this many bytes have piled up, so a whole TUI frame
-// (a screen repaint between cursor-home and the next idle) lands in one flush at
-// the natural frame boundary -- the ring draining -- rather than tearing across
-// two. Purely a safety valve for an unbounded flood; interactive bursts drain
-// and flush well below it.
 constexpr size_t FLUSH_BYTES   = 1u << 16;
 
-// Cap the repaint rate at ~60 Hz: after a flush, hold this many ticks (1 tick = 1 ms)
-// before the next one, so a chatty producer cannot drive the painter's CPU up. When
-// idle, poll a little slower still. ponytail: a wait-queue wake on push would drop
-// idle CPU to zero -- do that if this poll ever shows up in a profile.
 constexpr uint64_t FRAME_TICKS = 16;
 constexpr uint64_t IDLE_TICKS  = 8;
 
@@ -424,10 +407,7 @@ constexpr uint64_t IDLE_TICKS  = 8;
             for (size_t i = 0; i < n; ++i) { render(batch[i]); }
             since_flush += n;
         }
-        // Flush when the ring drains (n < batch) or a flood crosses the safety cap, but only if
-        // something changed -- gating on the dirty flag keeps an idle console off the CPU entirely
-        // (no full-grid diff when nothing was written).
-        bool hold = t.hold && since_flush < FLUSH_BYTES;  // the flood cap also bounds a frame left open
+        bool hold = t.hold && since_flush < FLUSH_BYTES;
         if (t.dirty && !hold && (n < sizeof(batch) || since_flush >= FLUSH_BYTES)) {
             flush();
             t.dirty     = false;
@@ -436,51 +416,50 @@ constexpr uint64_t IDLE_TICKS  = 8;
         } else if (n == 0) {
             kernel::sched::sleep_ticks(IDLE_TICKS);
         }
-        // else: ring still had a full batch -- keep draining without sleeping.
     }
 }
 
 }  // namespace
 
-namespace {
-constexpr size_t NO_OWNER    = SIZE_MAX;
-volatile size_t g_line_owner = NO_OWNER;
-size_t g_line_depth          = 0;
-}  // namespace
+Console g_console;
 
-line_guard::line_guard() : m_flags(kernel::arch::save_and_disable_interrupts()) {
+Console::LineGuard::LineGuard(Console& console)
+    : m_console(console), m_flags(kernel::arch::save_and_disable_interrupts()) {
     size_t self = kernel::arch::current_core_index();
-    if (__atomic_load_n(&g_line_owner, __ATOMIC_RELAXED) == self) {
-        ++g_line_depth;
+    if (__atomic_load_n(&m_console.m_line_owner, __ATOMIC_RELAXED) == self) {
+        ++m_console.m_line_depth;
         return;
     }
-    size_t expected = NO_OWNER;
-    while (!__atomic_compare_exchange_n(&g_line_owner, &expected, self, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
-        expected = NO_OWNER;
+    size_t expected = Console::NO_OWNER;
+    while (!__atomic_compare_exchange_n(&m_console.m_line_owner, &expected, self, false, __ATOMIC_ACQUIRE,
+                                        __ATOMIC_RELAXED)) {
+        expected = Console::NO_OWNER;
     }
-    g_line_depth = 1;
+    m_console.m_line_depth = 1;
 }
 
-line_guard::~line_guard() {
-    if (--g_line_depth == 0) { __atomic_store_n(&g_line_owner, NO_OWNER, __ATOMIC_RELEASE); }
+Console::LineGuard::~LineGuard() {
+    if (--m_console.m_line_depth == 0) {
+        __atomic_store_n(&m_console.m_line_owner, Console::NO_OWNER, __ATOMIC_RELEASE);
+    }
     kernel::arch::restore_interrupts(m_flags);
 }
 
-void write_byte(char c) {
+void Console::write(char c) {
     uart.write_byte(c);
     if (!__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE)) { return; }
     critical_irq_lock_guard guard(g_lock);
     push(c);
 }
 
-void write_string(ktl::string_view s) {
-    uart.write_string(s);
+void Console::write(ktl::string_view text) {
+    uart.write_string(text);
     if (!__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE)) { return; }
     critical_irq_lock_guard guard(g_lock);
-    for (char c : s) { push(c); }
+    for (char c : text) { push(c); }
 }
 
-void init(const kernel::boot::boot_info& info) {
+void Console::init(const boot::boot_info& info) {
     if (info.framebuffer == nullptr || info.fb_bpp != 32) { return; }
 
     // Treat the bootloader descriptor as untrusted input. In particular, a
@@ -498,8 +477,8 @@ void init(const kernel::boot::boot_info& info) {
     if (cols == 0 || rows == 0) { return; }
 
     size_t n_cells = static_cast<size_t>(cols) * rows;
-    cell* grid     = new (std::nothrow) cell[n_cells];
-    cell* shadow   = new (std::nothrow) cell[n_cells];
+    Cell* grid     = new (std::nothrow) Cell[n_cells];
+    Cell* shadow   = new (std::nothrow) Cell[n_cells];
     if (grid == nullptr || shadow == nullptr) {
         delete[] grid;
         delete[] shadow;
@@ -507,34 +486,31 @@ void init(const kernel::boot::boot_info& info) {
         return;
     }
 
-    t.fb     = static_cast<uint8_t*>(info.framebuffer);
-    t.width  = info.fb_width;
-    t.height = info.fb_height;
-    t.pitch  = info.fb_pitch;
-    t.cols   = cols;
-    t.rows   = rows;
+    t.fb    = static_cast<uint8_t*>(info.framebuffer);
+    t.pitch = info.fb_pitch;
+    t.cols  = cols;
+    t.rows  = rows;
     t.cx = t.cy = 0;
     t.grid      = grid;
     t.shadow    = shadow;
     t.fg        = DEFAULT_FG;
     t.bg        = DEFAULT_BG;
     t.bold = t.reverse = t.hold = false;
-    t.esc = t.nparams = t.cur = t.priv = 0;
-    t.have_cur                         = false;
+    t.parser_state              = ParserState::TEXT;
+    t.nparams = t.cur = t.priv = 0;
+    t.have_cur                 = false;
 
-    g_red_shift                        = info.fb_red_shift;
-    g_green_shift                      = info.fb_green_shift;
-    g_blue_shift                       = info.fb_blue_shift;
+    g_red_shift                = info.fb_red_shift;
+    g_green_shift              = info.fb_green_shift;
+    g_blue_shift               = info.fb_blue_shift;
     build_palette();
 
-    // grid and shadow both start blank-on-black; clear the panel to match so the
-    // first diff draws only real content.
-    for (size_t i = 0; i < n_cells; ++i) { grid[i] = shadow[i] = cell{' ', DEFAULT_FG, DEFAULT_BG}; }
-    memset(t.fb, 0, t.pitch * t.height);
-    kernel::platform::dcache_clean_range(t.fb, t.pitch * t.height);
+    for (size_t i = 0; i < n_cells; ++i) { grid[i] = shadow[i] = Cell{' ', DEFAULT_FG, DEFAULT_BG}; }
+    memset(t.fb, 0, t.pitch * info.fb_height);
+    kernel::platform::dcache_clean_range(t.fb, t.pitch * info.fb_height);
 
     kernel::sched::spawn("fb_sw_log", painter_thread, nullptr).expect("console: framebuffer painter spawn failed");
     __atomic_store_n(&g_ready, true, __ATOMIC_RELEASE);
 }
 
-}  // namespace kernel::console
+}  // namespace kernel

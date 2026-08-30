@@ -6,21 +6,21 @@
 namespace kernel::shell {
 
 void ShellOutput::write(const char* s) {
-    kernel::console::line_guard line;
+    auto line = kernel::g_console.lock_line();
     if (sink_ != nullptr) {
         for (const char* p = s; *p != '\0'; ++p) { sink_(*p, sink_ctx_); }
         return;
     }
-    kernel::console::write_string(s);
+    kernel::g_console.write(s);
 }
 
 void ShellOutput::write_char(char c) {
-    kernel::console::line_guard line;
+    auto line = kernel::g_console.lock_line();
     if (sink_ != nullptr) {
         sink_(c, sink_ctx_);
         return;
     }
-    kernel::console::write_byte(c);
+    kernel::g_console.write(c);
 }
 
 }  // namespace kernel::shell

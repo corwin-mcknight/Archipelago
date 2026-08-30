@@ -27,7 +27,7 @@ void kernel::system_log::flush() {
     // interrupt-context) flushes never block. The drain emits READY slots in sequence order and
     // stops at the first in-progress slot.
     m_ring.drain([this](const log_message& message) {
-        kernel::console::line_guard line;
+        auto line               = kernel::g_console.lock_line();
         const int clamped_level = ktl::clamp((int)message.level(), 0, (int)ktl::size(log_level_data) - 1);
         char status             = log_level_data[clamped_level].status;
         time_ns_t timestamp     = kernel::time::ktime_to_ns(message.timestamp);
@@ -44,13 +44,13 @@ void kernel::system_log::flush() {
             ktl::format::format_to_buffer_raw(front.m_buffer, front.size(), "{0:03d}.{1:03d} {2:1c} | ", time_seconds,
                                               time_ms, status);
         }
-        kernel::console::write_string(front);
+        kernel::g_console.write(front);
         message.text.for_each([&](char c) {
-            kernel::console::write_byte(c);
-            if (c == '\n') { kernel::console::write_string("..........| "); }
+            kernel::g_console.write(c);
+            if (c == '\n') { kernel::g_console.write("..........| "); }
         });
 
-        if (m_colors) { kernel::console::write_string("\033[0m"); }
-        kernel::console::write_byte('\n');
+        if (m_colors) { kernel::g_console.write("\033[0m"); }
+        kernel::g_console.write('\n');
     });
 }

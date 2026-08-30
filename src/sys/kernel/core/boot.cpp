@@ -227,7 +227,7 @@ static void shell_thread_main(void*) { kernel::shell::shell_main(); }
 
     // The scheduler is up, so the framebuffer console can spawn its painter thread; from here
     // the log and the shell appear on the panel as well as the UART.
-    kernel::console::init(collect());
+    kernel::g_console.init(collect());
 
     kernel::sched::spawn("zeroer", zeroer_thread_main, nullptr).expect("boot: zeroer spawn failed");
 

@@ -26,7 +26,7 @@ class ShellOutput {
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
         // Lines must reach the wire unspliced: a log write from interrupt context or from another
         // core landing mid-line corrupts the harness JSON stream.
-        kernel::console::line_guard line;
+        auto line = kernel::g_console.lock_line();
         if (protocol_mode_) {
             write("@@HARNESS {\"event\":\"result\",\"text\":\"");
             write_json_escaped(buffer.c_str());
@@ -41,7 +41,7 @@ class ShellOutput {
     template <typename... Args> void event(const char* fmt, const Args&... args) {
         ktl::fixed_string<512> buffer;
         ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-        kernel::console::line_guard line;
+        auto line = kernel::g_console.lock_line();
         write("@@HARNESS ");
         write(buffer.c_str());
         write("\n");
