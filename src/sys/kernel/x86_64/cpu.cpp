@@ -18,7 +18,7 @@ constinit kernel::cpu_core g_cpu_cores[CONFIG_MAX_CORES];
 namespace {
 kernel::x86::cpu_local g_cpu_locals[CONFIG_MAX_CORES];
 constexpr uint32_t MSR_GS_BASE = 0xC0000101;
-ktl::atomic<uint64_t> g_reschedule_ipi_count{0};
+constinit ktl::atomic<uint64_t> g_reschedule_ipi_count{0};
 }  // namespace
 
 extern "C" void x86_note_reschedule_ipi();

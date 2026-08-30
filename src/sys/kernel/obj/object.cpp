@@ -22,7 +22,7 @@ void obj_init() {
     kernel::sched::kernel_task();  // task zero exists before anything can need a handle
 }
 
-namespace { ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace
+namespace { constinit ktl::atomic<uint64_t> g_next_object_id{1}; }  // namespace
 
 Object::Object(TypeId type_id) : m_id(allocate_id()), m_type_id(type_id) {
     g_type_registry.on_object_created(m_type_id);

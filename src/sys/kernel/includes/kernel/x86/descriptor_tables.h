@@ -1,14 +1,24 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace kernel {
 namespace x86 {
 
 // LAPIC timer tick vector (first vector past the CPU exceptions).
-constexpr uint8_t IRQ0           = 32;
+constexpr uint8_t IRQ0                      = 32;
 // Local APIC fixed IPI used to wake an idle scheduling core.
-constexpr uint8_t RESCHEDULE_IPI = 48;
+constexpr uint8_t RESCHEDULE_IPI            = 48;
+
+constexpr uint16_t GDT_KERNEL_CODE_SELECTOR = 1 * sizeof(uint64_t);
+constexpr uint16_t GDT_KERNEL_DATA_SELECTOR = 2 * sizeof(uint64_t);
+constexpr uint16_t GDT_USER_DATA_SELECTOR   = 3 * sizeof(uint64_t);
+constexpr uint16_t GDT_USER_CODE_SELECTOR   = 4 * sizeof(uint64_t);
+constexpr uint16_t GDT_TSS_SELECTOR         = 5 * sizeof(uint64_t);
+
+static_assert(GDT_KERNEL_CODE_SELECTOR == 0x08 && GDT_KERNEL_DATA_SELECTOR == 0x10);
+static_assert(GDT_USER_DATA_SELECTOR == 0x18 && GDT_USER_CODE_SELECTOR == 0x20 && GDT_TSS_SELECTOR == 0x28);
 
 struct gdt_entry {
     uint16_t limit_low;
@@ -60,6 +70,15 @@ struct idt_ptr {
     uint16_t limit;
     uintptr_t base;
 } __attribute__((__packed__));
+
+static_assert(sizeof(gdt_entry) == 8);
+static_assert(sizeof(gdt_entry_high) == 8);
+static_assert(sizeof(gdt_pointer) == 10);
+static_assert(sizeof(idt_entry) == 16);
+static_assert(sizeof(idt_ptr) == 10);
+static_assert(sizeof(tss_entry) == 104);
+static_assert(offsetof(tss_entry, iomap_base) == 102);
+static_assert(sizeof(gdt::entries) + sizeof(gdt_entry_high) == 56);
 
 void init_gdt(int corenum);
 void init_idt();

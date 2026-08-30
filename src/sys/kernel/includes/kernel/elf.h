@@ -60,6 +60,11 @@ struct Elf64_Sym {
     uint64_t st_size;
 };
 
+static_assert(sizeof(Elf64_Ehdr) == 64 && offsetof(Elf64_Ehdr, e_phoff) == 32);
+static_assert(sizeof(Elf64_Phdr) == 56 && offsetof(Elf64_Phdr, p_offset) == 8);
+static_assert(sizeof(Elf64_Shdr) == 64 && offsetof(Elf64_Shdr, sh_offset) == 24);
+static_assert(sizeof(Elf64_Sym) == 24 && offsetof(Elf64_Sym, st_value) == 8);
+
 // e_ident indices and the values this kernel accepts.
 constexpr size_t EI_CLASS      = 4;
 constexpr size_t EI_DATA       = 5;

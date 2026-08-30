@@ -28,11 +28,11 @@ bool on_boot_core() { return kernel::arch::current_core_index() == kernel::boot:
 
 namespace {
 
-ktl::atomic<bool> g_started{false};
+constinit ktl::atomic<bool> g_started{false};
 
 // One FIFO under g_sched_lock; any core picks from it.
 // ponytail: one shared queue, per-core queues if the lock shows up in profiles.
-[[clang::no_destroy]] ktl::deque<ktl::ref<Thread>> g_run_queue;
+[[clang::no_destroy]] constinit ktl::deque<ktl::ref<Thread>> g_run_queue;
 
 // Pop the first thread whose previous core has finished switching it out; one still on-cpu rotates
 // to the back so no core ever waits on another inside the lock.
@@ -204,7 +204,7 @@ bool current_is_idle() {
 namespace {
 // Live threads known to scheduling; the high-water mark of this count is what the run queue and
 // sleeper list stay reserved for, so tick-context pushes never grow them.
-ktl::atomic<size_t> g_live_threads{0};
+constinit ktl::atomic<size_t> g_live_threads{0};
 }  // namespace
 
 ktl::result<void> ensure_tick_capacity() {

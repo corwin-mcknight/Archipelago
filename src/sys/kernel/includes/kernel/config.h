@@ -33,6 +33,19 @@
 #define CONFIG_LOCKDEP_MAX_LOCKS 128
 #define CONFIG_LOCKDEP_MAX_EDGES 512
 
+#ifdef __cplusplus
+static_assert((KERNEL_MINIMUM_PAGE_SIZE & (KERNEL_MINIMUM_PAGE_SIZE - 1)) == 0,
+              "minimum page size must be a power of two");
+static_assert((CONFIG_CPU_CACHE_LINE_SIZE & (CONFIG_CPU_CACHE_LINE_SIZE - 1)) == 0,
+              "cache-line size must be a power of two");
+static_assert(CONFIG_KERNEL_STACK_SIZE % KERNEL_MINIMUM_PAGE_SIZE == 0, "kernel stacks must span whole pages");
+static_assert(CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN < CONFIG_KERNEL_STACK_SIZE,
+              "the stack tripwire must leave usable stack space");
+static_assert(CONFIG_MAX_CORES > 0 && CONFIG_MAX_CORES <= 64, "core indices must fit the 64-bit core masks");
+static_assert(CONFIG_SCHED_TRACE_EVENTS > 0, "the scheduler trace must have storage");
+static_assert(CONFIG_MAX_OBJECT_TYPES > 0, "the object registry must have storage");
+#endif
+
 // Testing overrides
 #ifndef PRODUCT_DEBUG
 #define PRODUCT_DEBUG 0

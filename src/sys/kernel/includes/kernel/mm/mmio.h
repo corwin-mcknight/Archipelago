@@ -10,10 +10,10 @@ namespace kernel::mm {
 // width and offset of every access, while this class owns bounds, alignment, and ordering checks.
 class mmio_region {
    public:
-    mmio_region() = default;
+    constexpr mmio_region() = default;
 
-    bool valid() const { return m_base != 0; }
-    size_t size() const { return m_size; }
+    constexpr bool valid() const { return m_base != 0; }
+    constexpr size_t size() const { return m_size; }
 
     uint8_t read8(size_t offset) const;
     uint16_t read16(size_t offset) const;
@@ -26,7 +26,7 @@ class mmio_region {
     void write64(size_t offset, uint64_t value) const;
 
    private:
-    mmio_region(uintptr_t base, size_t size) : m_base(base), m_size(size) {}
+    constexpr mmio_region(uintptr_t base, size_t size) : m_base(base), m_size(size) {}
     uintptr_t checked(size_t offset, size_t width) const;
 
     uintptr_t m_base = 0;

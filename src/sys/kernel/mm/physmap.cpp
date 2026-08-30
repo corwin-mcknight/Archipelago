@@ -7,7 +7,7 @@
 namespace kernel::mm {
 namespace {
 
-uintptr_t g_direct_map_base = 0;
+constinit uintptr_t g_direct_map_base = 0;
 
 uintptr_t checked_address(physical_address address) {
     if (g_direct_map_base == 0) { panic("direct map used before initialization"); }

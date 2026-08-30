@@ -14,7 +14,7 @@ namespace kernel::mm {
 
 namespace {
 [[clang::no_destroy]] vm_aspace g_kernel_aspace;
-vm_paddr_t g_zero_page = 0;
+constinit vm_paddr_t g_zero_page = 0;
 }  // namespace
 
 vm_aspace& kernel_aspace() { return g_kernel_aspace; }

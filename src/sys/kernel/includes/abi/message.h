@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // The system message envelope: the fixed first bytes of every message on a coordinator channel,
@@ -24,6 +25,7 @@ typedef struct abi_message_header {
 
 #ifdef __cplusplus
 static_assert(sizeof(abi_message_header) == 16, "the envelope is exactly two words");
+static_assert(offsetof(abi_message_header, txid) == 8, "txid is the envelope's second word");
 #endif
 
 // The coordinator protocol: messages on the bootstrap channel between a task and its parent.
@@ -63,6 +65,8 @@ typedef struct abi_image_payload {
 
 #ifdef __cplusplus
 namespace abi::message {
+
+static_assert(sizeof(abi_image_payload) == 8, "the image payload is exactly one word");
 
 using header                           = ::abi_message_header;
 using image_payload                    = ::abi_image_payload;

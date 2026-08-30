@@ -4,11 +4,11 @@
 #include "kernel/platform.h"
 #include "kernel/sched/scheduler.h"
 
-ktl::atomic<ktime_t> kernel::time::_now           = 0;
-time_ns_t kernel::time::_ns_per_tick              = 0;
-ktl::atomic<uint64_t> kernel::time::_timestamp_hz = 0;
-uint64_t kernel::time::_anchor_timestamp          = 0;
-time_ns_t kernel::time::_anchor_ns                = 0;
+constinit ktl::atomic<ktime_t> kernel::time::_now           = 0;
+time_ns_t kernel::time::_ns_per_tick                        = 0;
+constinit ktl::atomic<uint64_t> kernel::time::_timestamp_hz = 0;
+uint64_t kernel::time::_anchor_timestamp                    = 0;
+time_ns_t kernel::time::_anchor_ns                          = 0;
 
 // Every scheduling core ticks for preemption; only the boot core advances kernel time.
 void kernel::time::tick() {

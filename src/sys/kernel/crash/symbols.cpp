@@ -28,12 +28,12 @@ struct func_entry {
     uint32_t name_off;
 };
 
-func_entry g_entries[kMaxSymbols];
-char g_string_pool[kStringPoolBytes];
+constinit func_entry g_entries[kMaxSymbols]{};
+constinit char g_string_pool[kStringPoolBytes]{};
 
-size_t g_entry_count = 0;
-size_t g_string_used = 0;
-bool g_initialized   = false;
+constinit size_t g_entry_count = 0;
+constinit size_t g_string_used = 0;
+constinit bool g_initialized   = false;
 
 // The on-disk ELF64 format lives in <kernel/elf.h>, shared with the user-binary loader. The pure
 // locate_symbol_tables() parser is declared in <kernel/elf_symbols.h> (namespace detail) so the host

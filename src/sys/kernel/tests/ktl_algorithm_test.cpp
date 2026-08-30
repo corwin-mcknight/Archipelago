@@ -10,6 +10,10 @@ using namespace kernel::testing;
 
 KTEST_MODULE("ktl/algorithm");
 
+constexpr int constexpr_values[] = {3, 5, 8, 13};
+static_assert(*ktl::find_if(constexpr_values, constexpr_values + 4, [](int value) { return value % 2 == 0; }) == 8);
+static_assert(*ktl::find_index_if(constexpr_values, constexpr_values + 4, [](int value) { return value == 13; }) == 3);
+
 // The find family: find_if / find / find_index_if all return an empty maybe on a
 // miss or an empty range, and a hit that refers back into the searched range.
 KTEST_CASE(ktl_algorithm_find_family) {

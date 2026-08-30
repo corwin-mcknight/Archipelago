@@ -25,7 +25,8 @@ template <typename C> constexpr auto size(const C& c) -> decltype(c.size()) { re
 template <typename T, size_t N> constexpr size_t size(const T (&)[N]) noexcept { return N; }
 
 /// Returns a reference to the first element satisfying the predicate, or nothing.
-template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pred) -> maybe<decltype(*first)> {
+template <typename It, typename Pred>
+constexpr auto find_if(It first, It last, Pred&& pred) -> maybe<decltype(*first)> {
     for (It it = first; it != last; ++it) {
         if (pred(*it)) { return maybe<decltype(*first)>(*it); }
     }
@@ -36,7 +37,7 @@ template <typename It, typename Pred> auto find_if(It first, It last, Pred&& pre
 /// The index type is size_t, but spelled dependently (decltype(sizeof(*first))) so this definition
 /// only instantiates the forward-declared maybe at call sites, where it is complete.
 template <typename It, typename Pred>
-auto find_index_if(It first, It last, Pred&& pred) -> maybe<decltype(sizeof(*first))> {
+constexpr auto find_index_if(It first, It last, Pred&& pred) -> maybe<decltype(sizeof(*first))> {
     using index_t = decltype(sizeof(*first));
     index_t index = 0;
     for (It it = first; it != last; ++it, ++index) {

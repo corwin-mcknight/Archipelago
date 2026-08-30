@@ -276,5 +276,32 @@ constexpr uint64_t CHANNEL_SIGNAL_PEER_CLOSED  = ABI_CHANNEL_SIGNAL_PEER_CLOSED;
 constexpr uint64_t PORT_SIGNAL_READABLE        = ABI_PORT_SIGNAL_READABLE;
 constexpr uint64_t BOOTSTRAP_HANDLE            = ABI_BOOTSTRAP_HANDLE;
 
+// Syscall numbers form a dense table today. Keep additions ordered and prevent an accidental
+// duplicate or gap from silently disagreeing with dispatch metadata and userspace stubs.
+struct syscall_descriptor {
+    uint64_t number;
+    uint8_t argument_count;
+};
+
+constexpr syscall_descriptor SYSCALL_DESCRIPTORS[] = {
+    {SYS_EXIT, 1},          {SYS_YIELD, 0},          {SYS_SLEEP, 1},
+    {SYS_WRITE, 2},         {SYS_HANDLE_CLOSE, 1},   {SYS_HANDLE_DUPLICATE, 2},
+    {SYS_OBJ_INFO, 1},      {SYS_CHANNEL_CREATE, 1}, {SYS_CHANNEL_SEND, 5},
+    {SYS_CHANNEL_RECV, 5},  {SYS_OBJECT_WAIT, 3},    {SYS_PORT_CREATE, 0},
+    {SYS_PORT_BIND, 4},     {SYS_PORT_UNBIND, 2},    {SYS_PORT_WAIT, 3},
+    {SYS_TASK_KILL, 1},     {SYS_TASK_STATUS, 1},    {SYS_TASK_SPAWN, 2},
+    {SYS_VMO_CREATE, 1},    {SYS_VMO_MAP, 5},        {SYS_VMO_UNMAP, 1},
+    {SYS_SOCKET_CREATE, 1}, {SYS_SOCKET_WRITE, 3},   {SYS_SOCKET_READ, 3},
+};
+
+consteval bool syscall_descriptors_are_valid() {
+    for (uint64_t i = 0; i < sizeof(SYSCALL_DESCRIPTORS) / sizeof(SYSCALL_DESCRIPTORS[0]); ++i) {
+        if (SYSCALL_DESCRIPTORS[i].number != i || SYSCALL_DESCRIPTORS[i].argument_count > 6) { return false; }
+    };
+    return true;
+}
+
+static_assert(syscall_descriptors_are_valid(), "syscall metadata must remain dense, unique, and fit the entry ABI");
+
 }  // namespace abi::syscall
 #endif

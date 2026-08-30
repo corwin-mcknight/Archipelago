@@ -30,7 +30,7 @@ class string_view {
 
     constexpr char operator[](size_t idx) const { return m_ptr[idx]; }
 
-    string_view substr(size_t start, size_t count = npos) const {
+    constexpr string_view substr(size_t start, size_t count = npos) const {
         if (start > m_size) { start = m_size; }
         size_t rcount = ktl::min(count, m_size - start);
         return string_view(m_ptr + start, rcount);
@@ -63,10 +63,10 @@ class string_view {
     constexpr bool operator!=(string_view other) const { return !(*this == other); }
 
     // Copy the string into the destination buffer, up to c characters.
-    size_t copy(char* destination, size_t c, size_t pos = 0) const {
+    constexpr size_t copy(char* destination, size_t c, size_t pos = 0) const {
         if (pos > m_size) { pos = m_size; }
         size_t rcount = ktl::min(c, m_size - pos);
-        memcpy(destination, m_ptr + pos, rcount);
+        for (size_t i = 0; i < rcount; ++i) { destination[i] = m_ptr[pos + i]; }
         return rcount;
     }
 
@@ -80,7 +80,7 @@ class string_view {
     }
 
     // Constants
-    static const size_t npos = (size_t)-1;
+    static constexpr size_t npos = static_cast<size_t>(-1);
 
    private:
     const char* m_ptr;

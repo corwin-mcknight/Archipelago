@@ -13,7 +13,7 @@ namespace kernel::mm {
 namespace {
 
 // The address space active on each core. The fault handler resolves against the calling core's.
-vm_aspace* g_active_space[CONFIG_MAX_CORES];
+constinit vm_aspace* g_active_space[CONFIG_MAX_CORES]{};
 
 // Other cores on which `space` is live right now. A core that activates it afterwards loads the
 // tables fresh (activate() flushes), so a stale entry can only sit on a core that already had it.

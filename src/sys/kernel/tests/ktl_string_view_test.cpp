@@ -7,6 +7,14 @@ using namespace kernel::testing;
 
 KTEST_MODULE("ktl/string_view");
 
+constexpr ktl::string_view compile_time_view("archipelago");
+static_assert(compile_time_view.substr(4, 3) == "ipe");
+constexpr bool copy_is_constant_evaluated() {
+    char out[4]{};
+    return compile_time_view.copy(out, 3, 4) == 3 && out[0] == 'i' && out[1] == 'p' && out[2] == 'e';
+}
+static_assert(copy_is_constant_evaluated());
+
 KTEST_CASE(ktl_string_view_default_safe_accessors) {
     ktl::string_view view;
 

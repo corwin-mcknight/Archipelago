@@ -26,7 +26,7 @@ bool pte_leaf(uint64_t entry) { return (entry & pte::HUGE) != 0; }
 // x86_64 PT entries have no other shape: present at the bottom means data.
 bool pte_leaf_bottom(uint64_t) { return true; }
 vm_paddr_t pte_addr(uint64_t entry) { return entry & pte::ADDR_MASK; }
-uint64_t pte_set_addr(uint64_t entry, vm_paddr_t paddr) { return (entry & ~pte::ADDR_MASK) | paddr; }
+uint64_t pte_set_addr(uint64_t entry, vm_paddr_t paddr) { return (entry & ~pte::ADDR_MASK) | (paddr & pte::ADDR_MASK); }
 
 // x86_64 requires the permission bits at every level of the walk;
 // intermediates get WRITABLE plus the USER bit of the mapping being installed.
@@ -61,6 +61,13 @@ vm_translation attrs_from_pte(uint64_t entry, vm_paddr_t paddr) {
     vm_cache_mode cache = (entry & pte::CACHE_DISABLE) ? vm_cache_mode::DEVICE : vm_cache_mode::CACHED;
     return {paddr, prot, cache};
 }
+
+static_assert((pte::ADDR_MASK &
+               (pte::PRESENT | pte::WRITABLE | pte::USER | pte::CACHE_DISABLE | pte::HUGE | pte::NO_EXECUTE)) == 0);
+constexpr uint64_t TEST_ENTRY = ((pte::PRESENT | pte::USER) & ~pte::ADDR_MASK) | (0x12345000 & pte::ADDR_MASK);
+static_assert((TEST_ENTRY & pte::ADDR_MASK) == 0x12345000);
+static_assert((TEST_ENTRY & pte::USER) != 0);
+static_assert(((0x2000 & pte::ADDR_MASK) | pte::PRESENT | pte::WRITABLE) & pte::PRESENT);
 
 vm_paddr_t current_root() {
     uintptr_t cr3;

@@ -44,8 +44,8 @@ constexpr uint64_t TIMEOUT_S         = 60;
 constexpr uint32_t LOAD_COUNT        = static_cast<uint32_t>(TIMEOUT_S * WDT_CORE_HZ / 2);
 constexpr uint64_t FEED_PERIOD_TICKS = 10'000;  // 1 tick = 1 ms
 
-kernel::mm::mmio_region g_syscrg;
-kernel::mm::mmio_region g_watchdog;
+constinit kernel::mm::mmio_region g_syscrg;
+constinit kernel::mm::mmio_region g_watchdog;
 
 void prepare_regions() {
     if (!g_syscrg.valid()) {

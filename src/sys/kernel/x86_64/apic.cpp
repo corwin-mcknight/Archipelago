@@ -28,7 +28,7 @@ constexpr uint32_t LVT_PERIODIC         = 1u << 17;
 constexpr uint32_t DIVIDE_BY_16         = 0x3;
 constexpr uint32_t ICR_DELIVERY_PENDING = 1u << 12;
 
-kernel::mm::mmio_region g_lapic;
+constinit kernel::mm::mmio_region g_lapic;
 
 void reg_write(uintptr_t offset, uint32_t value) { g_lapic.write32(offset, value); }
 uint32_t reg_read(uintptr_t offset) { return g_lapic.read32(offset); }

@@ -85,6 +85,12 @@ vm_translation attrs_from_pte(uint64_t entry, vm_paddr_t paddr) {
     return {paddr, prot, cache};
 }
 
+static_assert((pte::PPN_MASK & (pte::VALID | pte::RWX | pte::USER | pte::RSW_MASK)) == 0);
+static_assert(pte::ppn_decode(pte::ppn_encode(0x12345000)) == 0x12345000);
+static_assert(pte::ppn_decode((pte::VALID & ~pte::PPN_MASK) | pte::ppn_encode(0x12345000)) == 0x12345000);
+static_assert(((pte::ppn_encode(0x2000) | pte::VALID) & pte::RWX) == 0);
+static_assert(((pte::ppn_encode(0x2000) | pte::READ | pte::VALID) & pte::RWX) != 0);
+
 vm_paddr_t current_root() {
     uint64_t satp;
     asm volatile("csrr %0, satp" : "=r"(satp));

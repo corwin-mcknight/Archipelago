@@ -4,8 +4,8 @@
 namespace kernel::synchronization {
 
 namespace {
-execution_context g_contexts[CONFIG_MAX_CORES];
-deferred_preempt_hook g_preempt_hook = nullptr;
+constinit execution_context g_contexts[CONFIG_MAX_CORES]{};
+constinit deferred_preempt_hook g_preempt_hook = nullptr;
 
 bool deferred_preemption_eligible(const execution_context& context) {
     return context.preempt_depth == 0 && context.interrupt_depth == 0 && context.fault_depth == 0;

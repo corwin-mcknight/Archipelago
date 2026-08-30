@@ -12,7 +12,7 @@ namespace kernel::driver {
 
 namespace {
 constexpr uintptr_t UART0_PADDR = 0x10000000;
-kernel::mm::mmio_region g_uart_registers;
+constinit kernel::mm::mmio_region g_uart_registers;
 }  // namespace
 
 bool uart_present() {

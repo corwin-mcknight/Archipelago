@@ -27,12 +27,12 @@ IRQ_LIST(DECLARE_IRQ)
 
 // Each CPU has it's own GDT.
 namespace {
-kernel::x86::gdt gdts[CONFIG_MAX_CORES];
+constinit kernel::x86::gdt gdts[CONFIG_MAX_CORES]{};
 
 // They share the same IDT, which is initialized by the BP.
-__attribute__((aligned(0x10))) struct kernel::x86::idt_entry idt[256];
-__attribute__((aligned(0x10))) struct kernel::x86::idt_ptr idtptr;
-bool idt_initialized = false;
+constinit __attribute__((aligned(0x10))) struct kernel::x86::idt_entry idt[256]{};
+constinit __attribute__((aligned(0x10))) struct kernel::x86::idt_ptr idtptr{};
+constinit bool idt_initialized = false;
 }  // namespace
 
 void kernel::x86::init_gdt(int corenum) {
@@ -89,8 +89,8 @@ void kernel::x86::init_idt() {
         memset(&idt, 0, sizeof(idt));
 
         // Install ISRs and IRQs via X-macro expansion
-#define INSTALL_ISR(n) idt_set_gate(n, (uintptr_t)interrupt_isr##n, 0x08, 0x8E);
-#define INSTALL_IRQ(n) idt_set_gate(32 + n, (uintptr_t)interrupt_irq##n, 0x08, 0x8E);
+#define INSTALL_ISR(n) idt_set_gate(n, (uintptr_t)interrupt_isr##n, GDT_KERNEL_CODE_SELECTOR, 0x8E);
+#define INSTALL_IRQ(n) idt_set_gate(32 + n, (uintptr_t)interrupt_irq##n, GDT_KERNEL_CODE_SELECTOR, 0x8E);
         ISR_LIST(INSTALL_ISR)
         IRQ_LIST(INSTALL_IRQ)
 #undef INSTALL_ISR

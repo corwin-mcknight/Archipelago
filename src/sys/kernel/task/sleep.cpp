@@ -18,7 +18,7 @@ struct sleeper {
     ktime_t wake_at = 0;
     ktl::ref<Thread> thread;
 };
-[[clang::no_destroy]] ktl::vector<sleeper> g_sleepers;
+[[clang::no_destroy]] constinit ktl::vector<sleeper> g_sleepers;
 
 // Waiters parked on some object's wait queue with a deadline. Unlike sleepers, an entry does not
 // own the thread -- the wait node on the waiter's stack does. The entry only records where to look:
@@ -31,7 +31,7 @@ struct timed_wait {
     wait_queue* queue = nullptr;
     wait_node* node   = nullptr;
 };
-[[clang::no_destroy]] ktl::vector<timed_wait> g_timed_waits;
+[[clang::no_destroy]] constinit ktl::vector<timed_wait> g_timed_waits;
 
 }  // namespace
 

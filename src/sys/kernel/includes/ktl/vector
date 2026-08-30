@@ -16,7 +16,7 @@ template <typename T> class vector {
     using iterator       = T*;
     using const_iterator = const T*;
 
-    vector()             = default;
+    constexpr vector()   = default;
 
     ~vector() { destroy_and_free(); }
 

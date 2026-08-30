@@ -28,7 +28,7 @@ uintptr_t kernel::arch::kstack_floor() { return kernel::riscv::current_core().ks
 namespace {
 constexpr unsigned SUPERVISOR_SOFTWARE_CAUSE = 1;
 constexpr uint64_t SIP_SSIP                  = 1ull << 1;
-ktl::atomic<uint64_t> g_ipi_count{0};
+constinit ktl::atomic<uint64_t> g_ipi_count{0};
 
 // The reschedule IPI carries no payload: it asks the hart to revisit the run queue on its way
 // out of the trap. Requesting it here rather than relying on the idle loop closes the window

@@ -4,6 +4,9 @@
 #include <kernel/synchronization/guard.h>
 #include <std/new.h>
 
+#include <ktl/algorithm>
+#include <ktl/bit>
+
 namespace kernel::mm {
 
 [[clang::no_destroy]] slab_heap g_slab_heap;
@@ -20,12 +23,33 @@ constexpr uint32_t SLAB_MAGIC                        = 0x42414c53;  // "SLAB"
 
 constexpr size_t CLASS_SIZES[slab_heap::CLASS_COUNT] = {16, 32, 64, 128, 256, 512, 1024};
 
-size_t class_for(size_t bytes) {
+consteval bool valid_class_sizes() {
+    if (ktl::size(CLASS_SIZES) != slab_heap::CLASS_COUNT || !ktl::is_power_of_two(PAGE) || HEADER_BYTES > UINT16_MAX ||
+        HEADER_BYTES % slab_heap::MAX_SLAB_ALIGN != 0) {
+        return false;
+    }
+    for (size_t i = 0; i < slab_heap::CLASS_COUNT; ++i) {
+        if (!ktl::is_power_of_two(CLASS_SIZES[i]) || CLASS_SIZES[i] > slab_heap::MAX_CLASS_BYTES ||
+            PAGE <= HEADER_BYTES + CLASS_SIZES[i] ||
+            HEADER_BYTES % ktl::min(CLASS_SIZES[i], slab_heap::MAX_SLAB_ALIGN) != 0 ||
+            (i != 0 && CLASS_SIZES[i - 1] >= CLASS_SIZES[i])) {
+            return false;
+        }
+    }
+    constexpr size_t bitmap_slots = sizeof(uint64_t) * 8 * 4;
+    return (PAGE - HEADER_BYTES) / CLASS_SIZES[0] <= bitmap_slots;
+}
+
+static_assert(valid_class_sizes());
+
+constexpr size_t class_for(size_t bytes) {
     for (size_t i = 0; i < slab_heap::CLASS_COUNT; ++i) {
         if (bytes <= CLASS_SIZES[i]) { return i; }
     }
     __builtin_unreachable();
 }
+
+static_assert(class_for(1) == 0 && class_for(16) == 0 && class_for(17) == 1 && class_for(1024) == 6);
 
 }  // namespace
 

@@ -78,10 +78,10 @@ constexpr size_t MAX_MEMORY_RANGES = 128;
 // Overflow drops the tail with a warning rather than panicking, matching the memmap.
 constexpr size_t MAX_MODULES       = 8;
 
-memory_range g_ranges[MAX_MEMORY_RANGES];
-boot_module g_modules[MAX_MODULES];
-boot_info g_info   = {};
-bool g_info_cached = false;
+constinit memory_range g_ranges[MAX_MEMORY_RANGES]{};
+constinit boot_module g_modules[MAX_MODULES]{};
+constinit boot_info g_info{};
+constinit bool g_info_cached = false;
 
 memory_kind classify(uint64_t limine_type) {
     switch (limine_type) {
@@ -94,7 +94,7 @@ memory_kind classify(uint64_t limine_type) {
     }
 }
 
-size_t g_range_count = 0;
+constinit size_t g_range_count = 0;
 
 void push_range(uint64_t base, uint64_t length, memory_kind kind) {
     if (length > UINT64_MAX - base) {

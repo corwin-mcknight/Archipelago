@@ -20,8 +20,8 @@ namespace {
 // Dead threads awaiting the reaper, and recycled stacks. Stacks come from alloc_contiguous, which
 // has no contiguous free -- the pool recycles them among threads instead; it is bounded by the peak
 // live thread count. All under g_sched_lock.
-[[clang::no_destroy]] ktl::deque<ktl::ref<Thread>> g_zombies;
-[[clang::no_destroy]] ktl::deque<kernel::mm::vm_paddr_t> g_stack_cache;
+[[clang::no_destroy]] constinit ktl::deque<ktl::ref<Thread>> g_zombies;
+[[clang::no_destroy]] constinit ktl::deque<kernel::mm::vm_paddr_t> g_stack_cache;
 [[clang::no_destroy]] wait_queue g_reaper_wq;
 uint64_t g_reaped = 0;
 

@@ -21,14 +21,14 @@ template <typename T> class [[nodiscard]] maybe {
     T m_value;
 
    public:
-    maybe() : m_has_value(false), m_value{} {}
-    maybe(nothing_t) : m_has_value(false), m_value{} {}
-    maybe(const T& value) : m_has_value(true), m_value(value) {}
-    maybe(T&& value) : m_has_value(true), m_value(ktl::move(value)) {}
+    constexpr maybe() : m_has_value(false), m_value{} {}
+    constexpr maybe(nothing_t) : m_has_value(false), m_value{} {}
+    constexpr maybe(const T& value) : m_has_value(true), m_value(value) {}
+    constexpr maybe(T&& value) : m_has_value(true), m_value(ktl::move(value)) {}
 
-    bool has_value() const { return m_has_value; }
-    bool has_value() { return m_has_value; }
-    explicit operator bool() const { return m_has_value; }
+    constexpr bool has_value() const { return m_has_value; }
+    constexpr bool has_value() { return m_has_value; }
+    constexpr explicit operator bool() const { return m_has_value; }
 
     // Accessing the value of an empty maybe is a kernel bug and panics, mirroring result::unwrap.
     T& value() {
@@ -55,11 +55,11 @@ template <typename T> class [[nodiscard]] maybe {
         m_value     = T{};
     }
 
-    T& operator*() {
+    constexpr T& operator*() {
         if (!m_has_value) { panic("maybe::operator* on empty maybe"); }
         return m_value;
     }
-    const T& operator*() const {
+    constexpr const T& operator*() const {
         if (!m_has_value) { panic("maybe::operator* on empty maybe"); }
         return m_value;
     }
@@ -112,12 +112,12 @@ template <typename T> class [[nodiscard]] maybe<T&> {
     T* m_ptr;
 
    public:
-    maybe() : m_ptr(nullptr) {}
-    maybe(nothing_t) : m_ptr(nullptr) {}
-    maybe(T& ref) : m_ptr(&ref) {}
+    constexpr maybe() : m_ptr(nullptr) {}
+    constexpr maybe(nothing_t) : m_ptr(nullptr) {}
+    constexpr maybe(T& ref) : m_ptr(&ref) {}
     maybe(T&&) = delete;  // a temporary would dangle immediately
 
-    bool has_value() const { return m_ptr != nullptr; }
+    constexpr bool has_value() const { return m_ptr != nullptr; }
     explicit operator bool() const { return m_ptr != nullptr; }
 
     T& value() const {
@@ -130,7 +130,7 @@ template <typename T> class [[nodiscard]] maybe<T&> {
         return *m_ptr;
     }
 
-    T& operator*() const {
+    constexpr T& operator*() const {
         if (!m_ptr) { panic("maybe::operator* on empty maybe"); }
         return *m_ptr;
     }
