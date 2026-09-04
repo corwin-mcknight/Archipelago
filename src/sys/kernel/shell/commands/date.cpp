@@ -5,32 +5,19 @@
 #include <kernel/boot.h>
 #include <kernel/time.h>
 
-#include <ktl/maybe>
 #include <ktl/string_view>
 
 namespace {
 
-// With an argument, formats that UNIX timestamp instead of the current time;
-// useful for decoding epoch values seen in logs, and it makes the conversion
-// testable against known dates.
-void date_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
-    uint64_t epoch;
-    if (argc > 1) {
-        auto parsed = kernel::shell::parse_u64(argv[1]);
-        if (!parsed.has_value()) {
-            output.write("usage: date [epoch-seconds]\n");
-            return;
-        }
-        epoch = *parsed;
-    } else {
-        int64_t boot_epoch = kernel::boot::collect().boot_epoch_seconds;
-        if (boot_epoch <= 0) {
-            output.write("date: boot protocol supplied no wall clock\n");
-            return;
-        }
-        epoch =
-            static_cast<uint64_t>(boot_epoch) + static_cast<uint64_t>(kernel::time::ns_since_boot()) / 1'000'000'000u;
+// Prints the current UTC date and time.
+void date_handler(int, const ktl::string_view[], kernel::shell::ShellOutput& output) {
+    int64_t boot_epoch = kernel::boot::collect().boot_epoch_seconds;
+    if (boot_epoch <= 0) {
+        output.write("date: boot protocol supplied no wall clock\n");
+        return;
     }
+    uint64_t epoch =
+        static_cast<uint64_t>(boot_epoch) + static_cast<uint64_t>(kernel::time::ns_since_boot()) / 1'000'000'000u;
 
     uint64_t days  = epoch / 86400;
     uint64_t sod   = epoch % 86400;
