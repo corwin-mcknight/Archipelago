@@ -219,3 +219,116 @@ KTEST_CASE(obj_handle_table_clear_reentrant_destructor) {
     table.clear();
     KTEST_EXPECT_ALL(table.count() == 0, !table.is_valid(victim));
 }
+
+// Exhaust every pair of current/requested rights, including equal and empty sets. Failed
+// requests must preserve all authority; successful ones must retain exactly the requested set.
+KTEST_CASE(obj_handle_table_restrict_exhaustive_subsets) {
+    HandleTable table;
+    for (Rights current = 0; current <= RIGHTS_ALL; ++current) {
+        for (Rights requested = 0; requested <= RIGHTS_ALL; ++requested) {
+            KTEST_UNWRAP(id, table.emplace<TestObjA>(current));
+            auto result = table.restrict_rights(id, requested);
+            bool subset = (requested & ~current) == 0;
+            KTEST_REQUIRE_TRUE(result.is_ok() == subset);
+            if (!subset) { KTEST_EXPECT_TRUE(result.unwrap_err() == ktl::errc::rights_violation); }
+            KTEST_UNWRAP(verified, table.verify(id, 0, TEST_TYPE_A));
+            KTEST_EXPECT_ALL(verified.rights == (subset ? requested : current), table.count() == 1);
+            KTEST_REQUIRE_TRUE(table.close(id).is_ok());
+        }
+    }
+}
+
+KTEST_CASE(obj_handle_table_restrict_invalid_and_unknown_bits) {
+    HandleTable table;
+    KTEST_EXPECT_ERR(table.restrict_rights(HandleId::invalid(), 0), ktl::errc::handle_invalid);
+    KTEST_UNWRAP(old, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_REQUIRE_TRUE(table.close(old).is_ok());
+    KTEST_EXPECT_ERR(table.restrict_rights(old, 0), ktl::errc::handle_invalid);
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_REQUIRE_TRUE(id.index == old.index);
+    KTEST_EXPECT_ERR(table.restrict_rights(old, 0), ktl::errc::handle_invalid);
+    KTEST_EXPECT_ERR(table.restrict_rights({id.index, id.generation + 1}, 0), ktl::errc::handle_invalid);
+    for (unsigned bit = 6; bit < 32; ++bit) {
+        KTEST_EXPECT_ERR(table.restrict_rights(id, RIGHT_READ | (Rights{1} << bit)), ktl::errc::rights_violation);
+        KTEST_UNWRAP(verified, table.verify(id, RIGHTS_ALL));
+        KTEST_EXPECT_TRUE(verified.rights == RIGHTS_ALL);
+    }
+}
+
+KTEST_CASE(obj_handle_table_restrict_is_local_and_irreversible) {
+    bool destroyed = false;
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL, &destroyed));
+    KTEST_UNWRAP(alias, table.duplicate(id, RIGHTS_ALL));
+    {
+        KTEST_UNWRAP(before, table.verify(id, RIGHT_WRITE));
+        KTEST_REQUIRE_TRUE(table.restrict_rights(id, RIGHT_READ).is_ok());
+        KTEST_UNWRAP(after, table.verify(id, RIGHT_READ));
+        KTEST_UNWRAP(other, table.verify(alias, RIGHTS_ALL));
+        KTEST_EXPECT_ALL(before.object.get() == after.object.get(), other.object.get() == after.object.get(),
+                         before.rights == RIGHTS_ALL, after.rights == RIGHT_READ, other.rights == RIGHTS_ALL,
+                         table.count() == 2, !destroyed);
+    }
+    KTEST_EXPECT_ERR(table.verify(id, RIGHT_WRITE), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.duplicate(id, RIGHT_READ), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.restrict_rights(id, RIGHTS_ALL), ktl::errc::rights_violation);
+    KTEST_REQUIRE_TRUE(table.restrict_rights(id, 0).is_ok());
+    KTEST_REQUIRE_TRUE(table.restrict_rights(id, 0).is_ok());
+    KTEST_EXPECT_ERR(table.restrict_rights(id, RIGHT_READ), ktl::errc::rights_violation);
+    KTEST_REQUIRE_TRUE(table.close(alias).is_ok());
+    KTEST_EXPECT_FALSE(destroyed);
+    KTEST_REQUIRE_TRUE(table.close(id).is_ok());
+    KTEST_EXPECT_TRUE(destroyed);
+}
+
+KTEST_CASE(obj_handle_table_restrict_survives_transfer) {
+    HandleTable sender, receiver;
+    KTEST_UNWRAP(id, sender.emplace<TestObjRestricted>(TEST_RESTRICTED_VALID_RIGHTS));
+    KTEST_REQUIRE_TRUE(sender.restrict_rights(id, RIGHT_READ).is_ok());
+    KTEST_UNWRAP(taken, sender.take(id));
+    KTEST_EXPECT_ALL(taken.rights == RIGHT_READ, sender.count() == 0);
+    KTEST_UNWRAP(arrived, receiver.insert(ktl::move(taken.object), taken.rights));
+    KTEST_EXPECT_ERR(sender.restrict_rights(id, 0), ktl::errc::handle_invalid);
+    KTEST_EXPECT_ERR(receiver.restrict_rights(arrived, TEST_RESTRICTED_VALID_RIGHTS), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(receiver.duplicate(arrived, RIGHT_READ), ktl::errc::rights_violation);
+    KTEST_UNWRAP(verified, receiver.verify(arrived, RIGHT_READ));
+    KTEST_EXPECT_TRUE(verified.rights == RIGHT_READ);
+}
+
+KTEST_CASE(obj_handle_table_remove_exhaustive_masks) {
+    HandleTable table;
+    for (Rights current = 0; current <= RIGHTS_ALL; ++current) {
+        for (Rights removed = 0; removed <= RIGHTS_ALL; ++removed) {
+            KTEST_UNWRAP(id, table.emplace<TestObjA>(current));
+            KTEST_REQUIRE_TRUE(table.remove_rights(id, removed).is_ok());
+            KTEST_REQUIRE_TRUE(table.remove_rights(id, removed).is_ok());
+            KTEST_UNWRAP(verified, table.verify(id, 0));
+            KTEST_EXPECT_ALL(verified.rights == (current & ~removed), table.count() == 1);
+            KTEST_REQUIRE_TRUE(table.close(id).is_ok());
+        }
+    }
+}
+
+KTEST_CASE(obj_handle_table_remove_uses_current_rights_and_preserves_alias) {
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_UNWRAP(alias, table.duplicate(id, RIGHTS_ALL));
+    // Another caller removes WRITE after our last inspection. Removing READ must preserve that
+    // removal and leave every unrelated bit alone, without needing to retry a stale replacement.
+    KTEST_REQUIRE_TRUE(table.restrict_rights(id, RIGHTS_ALL & ~RIGHT_WRITE).is_ok());
+    KTEST_REQUIRE_TRUE(table.remove_rights(id, RIGHT_READ).is_ok());
+    KTEST_UNWRAP(verified, table.verify(id, 0));
+    KTEST_UNWRAP(other, table.verify(alias, RIGHTS_ALL));
+    KTEST_EXPECT_ALL(verified.rights == (RIGHTS_ALL & ~(RIGHT_READ | RIGHT_WRITE)),
+                     verified.object.get() == other.object.get(), other.rights == RIGHTS_ALL, table.count() == 2);
+    KTEST_EXPECT_ERR(table.restrict_rights(id, RIGHT_WRITE), ktl::errc::rights_violation);
+    KTEST_REQUIRE_TRUE(table.remove_rights(id, UINT32_MAX).is_ok());
+    KTEST_UNWRAP(taken, table.take(id));
+    KTEST_EXPECT_TRUE(taken.rights == 0);
+    KTEST_EXPECT_ERR(table.remove_rights(id, 0), ktl::errc::handle_invalid);
+    KTEST_UNWRAP(reused, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_REQUIRE_TRUE(reused.index == id.index);
+    KTEST_EXPECT_ERR(table.remove_rights(id, UINT32_MAX), ktl::errc::handle_invalid);
+    KTEST_EXPECT_ERR(table.remove_rights(HandleId::invalid(), 0), ktl::errc::handle_invalid);
+    KTEST_EXPECT_TRUE(table.verify(reused, RIGHTS_ALL).is_ok());
+}

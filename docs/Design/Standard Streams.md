@@ -1,7 +1,7 @@
 # Standard Streams
 
 > [!info] Design
-> This page describes the planned design. Nothing here is implemented yet.
+> This page describes the planned stdio wiring. Sockets and in-place handle rights restriction are implemented.
 
 Standard streams are how a program receives and produces ordinary bytes -- the role stdin, stdout, and stderr play in UNIX, rebuilt on capabilities.
 A stream is not a file and there are no descriptor numbers: a program is born holding [[IPC Primitives#Sockets|socket]] ends, and everything downstream of that is somebody else's decision.
@@ -12,7 +12,7 @@ The program does not know what is behind either -- a console server, another pro
 That polymorphism is the capability model doing what UNIX needed the file abstraction for: the indirection is the handle itself, so any object-holding program composes with any byte consumer.
 A pipeline between two programs is one socket pair, the write end endowed to the producer as output and the read end to the consumer as input, with no mechanism beyond spawn-time wiring.
 
-Rights make the ends unidirectional -- output is a socket end without the read right, input one without the write right -- so the stdio shape is policy applied by the spawner, not a property of the primitive.
+`SYS_HANDLE_RESTRICT` narrows rights in place to make the ends unidirectional -- output is a socket end without the read right, input one without the write right -- so the stdio shape is policy applied by the spawner, not a property of the primitive.
 
 ## The Stdio Endowment
 Every task the [[Service Coordination|coordinator]] spawns is endowed with three streams: input, output, and error.

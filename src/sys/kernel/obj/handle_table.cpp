@@ -119,6 +119,23 @@ ktl::result<HandleId> HandleTable::duplicate(HandleId source, Rights rights_mask
     return create_handle(ktl::move(obj_copy), new_rights);
 }
 
+ktl::result<void> HandleTable::restrict_rights(HandleId id, Rights rights) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    HandleEntry* entry = lookup_entry(id);
+    if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
+    if ((rights & ~entry->rights) != 0) { return ktl::err(ktl::errc::rights_violation); }
+    entry->rights = rights;
+    return ktl::result<void>::ok();
+}
+
+ktl::result<void> HandleTable::remove_rights(HandleId id, Rights rights) {
+    kernel::synchronization::lock_guard guard(m_lock);
+    HandleEntry* entry = lookup_entry(id);
+    if (!entry) { return ktl::err(ktl::errc::handle_invalid); }
+    entry->rights &= ~rights;
+    return ktl::result<void>::ok();
+}
+
 ktl::result<void> HandleTable::close(HandleId id) {
     auto taken = take(id);
     if (taken.is_err()) { return ktl::err(taken.unwrap_err()); }

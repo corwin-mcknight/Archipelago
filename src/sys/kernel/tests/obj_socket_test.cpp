@@ -136,3 +136,30 @@ KTEST_CASE(obj_socket_peer_close_semantics) {
     char buf[8];
     KTEST_EXPECT_ERR(pair.second->read(buf, sizeof(buf)), ktl::errc::peer_closed);
 }
+
+KTEST_CASE(obj_socket_restrict_preserves_lifetime_and_hangup) {
+    KTEST_UNWRAP(pair, Socket::create());
+    HandleTable table;
+    KTEST_UNWRAP(writer, table.insert(ktl::move(pair.first), Socket::DEFAULT_RIGHTS));
+    KTEST_UNWRAP(reader, table.insert(ktl::move(pair.second), Socket::DEFAULT_RIGHTS));
+    KTEST_REQUIRE_TRUE(table.restrict_rights(writer, RIGHT_WRITE | RIGHT_WAIT).is_ok());
+    KTEST_REQUIRE_TRUE(table.restrict_rights(reader, RIGHT_READ | RIGHT_WAIT).is_ok());
+    KTEST_EXPECT_EQUAL(table.count(), 2u);
+    KTEST_EXPECT_ERR(table.get<Socket>(writer, RIGHT_READ), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.get<Socket>(reader, RIGHT_WRITE), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.duplicate(writer, RIGHT_WRITE), ktl::errc::rights_violation);
+    KTEST_EXPECT_ERR(table.restrict_rights(writer, Socket::DEFAULT_RIGHTS), ktl::errc::rights_violation);
+    {
+        KTEST_UNWRAP(out, table.get<Socket>(writer, RIGHT_WRITE));
+        KTEST_EXPECT_EQUAL(write_str(out, "buffered"), 8u);
+    }
+    KTEST_UNWRAP(in, table.get<Socket>(reader, RIGHT_READ));
+    KTEST_EXPECT_TRUE((in->signals() & Socket::SIGNAL_PEER_CLOSED) == 0);
+    KTEST_REQUIRE_TRUE(table.remove_rights(writer, UINT32_MAX).is_ok());
+    KTEST_EXPECT_TRUE((in->signals() & Socket::SIGNAL_PEER_CLOSED) == 0);
+    KTEST_REQUIRE_TRUE(table.close(writer).is_ok());
+    KTEST_EXPECT_TRUE((in->signals() & Socket::SIGNAL_PEER_CLOSED) != 0);
+    KTEST_EXPECT_TRUE(read_equals(in, "buffered"));
+    char byte;
+    KTEST_EXPECT_ERR(in->read(&byte, 1), ktl::errc::peer_closed);
+}

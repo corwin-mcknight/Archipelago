@@ -32,10 +32,11 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         case kernel::syscall::SYS_SLEEP: kernel::sched::sleep_ticks(a0); break;
         case kernel::syscall::SYS_WRITE: ret = kernel::syscalls::sys_write(a0, a1); break;
         case kernel::syscall::SYS_HANDLE_CLOSE:
+        case kernel::syscall::SYS_HANDLE_RESTRICT:
         case kernel::syscall::SYS_HANDLE_DUPLICATE:
         case kernel::syscall::SYS_OBJ_INFO:
         case kernel::syscall::SYS_TASK_KILL:
-        case kernel::syscall::SYS_TASK_STATUS: ret = kernel::syscalls::handle_syscall(nr, a0, a1); break;
+        case kernel::syscall::SYS_TASK_STATUS: ret = kernel::syscalls::handle_syscall(nr, a0, a1, a2); break;
         case kernel::syscall::SYS_CHANNEL_CREATE: ret = kernel::syscalls::sys_channel_create(a0); break;
         case kernel::syscall::SYS_CHANNEL_SEND: ret = kernel::syscalls::sys_channel_send(a0, a1, a2, a3, a4); break;
         case kernel::syscall::SYS_CHANNEL_RECV: ret = kernel::syscalls::sys_channel_recv(a0, a1, a2, a3, a4); break;

@@ -12,7 +12,7 @@ void buffer_write(const sched::ipc_buffer& buffer, uint64_t offset, const void* 
 void buffer_read(const sched::ipc_buffer& buffer, uint64_t offset, void* dst, size_t length);
 
 uint64_t sys_write(uint64_t offset, uint64_t length);
-uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1);
+uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2);
 uint64_t sys_channel_create(uint64_t offset);
 uint64_t sys_channel_send(uint64_t handle, uint64_t offset, uint64_t length, uint64_t handles_offset,
                           uint64_t handle_count);

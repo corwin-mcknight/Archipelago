@@ -377,6 +377,20 @@ extern "C" int main() {
              (sig & abi::syscall::SOCKET_SIGNAL_READABLE) == 0;
         ok = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_WOULD_BLOCK;
 
+        // Restrict the move-only ends in place, then exercise real syscall rights checks.
+        const uint64_t original = sys_obj_info(ends[0]);
+        ok = ok && sys_is_error(sys_handle_restrict(ends[0], (1ull << 32) | ABI_RIGHT_WRITE));
+        ok = ok && sys_obj_info(ends[0]) == original;
+        ok = ok && sys_handle_restrict(ends[0], ABI_RIGHT_WRITE | ABI_RIGHT_WAIT) == 0;
+        ok = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE | (1ull << 63)) == 0;
+        ok = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE) == 0;
+        ok = ok && (sys_obj_info(ends[1]) >> 32) == (ABI_RIGHT_READ | ABI_RIGHT_WAIT);
+        ok = ok && (sys_obj_info(ends[0]) >> 32) == (ABI_RIGHT_WRITE | ABI_RIGHT_WAIT);
+        ok = ok && sys_is_error(sys_handle_restrict(ends[0], ABI_RIGHT_READ | ABI_RIGHT_WRITE));
+        ok = ok && sys_is_error(sys_socket_read(ends[0], OUT_AT, 1));
+        ok = ok && sys_is_error(sys_socket_write(ends[1], DATA_AT, 1));
+        ok = ok && sys_is_error(sys_handle_duplicate(ends[0], ABI_RIGHT_WRITE));
+
         // Two writes, one read: a stream has no boundaries.
         const char* joined = "hello stream";
         size_t first       = sys_stage(DATA_AT, "hello ");
@@ -421,7 +435,10 @@ extern "C" int main() {
         ok          = ok && (sig & abi::syscall::SOCKET_SIGNAL_PEER_CLOSED) != 0;
         ok          = ok && sys_socket_read(ends[1], OUT_AT, 64) == last;
         ok          = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_PEER_CLOSED;
+        ok          = ok && sys_handle_remove_rights(ends[1], ~0ull) == 0;
+        ok          = ok && (sys_obj_info(ends[1]) >> 32) == 0;
         ok          = ok && !sys_is_error(sys_handle_close(ends[1]));
+        ok          = ok && sys_is_error(sys_handle_remove_rights(ends[1], 0));
         report(ok, "selftest: socket ok\n", "selftest: SOCKET BROKEN\n");
     }
 

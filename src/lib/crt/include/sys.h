@@ -33,6 +33,10 @@ void sys_sleep(uint64_t ticks);
 // verification pipeline every one of them runs before doing anything.
 int sys_is_error(uint64_t ret);
 uint64_t sys_handle_close(uint64_t handle);
+// Keep exactly these rights on the same handle; adding rights fails without changes.
+uint64_t sys_handle_restrict(uint64_t handle, uint64_t rights);
+// Atomically clear these rights; absent/unknown bits are harmless. Only invalid handles fail.
+uint64_t sys_handle_remove_rights(uint64_t handle, uint64_t rights);
 uint64_t sys_handle_duplicate(uint64_t handle, uint64_t rights_mask);
 uint64_t sys_obj_info(uint64_t handle);
 

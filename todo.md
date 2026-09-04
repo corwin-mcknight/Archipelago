@@ -1,7 +1,7 @@
 # TODO
 
 ## Next Up
-- Standard streams (`docs/Design/Standard Streams.md`), remaining slices now that the socket primitive landed (SYS_SOCKET_*): the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. The endowment slice needs a rights-stripping mechanism first -- socket ends are move-only (no DUPLICATE, so PEER_CLOSED stays readable as hangup), so making an end unidirectional takes an in-place rights-narrowing handle op (a restrict/replace) that does not mint a second handle.
+- Standard streams (`docs/Design/Standard Streams.md`), remaining slices now that the socket primitive landed (SYS_SOCKET_*): the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. In-place rights narrowing is available through SYS_HANDLE_RESTRICT (retain an exact subset or atomically remove selected bits), so the coordinator can make move-only socket ends unidirectional without minting a second handle.
 
 ## Second Architecture (riscv64)
 - Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
@@ -99,7 +99,7 @@
 
 ## Handles & Syscalls
 - Handle dispatch follow-ups (the pipeline itself landed with Milestone 1: verify-then-execute over a declarative op table, `close`/`duplicate`/`obj_info` as first operations):
-    - Rights bits and type ids are kernel constants, not installed ABI; `obj_info` returns them raw, so a user program can compare but not name them. Move them into `abi/` when a program first needs to request a specific right.
+    - Type ids remain kernel constants; rights bits are installed ABI for SYS_HANDLE_RESTRICT. Publish type ids when a userspace consumer needs to name them.
     - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
 - Add kernel-owned handle tables for internal object references.
 - Add handle revocation flows for server crash cleanup.

@@ -32,7 +32,7 @@ It returns a borrowed pointer to the concrete object type, or a typed error (`er
 A separate `info(id)` accessor returns a value-copy snapshot of handle metadata (rights, type ID, object ID) that is safe to hold across table mutations.
 
 ## Handle Operations
-Four operations define the handle lifecycle.
+Five operations define the handle lifecycle.
 They are composable primitives -- combined operations like "duplicate and transfer" are expressed as a duplicate followed by a transfer, keeping the operation set small and auditable.
 
 ### Create
@@ -50,8 +50,25 @@ Creates a new handle in the same table pointing to the same object, with equal o
 The caller provides a rights mask that is ANDed with the existing handle's rights -- this enforces the [[Object Model#What is a handle?|monotonic rights property]].
 The object's reference count is incremented (two handles now reference it).
 
-Duplication is the mechanism for rights attenuation.
+Duplication requires the duplicate right and can attenuate the new handle.
 Before passing a handle to less-trusted code or transferring it to another process, the caller duplicates it with a restricted mask and operates on the duplicate.
+
+### Restrict
+`SYS_HANDLE_RESTRICT(handle, rights, mode)` changes rights in place.
+`RETAIN` (mode 0, exposed by `sys_handle_restrict`) replaces them with an exact subset.
+It requires no special right, preserves the handle ID and object reference, and allocates nothing.
+Equal rights and zero rights are valid; any requested bit absent from the current rights is rejected with `rights_violation`, leaving the handle unchanged.
+Retain mode also rejects nonzero bits above the 32-bit rights field rather than truncating them.
+Validation and replacement happen under one table lock, so concurrent restrictions cannot restore dropped rights.
+
+`REMOVE` (mode 1, exposed by `sys_handle_remove_rights`) clears the requested bits from the current rights under the same table lock.
+It needs no prior lookup, so concurrent removals accumulate without retries or lost updates.
+Absent or unknown bits, including bits above the 32-bit rights field, are ignored; zero is a no-op and an all-ones mask removes every right.
+For this mode only an invalid or stale handle can fail. Unknown mode values return `invalid_operation` without changes.
+
+These operations let move-only socket ends become unidirectional before transfer.
+Other handles to the same object are unaffected, and operations already verified may finish with their previously acquired authority.
+A zero-rights handle still owns its reference and can be inspected, restricted to zero again, or closed.
 
 ### Transfer
 Moves a handle from one table to another atomically.

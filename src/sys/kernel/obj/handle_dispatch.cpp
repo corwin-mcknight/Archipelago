@@ -15,6 +15,7 @@ struct op_context {
     HandleId id;
     VerifiedHandle verified;
     uint64_t arg;
+    uint64_t mode;
 };
 
 uint64_t errc_of(ktl::errc error) { return static_cast<uint64_t>(error); }
@@ -28,6 +29,17 @@ uint64_t op_duplicate(op_context& ctx) {
     auto dup = ctx.table.duplicate(ctx.id, static_cast<Rights>(ctx.arg));
     if (dup.is_err()) { return errc_of(dup.unwrap_err()); }
     return pack_handle(dup.unwrap());
+}
+
+uint64_t op_restrict(op_context& ctx) {
+    if (ctx.mode == sys::HANDLE_RESTRICT_REMOVE) {
+        auto removed = ctx.table.remove_rights(ctx.id, static_cast<Rights>(ctx.arg));
+        return removed.is_ok() ? 0 : errc_of(removed.unwrap_err());
+    }
+    if (ctx.mode != sys::HANDLE_RESTRICT_RETAIN) { return errc_of(ktl::errc::invalid_operation); }
+    if (ctx.arg > UINT32_MAX) { return errc_of(ktl::errc::rights_violation); }
+    auto restricted = ctx.table.restrict_rights(ctx.id, static_cast<Rights>(ctx.arg));
+    return restricted.is_ok() ? 0 : errc_of(restricted.unwrap_err());
 }
 
 uint64_t op_info(op_context& ctx) {
@@ -68,6 +80,7 @@ struct op_spec {
 constexpr op_spec OPS[] = {
     {sys::SYS_HANDLE_CLOSE, type_ids::INVALID, 0, op_close},
     {sys::SYS_HANDLE_DUPLICATE, type_ids::INVALID, RIGHT_DUPLICATE, op_duplicate},
+    {sys::SYS_HANDLE_RESTRICT, type_ids::INVALID, 0, op_restrict},
     {sys::SYS_OBJ_INFO, type_ids::INVALID, 0, op_info},
     {sys::SYS_TASK_KILL, type_ids::TASK, RIGHT_WRITE, op_task_kill},
     {sys::SYS_TASK_STATUS, type_ids::TASK, RIGHT_READ, op_task_status},
@@ -75,12 +88,12 @@ constexpr op_spec OPS[] = {
 
 }  // namespace
 
-uint64_t dispatch_handle_op(HandleTable& table, uint64_t nr, uint64_t handle, uint64_t arg) {
+uint64_t dispatch_handle_op(HandleTable& table, uint64_t nr, uint64_t handle, uint64_t arg, uint64_t mode) {
     for (const op_spec& op : OPS) {
         if (op.nr != nr) { continue; }
         auto verified = table.verify(unpack_handle(handle), op.required_rights, op.expected_type);
         if (verified.is_err()) { return errc_of(verified.unwrap_err()); }
-        op_context ctx{table, unpack_handle(handle), verified.unwrap(), arg};
+        op_context ctx{table, unpack_handle(handle), verified.unwrap(), arg, mode};
         return op.handler(ctx);
     }
     return errc_of(ktl::errc::invalid_operation);

@@ -83,3 +83,73 @@ KTEST_CASE(handle_dispatch_fresh_table_allocates_slot_zero_first) {
     KTEST_UNWRAP(second, table.emplace<TestObjB>(RIGHTS_ALL));
     KTEST_EXPECT_ALL(pack(first) == sys::BOOTSTRAP_HANDLE, pack(second) == 1);
 }
+
+KTEST_CASE(handle_dispatch_restrict_checks_full_width) {
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHT_READ | RIGHT_WRITE));
+    for (unsigned bit = 2; bit < 64; ++bit) {
+        KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), RIGHT_READ | (1ull << bit)),
+                           as_ret(ktl::errc::rights_violation));
+        KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_OBJ_INFO, pack(id), 0) >> 32,
+                           uint64_t{RIGHT_READ | RIGHT_WRITE});
+    }
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), UINT64_MAX),
+                       as_ret(ktl::errc::rights_violation));
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), RIGHT_READ), 0ull);
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), RIGHT_READ), 0ull);
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_OBJ_INFO, pack(id), 0) >> 32, uint64_t{RIGHT_READ});
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), RIGHT_WRITE),
+                       as_ret(ktl::errc::rights_violation));
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), 0), 0ull);
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_OBJ_INFO, pack(id), 0) >> 32, 0ull);
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_CLOSE, pack(id), 0), 0ull);
+    KTEST_UNWRAP(reused, table.emplace<TestObjA>(RIGHTS_ALL));
+    KTEST_REQUIRE_TRUE(reused.index == id.index);
+    // Invalid-handle errors take precedence even when the requested rights are malformed.
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), UINT64_MAX),
+                       as_ret(ktl::errc::handle_invalid));
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, UINT64_MAX, 0),
+                       as_ret(ktl::errc::handle_invalid));
+    KTEST_EXPECT_TRUE(table.verify(reused, RIGHTS_ALL).is_ok());
+}
+
+KTEST_CASE(handle_dispatch_remove_accepts_every_mask_bit) {
+    HandleTable table;
+    for (unsigned bit = 0; bit < 64; ++bit) {
+        KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
+        uint64_t mask = 1ull << bit;
+        for (unsigned repeat = 0; repeat < 2; ++repeat) {
+            KTEST_EXPECT_EQUAL(
+                dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), mask, sys::HANDLE_RESTRICT_REMOVE), 0ull);
+            KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_OBJ_INFO, pack(id), 0) >> 32,
+                               uint64_t{RIGHTS_ALL} & ~mask);
+        }
+        KTEST_EXPECT_EQUAL(
+            dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), UINT64_MAX, sys::HANDLE_RESTRICT_REMOVE),
+            0ull);
+        KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_OBJ_INFO, pack(id), 0) >> 32, 0ull);
+        KTEST_EXPECT_EQUAL(
+            dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), 0, sys::HANDLE_RESTRICT_REMOVE), 0ull);
+        KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_CLOSE, pack(id), 0), 0ull);
+        KTEST_EXPECT_EQUAL(
+            dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), UINT64_MAX, sys::HANDLE_RESTRICT_REMOVE),
+            as_ret(ktl::errc::handle_invalid));
+    }
+}
+
+KTEST_CASE(handle_dispatch_restrict_rejects_unknown_modes_without_changes) {
+    HandleTable table;
+    KTEST_UNWRAP(id, table.emplace<TestObjA>(RIGHTS_ALL));
+    for (unsigned bit = 1; bit < 64; ++bit) {
+        for (uint64_t base = 0; base <= 1; ++base) {
+            KTEST_EXPECT_EQUAL(
+                dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), RIGHT_READ, base | (1ull << bit)),
+                as_ret(ktl::errc::invalid_operation));
+            KTEST_EXPECT_TRUE(table.verify(id, RIGHTS_ALL).is_ok());
+        }
+    }
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, pack(id), 0, UINT64_MAX),
+                       as_ret(ktl::errc::invalid_operation));
+    KTEST_EXPECT_EQUAL(dispatch_handle_op(table, sys::SYS_HANDLE_RESTRICT, UINT64_MAX, 0, UINT64_MAX),
+                       as_ret(ktl::errc::handle_invalid));
+}

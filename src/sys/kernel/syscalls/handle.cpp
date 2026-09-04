@@ -22,11 +22,11 @@ ktl::ref<kernel::sched::Task> calling_task(ktl::ref<kernel::sched::Thread>& self
     return task;
 }
 
-uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1) {
+uint64_t handle_syscall(uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2) {
     auto self = kernel::sched::current();
     if (!self) { return static_cast<uint64_t>(ktl::errc::invalid_operation); }
     auto task = calling_task(self);
-    return kernel::obj::dispatch_handle_op(task->handles(), nr, a0, a1);
+    return kernel::obj::dispatch_handle_op(task->handles(), nr, a0, a1, a2);
 }
 
 uint64_t errc_of(ktl::errc error) { return static_cast<uint64_t>(error); }

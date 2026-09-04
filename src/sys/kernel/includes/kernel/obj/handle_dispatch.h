@@ -13,6 +13,6 @@ namespace kernel::obj {
 // Returns the operation's result, or a negative ktl::errc as a uint64. Unknown numbers return
 // invalid_operation. The table is passed in rather than looked up so the pipeline stays free of
 // scheduler dependencies and hosted tests can drive it directly.
-uint64_t dispatch_handle_op(HandleTable& table, uint64_t nr, uint64_t handle, uint64_t arg);
+uint64_t dispatch_handle_op(HandleTable& table, uint64_t nr, uint64_t handle, uint64_t arg, uint64_t mode = 0);
 
 }  // namespace kernel::obj

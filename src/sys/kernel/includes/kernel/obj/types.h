@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include <abi/syscall.h>
 
 namespace kernel::obj {
 
@@ -22,12 +22,12 @@ constexpr TypeId PORT    = 9;
 constexpr TypeId SOCKET  = 10;
 }  // namespace type_ids
 
-constexpr Rights RIGHT_READ      = 1 << 0;
-constexpr Rights RIGHT_WRITE     = 1 << 1;
-constexpr Rights RIGHT_DUPLICATE = 1 << 2;
-constexpr Rights RIGHT_TRANSFER  = 1 << 3;
-constexpr Rights RIGHT_SIGNAL    = 1 << 4;
-constexpr Rights RIGHT_WAIT      = 1 << 5;
+constexpr Rights RIGHT_READ      = ABI_RIGHT_READ;
+constexpr Rights RIGHT_WRITE     = ABI_RIGHT_WRITE;
+constexpr Rights RIGHT_DUPLICATE = ABI_RIGHT_DUPLICATE;
+constexpr Rights RIGHT_TRANSFER  = ABI_RIGHT_TRANSFER;
+constexpr Rights RIGHT_SIGNAL    = ABI_RIGHT_SIGNAL;
+constexpr Rights RIGHT_WAIT      = ABI_RIGHT_WAIT;
 constexpr Rights RIGHTS_ALL      = 0x3F;
 
 }  // namespace kernel::obj

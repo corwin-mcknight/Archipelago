@@ -39,6 +39,25 @@
     6ull /* arg0 = handle. Returns type id in the low 32 bits, \
             the handle's rights in the high 32. */
 
+// Change this handle's rights in place. No special right is required; returns 0 and preserves
+// the handle value. Other handles and operations already verified are unaffected.
+// RETAIN: keep exactly arg1. Equal rights and zero are valid; any added bit (including bits
+// 32..63) returns rights_violation without changes.
+// REMOVE: clear the bits in arg1 from the current rights under the table lock. Absent/unknown
+// bits (including bits 32..63) are ignored; only an invalid/stale handle can fail this mode.
+// Unknown modes return invalid_operation without changes, after validating the handle.
+#define ABI_SYS_HANDLE_RESTRICT 24ull /* arg0 = handle, arg1 = rights, arg2 = mode. */
+#define ABI_HANDLE_RESTRICT_RETAIN 0ull
+#define ABI_HANDLE_RESTRICT_REMOVE 1ull
+
+// Handle rights, also reported by SYS_OBJ_INFO. Object types admit only a subset of these bits.
+#define ABI_RIGHT_READ (1u << 0)
+#define ABI_RIGHT_WRITE (1u << 1)
+#define ABI_RIGHT_DUPLICATE (1u << 2)
+#define ABI_RIGHT_TRANSFER (1u << 3)
+#define ABI_RIGHT_SIGNAL (1u << 4)
+#define ABI_RIGHT_WAIT (1u << 5)
+
 // Channels: a bidirectional message pair. Data still moves only through the IPC buffer -- send
 // reads the message out of it, recv writes the message into it, and create delivers the two new
 // handles through it, the first kernel-to-user copy-out.
@@ -236,6 +255,9 @@ constexpr uint64_t SYS_SLEEP                   = ABI_SYS_SLEEP;
 constexpr uint64_t SYS_WRITE                   = ABI_SYS_WRITE;
 constexpr uint64_t SYS_HANDLE_CLOSE            = ABI_SYS_HANDLE_CLOSE;
 constexpr uint64_t SYS_HANDLE_DUPLICATE        = ABI_SYS_HANDLE_DUPLICATE;
+constexpr uint64_t SYS_HANDLE_RESTRICT         = ABI_SYS_HANDLE_RESTRICT;
+constexpr uint64_t HANDLE_RESTRICT_RETAIN      = ABI_HANDLE_RESTRICT_RETAIN;
+constexpr uint64_t HANDLE_RESTRICT_REMOVE      = ABI_HANDLE_RESTRICT_REMOVE;
 constexpr uint64_t SYS_OBJ_INFO                = ABI_SYS_OBJ_INFO;
 constexpr uint64_t SYS_CHANNEL_CREATE          = ABI_SYS_CHANNEL_CREATE;
 constexpr uint64_t SYS_CHANNEL_SEND            = ABI_SYS_CHANNEL_SEND;
@@ -284,14 +306,31 @@ struct syscall_descriptor {
 };
 
 constexpr syscall_descriptor SYSCALL_DESCRIPTORS[] = {
-    {SYS_EXIT, 1},          {SYS_YIELD, 0},          {SYS_SLEEP, 1},
-    {SYS_WRITE, 2},         {SYS_HANDLE_CLOSE, 1},   {SYS_HANDLE_DUPLICATE, 2},
-    {SYS_OBJ_INFO, 1},      {SYS_CHANNEL_CREATE, 1}, {SYS_CHANNEL_SEND, 5},
-    {SYS_CHANNEL_RECV, 5},  {SYS_OBJECT_WAIT, 3},    {SYS_PORT_CREATE, 0},
-    {SYS_PORT_BIND, 4},     {SYS_PORT_UNBIND, 2},    {SYS_PORT_WAIT, 3},
-    {SYS_TASK_KILL, 1},     {SYS_TASK_STATUS, 1},    {SYS_TASK_SPAWN, 2},
-    {SYS_VMO_CREATE, 1},    {SYS_VMO_MAP, 5},        {SYS_VMO_UNMAP, 1},
-    {SYS_SOCKET_CREATE, 1}, {SYS_SOCKET_WRITE, 3},   {SYS_SOCKET_READ, 3},
+    {SYS_EXIT, 1},
+    {SYS_YIELD, 0},
+    {SYS_SLEEP, 1},
+    {SYS_WRITE, 2},
+    {SYS_HANDLE_CLOSE, 1},
+    {SYS_HANDLE_DUPLICATE, 2},
+    {SYS_OBJ_INFO, 1},
+    {SYS_CHANNEL_CREATE, 1},
+    {SYS_CHANNEL_SEND, 5},
+    {SYS_CHANNEL_RECV, 5},
+    {SYS_OBJECT_WAIT, 3},
+    {SYS_PORT_CREATE, 0},
+    {SYS_PORT_BIND, 4},
+    {SYS_PORT_UNBIND, 2},
+    {SYS_PORT_WAIT, 3},
+    {SYS_TASK_KILL, 1},
+    {SYS_TASK_STATUS, 1},
+    {SYS_TASK_SPAWN, 2},
+    {SYS_VMO_CREATE, 1},
+    {SYS_VMO_MAP, 5},
+    {SYS_VMO_UNMAP, 1},
+    {SYS_SOCKET_CREATE, 1},
+    {SYS_SOCKET_WRITE, 3},
+    {SYS_SOCKET_READ, 3},
+    {SYS_HANDLE_RESTRICT, 3},
 };
 
 consteval bool syscall_descriptors_are_valid() {

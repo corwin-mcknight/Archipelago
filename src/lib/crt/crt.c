@@ -68,6 +68,14 @@ void sys_sleep(uint64_t ticks) { syscall1(ABI_SYS_SLEEP, ticks); }
 
 int sys_is_error(uint64_t ret) { return (int64_t)ret < 0; }
 uint64_t sys_handle_close(uint64_t handle) { return syscall1(ABI_SYS_HANDLE_CLOSE, handle); }
+uint64_t sys_handle_restrict(uint64_t handle, uint64_t rights) {
+    return syscall3(ABI_SYS_HANDLE_RESTRICT, handle, rights, ABI_HANDLE_RESTRICT_RETAIN);
+}
+
+uint64_t sys_handle_remove_rights(uint64_t handle, uint64_t rights) {
+    return syscall3(ABI_SYS_HANDLE_RESTRICT, handle, rights, ABI_HANDLE_RESTRICT_REMOVE);
+}
+
 uint64_t sys_handle_duplicate(uint64_t handle, uint64_t rights_mask) {
     return syscall2(ABI_SYS_HANDLE_DUPLICATE, handle, rights_mask);
 }

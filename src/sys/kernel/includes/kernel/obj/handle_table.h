@@ -63,6 +63,10 @@ class HandleTable {
     void clear();
 
     ktl::result<HandleId> duplicate(HandleId source, Rights rights_mask);
+    // Exact subset, checked and applied under one lock. No allocation or reference changes.
+    ktl::result<void> restrict_rights(HandleId id, Rights rights);
+    // Clear these bits from the current rights under the lock; only invalid handles fail.
+    ktl::result<void> remove_rights(HandleId id, Rights rights);
     ktl::result<void> close(HandleId id);
     // Remove a live entry but hand its reference and rights to the caller instead of dropping
     // them. This is the move half of handle transfer: the returned reference is what keeps the

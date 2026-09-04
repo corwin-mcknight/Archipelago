@@ -14,6 +14,7 @@
 #include <kernel/testing/testing.h>
 #include <kernel/time.h>
 
+#include <ktl/atomic>
 #include <ktl/ref>
 #include <ktl/string_view>
 #include <ktl/vector>
@@ -308,4 +309,42 @@ KTEST_CASE(sched_idle_state_truthful_while_switched_out) {
     }
     KTEST_REQUIRE_TRUE(idles >= 1);
     KTEST_EXPECT_TRUE(running < idles);
+}
+
+// Two threads clear different bits on shared handles. No lost update may restore either bit,
+// and already-cleared bits must remain successful through repeated removals.
+KTEST_CASE(handle_remove_concurrent) {
+    using namespace kernel::obj;
+    HandleTable table;
+    // Rights belong to each handle, so one shared object suffices for every race below.
+    auto event = ktl::make_ref<Event>();
+    KTEST_REQUIRE_TRUE(event);
+    HandleId handles[256];
+    for (auto& id : handles) {
+        KTEST_UNWRAP(created, table.insert(event, RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE));
+        id = created;
+    }
+    ktl::atomic<bool> start{false}, failed{false};
+    auto remove = [&](Rights mask) {
+        while (!start.load()) { kernel::sched::yield(); }
+        for (unsigned repeat = 0; repeat < 4; ++repeat) {
+            for (auto id : handles) {
+                if (table.remove_rights(id, mask).is_err()) { failed.store(true); }
+            }
+        }
+    };
+    auto read   = [&] { remove(RIGHT_READ); };
+    auto signal = [&] { remove(RIGHT_SIGNAL); };
+    KTEST_UNWRAP(first, spawn_fn("remove-read", read));
+    auto second = spawn_fn("remove-signal", signal);
+    start.store(true);
+    // Join every spawned worker before any assertion can unwind its captured stack frame.
+    first->wait_signals(Thread::SIGNAL_TERMINATED);
+    if (second.is_ok()) { second.unwrap()->wait_signals(Thread::SIGNAL_TERMINATED); }
+    KTEST_REQUIRE_TRUE(second.is_ok());
+    KTEST_EXPECT_FALSE(failed.load());
+    for (auto id : handles) {
+        KTEST_UNWRAP(verified, table.verify(id, RIGHT_DUPLICATE));
+        KTEST_EXPECT_TRUE(verified.rights == RIGHT_DUPLICATE);
+    }
 }
