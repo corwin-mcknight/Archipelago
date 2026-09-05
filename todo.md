@@ -1,199 +1,200 @@
-# TODO
+# Development Backlog
+The work ahead for Archipelago: known correctness gaps, the next usable system features, and the infrastructure needed to support them. [MILESTONES.md](MILESTONES.md) describes the larger outcomes; this backlog identifies the changes and dependencies that move the implementation toward them.
 
-## Next Up
-- Standard streams (`docs/Design/Standard Streams.md`), remaining slices now that the socket primitive landed (SYS_SOCKET_*): the stdio endowment mail the coordinator sends after spawn, and the console server that owns the read ends and drains to the debug write until device handoff exists. In-place rights narrowing is available through SYS_HANDLE_RESTRICT (retain an exact subset or atomically remove selected bits), so the coordinator can make move-only socket ends unidirectional without minting a second handle.
+Read the numbered sections as a suggested order of investment. Correctness fixes come first, followed by feature slices and their prerequisites. Testing, tooling, and focused cleanup should accompany the work they support; independent tasks need not wait for an earlier section to be finished.
 
-## Second Architecture (riscv64)
-- Extend the DTB-discovered PLIC path from its boot-hart claim/complete support to per-hart contexts when SMP lands;
-  CLINT software-interrupt routing remains future work.
-- Grow the riscv64/tests/ suite beyond the JH7110 UART-to-PLIC claim/complete test (more sfence/TLB behavior and
-  multi-source/per-hart external-interrupt coverage).
-- Pick a CI system; local-first candidates to investigate: Jenkins, Woodpecker, Gitea Actions, Buildbot. `plume test --arch all` is the entry point either way.
+Deferred items name the consumer or condition that would justify taking them on. Accepted constraints record deliberate boundaries to preserve when implementing related work. Keep active entries concrete: describe what remains, name any prerequisite, and remove them when complete.
 
-## Boot & Platform
-- `_start` still owns the boot ordering itself: `kernel::platform::console_init()`/`timer_init()` moved device bring-up out of the arch files, but the sequence (heap, ctors, console, cores, memory, traps, timer, late boot) is written twice, once per arch, and the two orders differ in ways that are not all forced. Factor the common spine once the third arch makes the real variation visible.
-- Board discovery is partial: Limine's DTB is exposed through `boot_info` and JH7110 PLIC topology is read from it, but
-  each riscv64 board still fixes its timebase and UART address as constants. Read `/cpus/timebase-frequency` and UART
-  `reg` next rather than growing the per-board constant set.
-- Linker scripts stayed in `<arch>/`: the higher-half load address is an arch and boot-protocol fact, not a board one. Revisit only if a board needs a different load address.
-- Add ACPI table discovery (RSDP/MADT parsing) and bootstrap CPU diagnostics; SMP startup via Limine's MP protocol is already implemented.
-- Introduce optional kernel address space layout randomization (kASLR) and verify relocation tooling.
-- Post-Milestone-1 review findings, architecture and boot:
-    - riscv64 calls `fault_enter()` only inside the page-fault branch while x86_64 calls it for every exception, so identical faults reach the crash path with different fault depth and different `blocking_allowed()` behaviour.
-    - `trap_sp_overflow` on x86_64 branches out before `isr_common`'s `cld`, so the panic and crash-dump path runs with DF in whatever state the faulting context left it.
-    - `enable_nxe()`'s comment claims it must run before any NX mapping is installed, but `init_memory()` clones and activates Limine's page tables (NX bits included) first; it survives only because Limine already set EFER.NXE. Fix the order or the comment. `MSR_EFER` is also defined in both `main.cpp` and `arch.cpp`.
-    - The `gdts[]` array has no alignment attribute while the IDT does; `struct gdt` nests only packed members, so entries land at arbitrary alignment.
-    - `.init_array` is placed in the executable `text` PHDR on both arches; the constructor pointer table belongs in `:rodata`. The unexplained `. += 0x1000;` in `.bss` also deserves a comment naming what it pads.
-    - Boot memmap entries are trusted for overlap: an overlapping USABLE entry would hand kernel-image frames to the PMM (wrapping ranges are now rejected in `init_memory`, and usable ranges past the descriptor cap are dropped from the PMM rather than left allocatable-but-uncovered). `cpu_hw_id`/`start_cpu` bound-check with `assert`, which compiles out under NDEBUG.
-    - Dead includes in `x86_64/arch.cpp` (log, panic, time, ioport), `riscv64/arch.cpp` (panic), and `descriptor_tables.cpp` (`kernel/cpu.h`).
-    - The board source glob in the kernel Makefile picks up `*.cpp` and `*.S` but not `*.s`, the extension every existing x86 assembly file uses, so a board assembly file would be silently dropped from the link.
+## 1. Correctness & Hardening
+These findings remain visible in the source; this is a source review, not a fresh reproduction of every failure. Add regression coverage with each fix, using the host or freestanding lane appropriate to the code.
 
-## Kernel Core
-- Add severity filtering to the log pipeline (compile-time and/or runtime min-level threshold); buffered sinks and crash dump emission are already done.
-- Log renderer reaches into fixed_string internals (m_buffer) to format the timestamp/color prefix, and the 32-byte prefix buffer is sized by eyeball -- format through the type's interface and static_assert the worst case.
+### Memory ownership and allocation failures
+- Validate PMM frees for alignment and eligible frame state (`mm/pmm.cpp`). FREE/ZEROED double frees are already rejected when descriptors cover the frame; WIRED/MMIO and unaligned frees still need protection.
+- Reject kernel-half mutations through user address spaces in `mm/paging.cpp`. `map_page`/`unmap_page` currently permit canonical kernel addresses, whose intermediate tables are shared; define a separate kernel-mapping path before adding dynamic kernel mappings.
+- Make VMO construction report chunk-index allocation failure (`mm/vmo.cpp`); it currently discards `m_chunks.push_back` failure and can advertise more pages than the index covers.
+- Define device-VMO reservation ownership and rollback (`mm/pager_device.cpp`). `create_device_vmo` marks frames WIRED before VMO allocation succeeds and never restores the reservation on destruction; account for overlapping windows before simply unmarking them.
+- Audit fallible allocation callers, including `ktl::make_ref`, now that nothrow allocation can return null after `heap_activate()`. Ordinary `operator new` and the pre-PMM early heap still panic on exhaustion.
+- Handle task-list allocation failure in `task/task.cpp::register_task` instead of discarding it.
+- Protect the early-heap block list across CPUs, or prove/enforce that all remaining accesses are boot-core-only. Allocation switches to the slab before AP startup, but later frees of early pointers and statistics still enter `early_heap`; any lock must be constant-initialised for pre-constructor use.
+- Validate boot memmap overlaps before admitting USABLE ranges to the PMM (`core/boot.cpp`). Wrapping ranges and descriptor-cap exclusions are already handled; conflicting usable/reserved or kernel-image ranges remain a gap.
 
-## Code Hygiene
-- Unify naming: types mix CamelCase (HandleTable), snake_case (page_frame_allocator), and I-prefix (IInterruptHandler); constants mix kMaxSymbols, PAGE_SIZE, and IM_MAX_HANDLERS. Convention per docs is CamelCase types / UPPER_SNAKE constants -- sweep the outliers.
+### ELF validation
+- In `elf/elf_parse.cpp`, validate every program-header alignment, including the `e_phentsize` stride; cast before `i * e_phentsize` to avoid promoted signed multiplication overflow.
+- Require the entry point to fall in an executable segment, and reject `p_filesz > 0 && p_memsz == 0` before skipping empty segments.
+- Define/reject unrepresentable `PT_LOAD` permissions: without `PF_R`, x86 mappings become readable anyway, and riscv64 write-only PTEs are invalid.
+- Fix symbol-table stride validation/walking in `crash/symbols.cpp`: declared `e_shentsize`/`sh_entsize` and actual `sizeof` strides disagree. Avoid truncating `st_size` to 32 bits and wrapping the `find_entry` extent check.
 
-## KTL & Error Handling
-- Monadic-style audit remainder: register_interrupt, symbols::init, and static_vector::push_back still return void instead of a result.
-- Container accessor maybe<T&> overloads (M040) -- last KTL addition proposed by the audit; vector at/front/back currently return maybe<T> by copy.
-- maybe<T> stores an inline default-constructed T, so an empty maybe holds a live value and non-default-constructible types won't compile -- rework to raw storage with explicit construct/destroy (vector already works this way).
-- vector::emplace_back only forwards a T&&; make it variadic in-place construction or rename it.
-- Result/maybe monadic combinators (map/and_then/or_else) are const-only and operate on copies -- add rvalue-qualified overloads that move.
-- rb_tree has no reverse iteration or predecessor query; find_le covers the interval-lookup need for now.
-    - Zero non-test callers, candidates for deletion: `ktl::tuple` (whole header), `take_view`/`drop_view`/`views::transform`, eight of the eleven `ktl::bit` functions, `maybe`'s `filter`/`take`/`ptr_or`/`from_ptr` and its duplicate non-const `has_value()`, `static_vector::peek_back()`, and the `strcpy`/`strncpy`/`strlcpy`/ctype surface in the std shims.
+### Traps, stacks, and boot
+- Clear DF in x86 `trap_sp_overflow` before entering C++ (`x86_64/interrupt_handlers.s`); the branch bypasses the normal entry's `cld`.
+- Resolve the stack-publication window in `task/scheduler.cpp::switch_to`: the incoming stack floor and TSS/syscall stack are published while still on the outgoing stack. Move publication to an appropriate incoming-stack hook, including first-run paths. Clear/poison the syscall stack for stackless threads instead of retaining the previous value.
+- Reconcile `enable_nxe()` ordering and its contract (`x86_64/main.cpp`): boot memory setup activates copied NX mappings before this helper runs, relying on Limine's NXE state.
+- Make boot CPU accessor bounds checks survive NDEBUG (`boot/limine/limine_boot.cpp`, `cpu_hw_id`/`start_cpu`).
+- Move `.init_array` into the read-only PHDR in both linker scripts and explain the extra `.bss` padding. Review GDT alignment explicitly; its packed layout currently has no requested alignment (an audit item, not a demonstrated boot failure).
+- Enable feature-detected SMAP/SMEP on x86_64; explicitly establish and verify clear `sstatus.SUM` on riscv64. ELF loading and IPC buffers use physical mappings, so current user-memory access needs no temporary access window.
+- Add VMM-mapped guard pages to kernel stacks after the kernel-mapping path is defined. Add x86 IST-backed exception/NMI stacks for stack-overflow and double-fault reporting; the current emergency-stack tripwire is already implemented.
 
-## Memory Management
-- VMM is the sole consumer of PMM pages -- all user-facing allocation goes through VMM, which handles reclamation and retry on PMM exhaustion.
-- Implement NUMA awareness and reserved region handling.
-- Bootloader-reclaimable regions are excluded from the PMM entirely (~20MB leaked); copy live Limine data out and reclaim them explicitly once execution moves off the boot stack.
-- Boot modules are never reclaimed. They are classified `KERNEL` (wired) because Limine reports the kernel image and every module under one memmap type, so a module range is not distinguishable from the memmap alone. `boot_info::modules` carries each module's address and size, which is what a future initrd path needs to hand the page-aligned interior to `pmm::add_region()` once it has consumed it; a `memory_kind::MODULE` should land with that reclaim path rather than before it.
-- Large-page (2M/1G) support -- the kernel assumes 4K pages everywhere (`includes/kernel/mm/page.h`).
-- Finish physical-address typing: replace the integer `vm_paddr_t` representation throughout PMM/VMM and remove the
-  public `direct_map_address()` migration seam once pointer-identity clients have narrower frame APIs.
-- Give kernel MMIO dedicated cache-correct virtual mappings instead of backing `mmio_region` with the bootloader HHDM.
-- Cross-CPU TLB shootdown, GLOBAL-page flush for inactive spaces, and paging-structure-cache invalidation when widening intermediate USER bits (all single-CPU scoped today).
-- Memory-pressure signal userspace can wait on: a kernel Event with level bits (low, critical) sampled where the zeroer already runs, so servers drop caches before allocations start failing -- the kernel cannot reclaim server-held memory itself and anonymous memory is never swapped. Open questions: hysteresis at the boundary, global level versus per-task, and whether ignoring it has a consequence.
-- VMM follow-ups:
-    - Binding splitting for partial unmap (whole-slot ranges only).
-    - Region handle exposure + detached-state machine (task/IPC milestone).
-    - Shared-frame CoW beyond the zero page (share counts on real frames arrive with VMO clone).
-    - Page-table frames sit in descriptor state ACTIVE, not WIRED; revisit when eviction lands.
-    - PAT programming for true write-combining (degrades to uncached today).
-    - Clock replacement deferred to user-pager milestone (only pager-backed pages evictable); anonymous swap ruled out permanently. OOM = allocation failure via Result.
-- Post-Milestone-1 review findings, memory management:
-    - `page_frame_allocator::free` validates nothing: it accepts unaligned addresses, double frees, and frees of WIRED/MMIO frames, even though `g_page_descriptors` already knows each frame's state.
-    - `map_page`/`unmap_page` accept kernel-half addresses, where intermediate tables are shared across every address space, so a kernel-half map on a user aspace would mutate all of them and `arch_destroy` would leak the tables.
-    - The "OOM = allocation failure via Result" contract is now real after `heap_activate()`: the nothrow `operator new` returns null on slab-heap exhaustion. The early heap still panics, but only the boot window (pre-PMM) runs on it. Remaining fallout: audit existing callers that assume allocation success now that null is actually deliverable (deferred to review).
-    - `early_heap` guards its block list with interrupts off rather than a lock, which is mutual exclusion only while one core allocates. Upgrading to a spinlock needs a constant-initialised lock, because `on_boot()` runs before the global constructors.
-    - The `total_consumed > block->size` rejection in `early_heap::alloc` is unreachable; the preceding `usable < size` check already guarantees it.
-    - The vmo constructor ignores chunk-index allocation failure, producing a VMO whose `size_pages()` exceeds what its index covers.
-    - `create_device_vmo` marks its range WIRED before the vmo exists and nothing ever un-marks it, so a failed construction or a destroyed device VMO leaves the range permanently WIRED.
-    - Both arch `flush_tlb_page` implementations duplicate the same active-root guard and its comment; only the invalidate instruction differs.
-    - `page_descriptor.h`'s `coverage_end()` hardcodes `0x1000` instead of `KERNEL_MINIMUM_PAGE_SIZE`.
-- Heap large-path ceiling: multi-page allocations use `alloc_contiguous`, which only carves untouched region tails, and freed runs return as single pages -- heavy multi-page churn slowly consumes contiguous capacity. A PMM that tracks free runs (buddy or equivalent) lifts this.
-- The host page-source stub caps live large runs at 4096 entries.
-- Remaining AUMI phases over the arenas (`mm/object_arena.cpp`): allocation hardening (poisoning, redzones, a guard-page debug mode) and per-CPU magazines when SMP scheduling lands.
-- Arena client deferred: handle-table entries. The table is a contiguous `ktl::vector`, so feeding it from an arena means converting it to chunked entry batches -- a standalone refactor of the verification path.
+### Syscalls and IPC boundaries
+- Seal `TypeRegistry` after boot or synchronise readers with registration; `lookup`, `count`, and `index_for_id` currently read without the writer lock.
+- Validate upper rights bits in `SYS_HANDLE_DUPLICATE`; audit `SYS_HANDLE_RESTRICT` REMOVE mode's truncation separately from RETAIN, which already rejects values above UINT32_MAX. Define reserved-argument handling per syscall; arguments a2..a4 are used by the current ABI, while a5 is ignored.
+- Bound the interrupt-masked work in `syscalls/debug.cpp::sys_write`. Before user threads run on APs, also serialise or replace its shared line buffer.
+- Define receive-side handle insertion failure semantics (`syscalls/channel.cpp`): a message is already dequeued when insertion fails, and the undeliverable handle is closed.
+- Define whether transferred objects need their own transfer permission. Today RIGHT_TRANSFER gates the sending channel; it is not checked on each carried handle. Both endpoints of the sending pair are already rejected from their own queue; audit ownership cycles spanning multiple pairs separately.
+- Count/trace a spawn only after successful enqueue (`task/spawn.cpp::thread_enqueue`); failure currently unwinds the thread after recording a spawn.
 
-## Scheduler & Concurrency
-- Extend the round-robin scheduler to multiple cores (currently BSP-only: one run queue and one idle thread, driven from the boot core), per `docs/Design/Scheduling.md` (no priority system by design); needs LAPIC timer ticks on the APs (the LAPIC timer driver landed, but only the BSP's fires), wake IPIs, and a reaper switch-completed handshake.
-- Per-CPU trace rings and accounting once AP scheduling lands (today's ring and stats assume a single scheduling core).
-- Latency percentiles and richer `sched` shell views if thread counts grow beyond what the flat per-thread tables can show at a glance.
-- Per-core run queues and load balancing if the single scheduler lock shows up in profiles; today one shared FIFO plus a
-  boot-core-only queue for user threads.
-- Back per-core identity with a GS-based per-CPU pointer before AP scheduling replaces the current x86 CPUID/dense-index lookup; make per-core lapic_id atomic to close the bring-up read/write race.
-- VMM-mapped, guard-paged kernel stacks to replace the current stack-floor tripwire.
-- The per-thread FPU area is embedded in Thread (512 bytes on x86_64, dropping the thread arena from 7 to 3 slots per page); kernel threads carry it dead. Move to a slab-heap pointer allocated only for user threads (the aspace test spawn already uses for IPC buffers) when thread counts or memory pressure make it matter -- needs a Thread teardown hook to free it.
-- Post-Milestone-1 review findings, scheduler and synchronization:
-    - `lockdep` mutates the per-CPU held-lock stack non-atomically with interrupts enabled for mutex guards; an ISR taking any tracked spinlock would corrupt it. Latent until the planned UART RX interrupt path lands.
-    - `switch_to` publishes `g_kstack_floor` and the TSS stack while still running on the outgoing stack, so a fault in that window is checked against the incoming thread's floor. Publish from `sched_finish_switch`, which already runs first on the incoming stack.
-    - `switch_to` republishes the syscall kernel stack only when `kstack_top() != 0`, leaving the previous thread's value live for stackless threads; publish unconditionally with a poison value so a stray syscall faults.
-    - `spawn` counts and traces a spawn before the run-queue push whose failure unwinds it, so failed spawns are recorded as real.
-    - `register_task` swallows push failure with `(void)`, unlike every other scheduler queue push, which asserts.
-    - `yield()` and `service_pending_preemption()` duplicate the same pop-next / demote / requeue / switch sequence, differing only in stat counter and reason.
-    - Stale assert text: `service_pending_preemption` reports "on_tick: run queue allocation failed".
-    - Dead: `execution_context::irq_depth` is write-only bookkeeping never read by `blocking_allowed` or anything else, `assert_thread_context` has no callers, and `synchronization::semaphore` has no users, duplicates `obj::Semaphore`, and busy-waits in a way that would hard-hang a single core.
-- IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
+## 2. Milestone 2 -- Useful Work in Userspace
+[Milestone 2](MILESTONES.md) establishes the complete boot -> userspace shell -> program writes file -> separate program reads file path. The kernel loads only init and hands it the opaque initrd; file and path semantics belong to userspace.
 
-## Handles & Syscalls
-- Type ids remain kernel constants; rights bits are installed ABI for SYS_HANDLE_RESTRICT. Publish type ids when a userspace consumer needs to name them.
-- Add handle revocation flows for server crash cleanup.
-- Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
-    - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
-    - Buffers occupy fixed slots in a reserved address-space region (64 slots per task, one bitmap word), predating the VMM's first-fit search; moving them onto `map_anywhere` retires the slot bitmap.
-    - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
-- Remaining syscall and handle review findings:
-    - `SYS_SLEEP` passes its argument straight into `now() + ticks`, so a large value wraps to a deadline in the past and returns on the next tick.
-    - `sys_write`'s copy loop runs with interrupts masked for a user-chosen length up to the full IPC buffer; cap the per-call length or re-enable interrupts around it.
-    - `TypeRegistry` writes take `m_lock` but `lookup`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
-    - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
-    - Unknown syscall numbers still return raw `-1`; consider standardizing on `invalid_operation` in a future ABI change.
-    - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
-- User memory syscall surface is create/map/unmap only (SYS_VMO_*); resize, protect, commit/decommit, EXEC mappings, and per-task memory quotas each wait for a consumer that names them (growable arenas, guard pages, the userspace loader, real quota policy). Absurd VMO sizes succeed at create and fail lazily at touch -- the accepted no-cap stance until quotas land.
-- Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
-- Replace the x86_64 syscall entry's single-core stack globals with per-CPU GS state when SMP scheduling lands.
+### Task construction and userspace loading
+- Expose primitives to create an unstarted task, populate its address space through authorised region handles, prepare its first thread and bootstrap endowments, and start it. Define cleanup for abandoned or failed construction.
+- Enable authorised executable mappings with kernel-enforced executable-memory protections, including writable aliases, so init can load programs without the kernel interpreting their ELF images.
+- Add init's userspace ELF loader and move subsequent program launches onto task-building primitives; retain the kernel ELF loader for the initial init executable.
 
-## Task & Thread Lifecycle
-- Implement exception propagation (task/thread vocabulary per `docs/Design/Task Model.md` -- no processes, no UNIX signals); task-kill, exit status, and the TERMINATED signal landed with the lifecycle slice.
-- Kill's compute-loop backstop exits from the deferred-preemption hook only when no syscall is in flight; a killed thread blocked on a contended kernel mutex busy-waits (bounded by preemption) instead of parking, an accepted cost of refusing signal-wait parks after the kill scan.
-- ELF loader follow-ups (static ET_EXEC for the running architecture is what loads today):
-    - No `ET_DYN`/PIE support, which is the prerequisite for user-space ASLR; relocation processing is a milestone of its own.
-    - Segments must be page-aligned and may not share a page. Ordinary lld output satisfies this, but a packed binary from another toolchain is rejected rather than mapped.
-    - `MAX_SEGMENTS` is a fixed 8, chosen for static binaries; a real toolchain image with more loadable segments would be refused.
-    - The user stack address and size are still fixed constants chosen by the kernel, not derived from the image.
-    - `task_spawn` checks the ELF magic on page 0 before committing the whole image, but an image that then fails contiguity or full parsing keeps its frames committed until the VMO dies -- bounded and idempotent, and free for today's wired VMOs, but a VMO decommit path belongs with the first userspace-supplied VMO reaching spawn.
-    - `PT_GNU_STACK` is ignored -- the stack is mapped `READ|WRITE` unconditionally.
-    - `e_phentsize` is accepted at any value at or above `sizeof(Elf64_Phdr)`, but only entry 0's alignment is checked, so a stride that is not a multiple of 8 misaligns every later header -- the UB the existing alignment check exists to prevent, and invisible to ASan. Require the stride to be a multiple of the alignment.
-    - `entry_covered` ignores segment flags, so an entry point inside a non-executable segment parses clean and faults on the first instruction fetch.
-    - A `PT_LOAD` without `PF_R` is accepted; on x86_64 write-without-read cannot be encoded, so it maps readable, wider than requested.
-    - `i * e_phentsize` in the header walk is `int` arithmetic that can sign-overflow; reachable only past 2 GiB of image, so theoretical today.
-    - A segment with `p_filesz > 0` and `p_memsz == 0` is skipped before `check_segment` sees it, so a malformed shape is ignored rather than rejected.
-    - `symbols.cpp` bounds-checks with the declared `e_shentsize`/`sh_entsize` but walks the arrays at `sizeof` stride, so any larger declared entry size silently misparses every entry after the first. It also truncates `st_size` to 32 bits and can wrap the extent test in `find_entry`.
-    - `elf_parse.cpp` and `elf_loader.cpp` each define `PAGE_SIZE` and hand-roll the same page round-up; share one helper.
-- Supply debug metadata for user-mode stack unwinding and cooperative crash reporting (kernel-side crash reporting already exists).
+### Bootstrap and file services
+- Build an initrd containing the bootstrap servers, shell, programs, and data files. Supply init and the initrd as the two userspace Limine boot inputs.
+- Define the initrd format and bootstrap-server discovery convention. Give init a minimal reader so it can find and launch the initial servers before file access exists.
+- Implement the userspace file server's file/directory protocol and namespace: writable anonymous storage at `/`, with the read-only initrd exposed at `/boot`. Anonymous storage is a feature of the file server and lasts for the current boot.
+- Define capability-based file access and executable-content delivery, including lifetimes and failure behaviour. The shell obtains program contents from the file server and asks init to execute them.
 
-## IPC & Services
-- Handle-transfer gaps: no per-handle transfer right yet (no object type registers TRANSFER; the channel-handle gate is the only check), a receiver-table insert failure on dequeue closes the arrived handle rather than failing the recv (the message is already dequeued), and an endpoint escrowed on its own pair's queue is an unreclaimable reference cycle (the exact self-channel case is refused; the peer-through-itself shape is not detectable cheaply).
-- Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
-- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers).
-- Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
-- The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end as `Task::mailbox()` only for the coordinator, its one child; spawned tasks' parent ends live in the spawner's handle table). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
-- Coordinator follow-ups (the register/connect layer itself landed: `sys/init`, `docs/Design/Service Coordination.md`):
-    - Policy is open-with-logging by design; per-program rules (who may register/reach which names) land with manifests, which wait on packaging.
-    - No respawn: the coordinator closes each image VMO after spawning it; keeping them is the restart story, which also needs crash observation policy (it already sees every child's death).
-    - Fixed tables: 8 children/registrations/parked connects, 31-byte names, echo serves 4 clients; a parked connect for a name that never appears parks forever (a negative-reply or timeout opcode is the upgrade).
-    - `endow_boot_modules` can mail at most `Channel::QUEUE_DEPTH` (8) IMAGE messages before the coordinator first drains; failures now name their module in the log, but chunking or retrying against the queue depth is still needed once a target ships more modules than that.
-- Device handoff to userspace (`docs/Design/Standard Streams.md` device trajectory): mapping a device VMO into a user address space and interrupt delivery via interrupt objects, the two bricks a real userspace UART driver waits on. Until then the console server drains through the debug write.
+### Interactive shell and completion demonstration
+- Load the userspace shell through file access once the file server is ready. Support browsing and reading files, program arguments, launch requests to init, and observing completion.
+- Supply interactive input and standard streams. Demonstrate one program creating and writing an anonymous file and a separately launched program reading and printing it on x86_64 and riscv64.
+- Cover read-only `/boot`, absent files, invalid executables, and returning to a usable shell after program exit. Verify anonymous files disappear on reboot.
 
-## Storage & Filesystem
-- Implement the package store mount path and signed read-only root filesystem driver.
-- Plan writable user partition support with journaling, snapshots, or rollback safeguards.
-- Add a block device abstraction layer with caching and asynchronous I/O plumbing.
+### Standard streams
+Implement [standard streams](docs/Design/Standard%20Streams.md) as part of the interactive environment. Sockets, ports, channel transfer, and atomic in-place rights restriction already exist.
 
-## Device Drivers
-- Expand x86_64 bring-up with IOAPIC routing for device interrupts (LAPIC and its timer landed; the legacy PIC is now fully masked).
-- High-resolution timer events: one-shot deadline programming (LAPIC one-shot/TSC-deadline on x86_64, sbi_set_timer already one-shot on riscv64) with a deadline queue, so sleeps and preemption wake at sub-tick deadlines; `ns_since_boot()` already reads the cycle counter.
-- Add keyboard input for the framebuffer console. The framebuffer terminal exists (core/console.cpp: the fb_sw_log thread drains a byte ring and drives a VT-ish emulator -- cursor positioning, erase, SGR incl. xterm 256-colour -- over the unscii 8x8 font, diffing a cell grid against a shadow so only changed cells repaint; proven live on jh7110 HDMI). It is output-only -- shell input is still read from the UART, so the panel shows output but cannot be typed at without a keyboard driver. Still missing: UTF-8 decoding (the font is 8-bit, so codepoints past U+00FF fall back rather than render -- why top's marker is ASCII, not a triangle), a glyph cache, and scrollback.
-- UART: pre-init panics lose their output (writes before init are dropped by the health gate); consider an atomic health flag for crash-context writes.
-- UART RX interrupt path (IOAPIC/PLIC routing) so shell input can block on a wait queue instead of sleep-polling; QEMU's chardev backpressure makes the current 1 ms poll lossless, but a real 16550's 16-byte FIFO would drop pasted input.
-- Implement storage (AHCI or NVMe), RTC, and entropy drivers (the jh7110 hardware watchdog is done; no other board has one worth arming). Wall-clock time already comes from the Limine date-at-boot request (`boot_info::boot_epoch_seconds`, shell `date`); an RTC driver is still wanted for non-Limine boot paths and for re-syncing drift on long uptimes.
+1. Define the stdio bootstrap message and runtime consumption before program entry. Wire output/error socket ends with narrowed rights; leave input explicitly absent until a source exists.
+2. Add the console server, multiplexing readable socket ends through a port and draining to debug write initially.
+3. Wire coordinator endowment immediately after spawn, including parking read ends until the console server arrives. Cover spawn-order independence, absent stdin, peer closure, backpressure, and cleanup on partial failure.
+4. Move ordinary program output to endowed streams. Device ownership follows the driver work below.
 
-## Security & Reliability
-- Enforce memory zeroisation, W^X policies, and static analysis for privileged code paths.
-- Integrate boot-time integrity checks for packages and kernel binaries.
-- Add watchdog firing (the crash trigger enum slot is already reserved) and structured fault isolation reporting; assertion escalation policy already exists.
+### Coordinator and lifecycle follow-ups
+- Handle boot-module delivery beyond `Channel::QUEUE_DEPTH` (8) with chunking, draining, or retry; `endow_boot_modules` currently logs failed IMAGE delivery but does not retry.
+- Replace or explicitly expose fixed coordinator limits as workloads grow: 8 children/registrations/parked connects, 31-byte service names, and echo's 4-client limit. Add negative replies or timeouts for connects to names that never register.
+- Implement exception propagation and user crash-reporting/unwinding metadata, per [Task Model](docs/Design/Task%20Model.md). Task kill, exit status, TERMINATED, and child-death observation already exist.
+- Define restart and capability-revocation policy for crashed servers. Retain/reload image VMOs for respawn; coordinator currently closes them after spawn. Include structured fault isolation reporting.
+- Add per-program registration/connect policy with manifests once packaging exists; open-with-logging is the current intended policy.
+- Clarify the remaining server dispatch/capability-routing work against [IPC Primitives](docs/Design/IPC%20Primitives.md) and [Service Coordination](docs/Design/Service%20Coordination.md); named register/connect routing has already landed.
 
-## Testing & QA
-- Continue growing driver/core unit and stress coverage where gaps remain; hosted suites cover channels, ports, arenas, and handle tables, and syscall-level coverage rides in the init program -- add dedicated IPC stress/fuzz suites as the subsystem grows (multi-threaded port producers, transfer under pressure).
-- VMM test gaps: WRITE_COMBINING end-to-end (indistinguishable from DEVICE until PAT lands) and OOM paths in the fault/commit paths (needs PMM fault injection).
-- Wire up a CI pipeline (no config exists yet) that runs the existing host+QEMU tiers and applies the coverage gate -- coverage tracking and QEMU test automation are already done.
-- Extend the fuzz harness to memory-subsystem interfaces now; add scheduler fuzz targets (run-queue rotation, wait-queue bookkeeping, signal-mask matching) now that the scheduler exists, and syscall fuzz targets once syscalls exist.
-- Harness protocol lines can interleave with concurrent log flush output (one test_end line was garbled in the 2026-06-10 run, test still counted); make @@HARNESS emission atomic with respect to log flushes.
-- Expand targeted coverage for: `core/cxx.cpp`, `core/interrupts.cpp`, `core/log.cpp`, `core/panic.cpp`, `core/time.cpp`.
-- KTL edge-case gaps: self-move assignment (vector/ref/Result), ref refcount-overflow panic path, negative-compilation checks for deleted overloads (e.g. maybe<T&> rvalue binding).
-- Harness assertion messages are interpolated raw into the `@@HARNESS` JSON, so any assertion text containing a quote or backslash corrupts the stream; route them through the existing `kernel::write_json_escaped`.
-- Fuzz coverage gaps found in the post-Milestone-1 review: `elf_symbols_fuzz` stops at `locate_symbol_tables` and never reaches the per-symbol string handling in `init()`, which is where the bounds checks live; `elf_loader_fuzz`'s oracle asserts only `filesz <= memsz` and the file-byte read, not page alignment, the W+X rejection, extent wrap, or entry coverage.
-- Add scenario coverage for `x86_64/descriptor_tables.cpp` (GDT/IDT setup), `x86_64/apic.cpp` (LAPIC timer), and `x86_64/main.cpp` (core_init); uart and interrupt dispatch/exception paths are already covered.
+## 3. Userspace SMP & Memory Coherence
+Kernel threads already run on secondary cores on both architectures, with local timer ticks, reschedule IPIs, per-core idle threads, and the reaper's `on_cpu` handoff. User threads remain on the boot core.
 
-## Tooling & Developer Experience
-- Plume does not notice files deleted from the composed sysroot behind its back: the sysroot stamp keys on package build stamps, not sysroot contents, so a tampered sysroot images as-is until the next recompose. Deleting `build/<arch>/sysroot.stamp` (or the sysroot itself) forces one.
-- Provide standalone scripts for ad-hoc log capture and tracing outside the test harness (the harness already captures structured logs during runs).
-- Expand the Debugging doc with a concrete GDB/QEMU remote-attach walkthrough (stub port, symbol loading, break-on-entry); `make clangd` already exists.
-- Fix the `make docs` lane: the kernel Doxyfile's INPUT points at `src/sys/kernel/docs/` (README.md, architecture.md, testing.md), which does not exist, and PROJECT_BRIEF still says "x86_64 kernel". Point it at the real sources and `docs/Kernel/`.
-- Kernel shell enhancements:
-    - Object Inspection -- expand handle inspect and obj inspect with detailed views
-    - Table Dumps -- add full handle table dump with object details
-    - Runtime Metrics -- add interrupt counts, allocation stats, tick rates
-    - Debugging Aids -- add memory dump, stack trace, register dump commands
-- Crash handler follow-ups: shell-drop on crash, watchdog injection (enum slot reserved), #DF/triple-fault handling (needs IST), stack overflow detection (needs guard pages), SMP crash fan-out (needs IPI).
+- Implement acknowledged x86 TLB shootdown; its arch hook is still a no-op. riscv64 already implements SBI RFENCE remote invalidation. Validate shared-address-space activation/unmap races and frame-reuse ordering before allowing user threads on APs.
+- Audit GLOBAL mappings when a space is inactive and paging-structure-cache invalidation when widening intermediate USER bits. Define invalidation for shared kernel mappings as part of the kernel-mapping work above.
+- Finish the user-concurrency audit (debug output, shared syscall state, address-space and IPC lifetime), then remove boot-core affinity and test simultaneous user execution/teardown on both architectures. x86 syscall entry and stack floors already use GS-local state.
+- Audit the remaining plain `cpu_core::lapic_id` bring-up accesses; make publication race-free if readers can overlap writes. GS identity itself is implemented.
+- Extend JH7110's DTB-discovered PLIC from the boot-hart context to per-hart routing when distributing external IRQs. Software wake IPIs already use SBI; direct CLINT routing is only needed for a future non-SBI platform.
+- Add per-CPU trace rings if the shared scheduler-locked ring becomes a bottleneck or needs CPU attribution. Per-core accounting already exists.
+- Add per-core run queues/load balancing only if profiles justify replacing the shared FIFO and boot-core user queue; retain round-robin policy.
 
-## Documentation & Governance
-- Publish contribution guidelines and a security model doc (coding standards already covered by `docs/Development.md`).
-- Maintain a public roadmap, change log, and stakeholder communication cadence.
+## 4. Device Ownership & Platform Support
 
-## Release & Distribution
-- Define semantic versioning, artefact signing, and release validation workflows.
-- Automate ISO publishing, mirroring, and provenance tracking.
-- Craft a regression gate checklist with performance, security, and compatibility sign-off.
+### Milestone 3 -- Ethernet and IPv4 Networking in Userspace
+- Establish a userspace network driver for a chosen Ethernet adapter, including discovery, resource delegation, interrupt delivery, and the DMA isolation/teardown contract required by the device.
+- Add the userspace network stack and application-facing service for Ethernet, address resolution, IPv4, and ICMP. Define how the connection is configured, including the route to external IPv4 hosts.
+- Have init start and endow the network services. Support stopping and restarting the driver, restoring connectivity while the shell and file services remain usable.
+- Add a userspace ping program and demonstrate incoming echo replies and outgoing ping to a reachable internet IPv4 address. Use a controlled peer for repeatable regression coverage.
+- Plan TCP and an HTTP server as subsequent work building on file and network services; they are outside Milestone 3's Ethernet/IPv4/ICMP completion scope.
+
+### Platform and device prerequisites and follow-ups
+- Read riscv64 timebase frequency and UART address from the DTB; boards still supply constants despite existing DTB/PLIC discovery.
+- Add ACPI RSDP/MADT discovery and CPU topology diagnostics for x86, then IOAPIC device-interrupt routing. Limine MP startup, LAPIC timers, and PIC masking are already implemented.
+- Add UART RX interrupts and a waitable input queue, replacing shell sleep-polling. Use IOAPIC on x86 and the existing PLIC path on JH7110; test burst/pasted input on real UART FIFOs.
+- Before interrupt objects signal from handlers, make the port signalling path IRQ-safe (`obj/port.cpp` currently uses a non-IRQ critical guard). Split its global lock only when contention warrants it.
+- Give kernel MMIO dedicated cache-correct mappings; `mmio_region` currently uses the bootloader HHDM. Add x86 PAT programming for real write-combining; riscv64 cache attributes need platform/PMA or Svpbmt support, not merely the stored software cache-mode tag.
+- Expose authorised device-VMO mappings and interrupt objects to userspace, then move the console server to a userspace UART driver. Keep a raw panic fallback and define how kernel log output shares the device.
+- Extend keyboard support to boards/devices that need it (notably JH7110); x86 polled PS/2 input already feeds the console. Add interrupt-driven input with the routing work above.
+- Extend the framebuffer terminal with UTF-8 decoding/font fallback, glyph caching if measured useful, and scrollback. The terminal and x86 keyboard path already exist.
+- Improve pre-console panic output and synchronisation of the UART health flag; writes before UART init are currently dropped.
+- Add deadline-driven timer events and a deadline queue for sub-tick sleeps/preemption: x86 LAPIC one-shot/TSC-deadline, and riscv64's existing one-shot SBI timer. High-resolution elapsed-time reads already exist.
+- Add entropy and RTC drivers as consumers require them. Limine supplies date-at-boot today; RTC support is for other boot paths and long-uptime resynchronisation.
+- Add crash watchdog injection/reporting and SMP crash fan-out through IPIs. JH7110 already arms a hardware watchdog; a reserved crash-trigger enum alone is not the missing hardware driver. Evaluate shell-drop on recoverable diagnostic crashes separately from fatal corruption.
+
+## 5. Memory Lifecycle & Resource Policy
+- Reclaim bootloader-reclaimable memory after copying live Limine data and retiring all boot/AP stacks that use it. It is currently excluded from PMM; the amount depends on the boot environment.
+- Reclaim boot modules once no loader/VMO consumer references them. Use `boot_info::modules` to identify module extents (memmap classifies them with the kernel); return only safely owned page-aligned interiors. Add MODULE classification with the reclaim path if needed.
+- Implement reusable contiguous free runs in PMM (buddy or equivalent). `alloc_contiguous` only carves untouched region tails; freed pages do not restore contiguous capacity, which limits large-heap allocation churn.
+- Finish physical-address typing through PMM/VMM and retire `direct_map_address()` after pointer-identity clients have narrower APIs. Typed physical access and `mmio_region` have already landed.
+- Add binding splitting for partial unmap; current unmaps cover whole slots.
+- Define VMO sharing/duplication rights and lifetimes, then clone/share counts and shared-frame CoW beyond the zero page. Include cross-core coherence tests.
+- Introduce per-task resource accounting/quotas across VMO memory, IPC buffers, channel message pages, sockets, and handles. Fixed per-buffer/queue limits do not bound a task's aggregate pinned memory.
+- Define a userspace memory-pressure Event (low/critical levels), with hysteresis and an explicit global/per-task policy, so servers can release caches. Decide whether ignoring it has consequences.
+- Harden object arenas with poisoning, redzones, and optional guard pages. Add per-CPU magazines when allocation contention warrants them; SMP kernel scheduling already exists.
+- Move handle entries to arenas only after a deliberate chunked-table refactor; the current contiguous vector cannot directly consume independent arena slots.
+
+## 6. Storage, Packaging & Release Security
+Dependencies run from device access through storage to policy and distribution.
+
+1. Add a block-device abstraction with asynchronous I/O and caching, and a first storage driver (AHCI or NVMe).
+2. Define the package format/trust roots and implement the package store plus signed read-only root mount path. Integrate package/kernel boot integrity checks with the signing policy.
+3. Add writable user storage with an explicit crash-recovery choice (journaling, snapshots, or rollback).
+4. Define versioning, artifact signing/provenance, and release validation gates covering correctness, security, performance, and target compatibility.
+5. Automate ISO/image publishing and mirroring once the signing and regression gates exist.
+
+- Audit zeroisation and W^X end to end, especially new shared/device/executable mappings, and add privileged-code static analysis. PMM allocation already zeroes pages, the ELF parser rejects W+X segments, and user VMO syscalls currently expose no EXEC permission.
+- Optional kASLR needs relocation/tooling verification. Userspace ASLR depends on ET_DYN/PIE and relocation support; the current loader accepts static ET_EXEC only.
+- Publish contribution/security guidance and keep the existing roadmap current. Add a changelog/release communication process when releases have consumers; a generic stakeholder cadence is not a kernel implementation prerequisite.
+
+### Milestone 4 -- Persistent storage and user accounts
+- Establish persistent storage through userspace drivers and file services, then add userspace account, authentication, and session services with persistent personal files and settings. Establish this model before the desktop's application-launch and file-access contracts.
+- Define authenticated capability grants, application-specific endowments, and administrative service access. Ensure init preserves the requesting session's authority limits and that file services enforce access independently of path knowledge or caller-supplied account IDs.
+- Define explicit sharing and logout semantics, including task cleanup and invalidation of session-scoped grants; closing a handle alone does not revoke delegated copies.
+- Demonstrate two isolated local accounts, explicit resource sharing, and logout/login without exposure of the previous session's private resources. Map POSIX identity/ownership interfaces onto trusted services as ported applications require them.
+
+## 7. Continuous Validation & Developer Tools
+Work here can accompany every feature slice; fix protocol reliability before relying on unattended CI results.
+
+### Test reliability and coverage
+- Escape assertion/reason strings in harness JSON using `kernel::write_json_escaped`. Console line locking already protects `ShellOutput::print` and `event` against concurrent output; retain interleaving regression coverage as logging evolves.
+- Choose and wire one CI system to run host tests, the x86_64/riscv64 QEMU matrix (`plume test --arch all`), and the existing coverage gate. Keep real-board validation as a separate hardware lane; no CI config is currently checked in.
+- Extend IPC stress/fuzz coverage to concurrent port producers, channel/socket backpressure, transfer under allocation pressure, and teardown. Hosted object suites and dedicated freestanding syscall tests already exist.
+- Add memory-subsystem, scheduler/wait-queue/signal, and syscall fuzz targets; all of those subsystems exist now.
+- Strengthen ELF fuzz oracles for alignment, W^X, wrapping extents, and executable entry coverage; drive symbol ingestion/string handling beyond `locate_symbol_tables`.
+- Add PMM fault injection for VMM fault/commit OOM paths. Add WRITE_COMBINING end-to-end coverage after real cache-mode support lands.
+- Grow riscv64 sfence/TLB and multi-source/per-hart IRQ coverage; architecture tests already include reschedule IPI coverage in addition to the JH7110 UART/PLIC test.
+- Expand targeted tests for `core/cxx.cpp`, interrupt management, log rendering, `core/panic.cpp`, and uncovered time behaviour. Time and log-ring host tests already exist.
+- Add focused GDT/IDT and LAPIC timer/core-init scenarios beyond current interrupt and SMP smoke coverage.
+- Add KTL self-move assignment cases (vector/ref/result), refcount-overflow failure coverage, and negative-compilation checks for deleted overloads such as `maybe<T&>` rvalue binding.
+
+### Build and debugging tools
+- Include board `*.s` files in the kernel Makefile's platform source discovery, alongside `*.cpp`/`*.S`.
+- Fix the Doxygen inputs to use existing sources and `docs/Kernel/`; its current `src/sys/kernel/docs/` inputs do not exist, and PROJECT_BRIEF still names only x86_64.
+- Decide whether Plume should validate composed sysroot contents before imaging. Its stamp detects package changes, not external deletion/tampering; deleting the sysroot or its adjacent `.stamp` forces recomposition today.
+- Document a concrete GDB/QEMU attach workflow (port, symbols, break-on-entry). Add ad-hoc tracing/log capture only where the test harness and existing serial-mux/board tools do not cover the need.
+- Extend shell inspection with individual object/handle detail and memory/register/stack dump commands. `handle all` already dumps every task's handles; allocation and per-core scheduler metrics already exist. Add interrupt counts, timer diagnostics, latency percentiles, or richer scheduler views for specific debugging needs.
+- Update stale current-state descriptions in `docs/Design/Scheduling.md` (still says no userspace and parked APs) and audit related syscall/task docs after the source split and SMP work.
+
+## 8. KTL & Focused Cleanup
+- Rework owning `maybe<T>` to explicit lifetime storage so empty values do not construct T and non-default-constructible types work.
+- Add reference-returning vector accessors using the existing `maybe<T&>` specialisation; `at` and `back` currently copy, and `front` is absent.
+- Make `vector::emplace_back` variadic in-place construction or remove/rename its forwarding-only alias.
+- Add move-aware rvalue overloads to the remaining `maybe` combinators when a caller needs them. `result` no longer has the old monadic combinator surface; do not recreate it merely to satisfy the old audit.
+- Review failure reporting for `register_interrupt` and `symbols::init`; `static_vector::push_back` already reports capacity failure with bool. Use results where a caller can act on distinct errors, rather than converting all void/bool APIs mechanically.
+- Format log prefixes through `fixed_string`'s interface and prove the prefix capacity instead of writing `m_buffer` directly.
+- Add minimum-severity filtering to the log pipeline; buffered sinks and crash-log emission already exist.
+- Consolidate the common scheduler rotation in `yield`/`service_pending_preemption` if it improves clarity without hiding their different accounting and kill handling.
+- Share ELF page-rounding helpers; use `KERNEL_MINIMUM_PAGE_SIZE` in descriptor `coverage_end`; consolidate duplicate EFER constants and active-root flush guards where the arch boundary stays clear.
+- Apply CamelCase type / UPPER_SNAKE constant conventions to outliers as their code is touched; avoid a priority-displacing whole-tree rename.
+- Recheck unused includes after the source split. Remaining deletion candidates include `TypeDescriptor::default_rights`, `assert_thread_context`, duplicate non-const `maybe::has_value`, and the test-only ctype shim. `HandleTable::is_valid` and public `insert` have production callers; `irq_depth` checks balanced exits. Tuple, the unused string-copy shims, unused bit/range/maybe helpers, `static_vector::peek_back`, `HandleTable::info`, and the duplicate synchronization semaphore have already been removed.
+
+## Deferred Until a Consumer or Measured Need
+- NUMA policy after topology discovery and multi-node hardware/workloads; reserved regions are already excluded from allocation, with overlap validation tracked above.
+- Owned 2M/1G mappings after a concrete large-page consumer; current allocation/mapping uses 4K, while page walks already understand bootloader large leaves.
+- User-pager eviction/clock replacement after a user-pager interface exists. Revisit ACTIVE versus WIRED page-table descriptors then; anonymous swap is intentionally out of scope.
+- General VMO resize/protect/commit/decommit operations beyond the Milestone 2 loader's needs when growable arenas, guard pages, or pager consumers define the contracts. Region-based task construction and executable mappings are active Milestone 2 work above.
+- Replace fixed IPC-buffer slots with `map_anywhere` when address-space layout needs it; any buffer eviction must invalidate the cached physical-frame contract.
+- Generalise ELF segment packing, the eight-segment limit, stack layout, and PT_GNU_STACK policy when supported toolchains require it. Keep the default stack non-executable. Failed spawn parsing can leave image pages committed until VMO destruction; add rollback/decommit with reclaimable image VMOs.
+- Optional weak port bindings with closure packets, and server-defined packet payloads, when a server needs them. Current strong bindings intentionally pin their objects.
+- Allocate FPU save storage only for user threads when Thread footprint matters; the embedded area currently costs kernel threads too. Add teardown ownership with that change.
+- Lift the host page-source stub's 4096 live-run cap if a stress workload reaches it.
+- Add rb_tree predecessor/reverse iteration when a caller outgrows `find_le`.
+- Factor the duplicated boot spine when another architecture exposes the real variation. Keep linker scripts architecture-owned unless a board needs a different load address.
+- Standardise unknown syscall returns (currently raw -1) with a deliberate ABI compatibility decision. Publish object type IDs when a userspace consumer needs named constants.
+
+## Accepted Constraints
+These describe current policy, not unfinished implementation.
+
+- Bootstrap channels are parent-to-task. Only the coordinator's parent end is held by the kernel; PEER_CLOSED observes parent death. A child can retain up to the bounded mailbox queue until teardown. A future kernel control plane needs its own explicit interface.
+- Killed threads do not park again on signal waits after the kill scan. A killed thread contending on a kernel mutex may busy-wait with preemption until it reaches the syscall exit boundary.
+- Anonymous memory is not swapped. Fallible allocation returns an error/null; boot allocation and ordinary `operator new` retain panic-on-OOM contracts.
+- User VMO creation has no policy size cap until quotas exist; allocation may fail during metadata construction or later at commit/touch. Direct PMM clients also include kernel stacks, heap/arena backing, channel pages, and page tables -- VMM is not the sole PMM consumer and does not currently provide a general reclaim/retry policy.
