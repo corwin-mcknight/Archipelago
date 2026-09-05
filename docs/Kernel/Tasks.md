@@ -12,7 +12,7 @@ The loader accepts static `ET_EXEC` images for the running architecture and noth
 Rejections are named rather than generic, because the parser cannot log and a refused binary is otherwise indistinguishable from a broken one. Dynamically linked images are refused outright rather than loaded without their interpreter, segments that are both writable and executable are refused, and segments must begin on a page boundary. Memory beyond a segment's file contents needs no special handling: anonymous VMOs zero-fill, which covers both `.bss` and the tail of a partially filled page.
 
 ## Scheduling and address spaces
-Every spawned thread keeps a reference to its owning task and records its kernel stack top. On a context switch, the scheduler activates the incoming user task's address space only when it differs from the active address space. Kernel threads have no private address space and may run in the currently active user space because every user space includes the shared kernel mappings.
+Every thread has an immutable, non-null reference to its parent task. Boot and idle threads belong to task zero; a thread cannot be added to another task's thread list. Spawned threads also record their kernel stack top. On a context switch, the scheduler activates the incoming task's address space, or the kernel address space for task zero, when it differs from the active space.
 
 The scheduler also publishes the incoming kernel stack for privilege transitions. x86_64 writes TSS `rsp0` and the SYSCALL entry stack. riscv64 reconstructs the stack top in `sscratch` whenever a trap returns to U-mode.
 
@@ -32,20 +32,22 @@ The initial syscall surface is deliberately small:
 The syscall number names the operation; a handle argument names the object it acts on.
 
 ## Handle operations
-Every handle syscall runs the same pipeline before any operation code executes: decode the handle, then a single verification call on the calling task's handle table -- slot-and-generation lookup, type check, rights check, under one lock -- and only then the operation. The pipeline is a table with one row per operation declaring the type it expects and the rights it requires, so an operation cannot be reached without its checks and adding an operation cannot forget them. Failures return a negative error naming the first check that failed: an invalid or stale handle, the wrong type, or a missing right, in that order.
+One syscall switch calls ordinary handlers. Typed operations use `get<T>()` to check handle validity, type, and rights under one table lock; generic object operations use `verify()`. Close, duplicate, and restriction perform their own validation within the table operation. Acquired references pin objects after unlocking and across concurrent handle closes.
+
+The dispatcher pins the calling thread once and passes it to handlers that need the IPC buffer or task. Every return crosses the same termination check, including unknown syscall numbers. All references and locks are released before exiting a thread, because exit abandons the stack without unwinding.
 
 A handle crossing the boundary is a uint64: table slot index in the low 32 bits, generation in the high 32. A closed slot's generation moves, so a stale handle fails the lookup rather than reaching whatever now occupies the slot.
 
 The initial thread's table is created with exactly one entry, promised by the ABI as first-generation slot 0: one end of its bootstrap channel. The other end belongs to the task's creator -- the kernel today, held as the task's mailbox for the task's whole life. The first message queued on the channel, before the thread can run, is the bootstrap message: an empty payload carrying a handle to the task itself (read and write rights), a handle to its initial thread (read and wait), and any further handles the creator endowed the task with. Everything after that first message is ordinary parent-to-task mail. Neither self-handle carries the duplicate right, which makes the rights-rejection path reachable from the first program.
 
-x86_64 enters through SYSCALL/SYSRET. riscv64 enters through `ecall` and returns through `sret`. Both call the shared dispatcher with interrupts disabled on the calling thread's kernel stack. Six argument registers are carried -- as many as either architecture's calling convention provides, so the entry assembly never needs widening again -- though no operation reads more than two yet.
+x86_64 enters through SYSCALL/SYSRET. riscv64 enters through `ecall` and returns through `sret`. Both call the shared dispatcher with interrupts disabled on the calling thread's kernel stack. Six argument registers are carried -- as many as either architecture's calling convention provides, so the entry assembly never needs widening again -- though current operations read at most five.
 
 ## The IPC buffer
 No pointer crosses the syscall boundary. Every thread with an address space is given a buffer at creation -- a committed anonymous VMO mapped into its task, sized when the thread is spawned and capped by a system constant -- and that buffer is the only memory a syscall ever reads from its caller. A syscall argument naming data is an offset into it.
 
 The kernel resolves the buffer's frames once, when the thread is created, and keeps their physmap addresses. So a buffered syscall performs no page-table walk, takes no VMM lock, and cannot fault: it checks a range against a size it already knows and reads its own direct map. There is no window in which the mapping can change under the kernel, and no address the caller can name that the kernel has to be talked into trusting. A task that unmaps its own buffer only blinds itself -- the kernel holds its own reference, so the frames stay alive and unchanged.
 
-The range check is written as a subtraction rather than an addition, so an offset and length crafted to overflow cannot wrap past the end and appear valid.
+The checked-range API rejects invalid buffers, out-of-bounds offsets, and overflowing lengths. It yields bounded page chunks and copies across noncontiguous frames. Empty ranges at the end of a valid buffer are allowed and touch no frames. A range borrows its buffer and is used while the dispatcher pins the calling thread.
 
 A thread learns where its buffer is from two registers set at entry, rather than from a constant in the ABI, which leaves the address free to move when user-space layout randomisation arrives.
 

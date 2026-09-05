@@ -129,18 +129,17 @@ void switch_to(ktl::ref<Thread> next, switch_reason reason) {
     kernel::arch::set_kstack_floor(c.current->kstack_floor());
     // A core holds a user address space active only while running one of that task's threads, so
     // the reaper can tear a space down from any core once its last thread is off-cpu.
-    auto* next_task = static_cast<Task*>(c.current->owner().get());
-    auto* want =
-        next_task != nullptr && next_task->aspace() != nullptr ? next_task->aspace() : &kernel::mm::kernel_aspace();
+    auto* next_task = c.current->owner().get();
+    auto* want      = next_task->aspace() != nullptr ? next_task->aspace() : &kernel::mm::kernel_aspace();
     if (kernel::mm::vm_aspace::active() != want) { want->activate(); }
     if (c.current->kstack_top() != 0) { kernel::arch::set_kernel_stack(c.current->kstack_top()); }
     // User FP/SIMD state changes hands only here, and only user threads (task with an address
     // space) have any: kernel code never touches those registers, so whatever user mode left in
     // them survives every kernel entry -- and every kernel-thread stretch -- until the next user
     // thread is restored.
-    auto* prev_task = static_cast<Task*>(outgoing->owner().get());
-    if (prev_task != nullptr && prev_task->aspace() != nullptr) { kernel::arch::fpu_save(outgoing->fpu_area()); }
-    if (next_task != nullptr && next_task->aspace() != nullptr) { kernel::arch::fpu_restore(c.current->fpu_area()); }
+    auto* prev_task = outgoing->owner().get();
+    if (prev_task->aspace() != nullptr) { kernel::arch::fpu_save(outgoing->fpu_area()); }
+    if (next_task->aspace() != nullptr) { kernel::arch::fpu_restore(c.current->fpu_area()); }
     arch_context_switch(outgoing->saved_sp_slot(), c.current->saved_sp());
     sched_finish_switch();
 }

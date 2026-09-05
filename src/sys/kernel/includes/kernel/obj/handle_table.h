@@ -23,8 +23,7 @@ struct HandleId {
     bool operator!=(const HandleId& other) const { return !(*this == other); }
 };
 
-// The packed user-facing form specified in <abi/syscall.h>: slot index in the low 32 bits, slot
-// generation in the high 32.
+// ABI encoding: index in the low 32 bits, generation in the high 32.
 inline uint64_t pack_handle(HandleId id) {
     return static_cast<uint64_t>(id.index) | (static_cast<uint64_t>(id.generation) << 32);
 }
@@ -40,8 +39,6 @@ struct HandleInfo {
     ObjectId object_id;
 };
 
-// What verify() hands back: the object reference plus the rights the handle actually carries, so
-// callers that report or propagate rights need no second lookup.
 struct VerifiedHandle {
     ktl::ref<Object> object;
     Rights rights;
@@ -57,9 +54,7 @@ class HandleTable {
 
     template <typename T, typename... Args> ktl::result<HandleId> emplace(Rights rights, Args&&... args);
 
-    // Share an already-existing object into this table.
     ktl::result<HandleId> insert(ktl::ref<Object> object, Rights rights);
-    // Close every live handle and rebuild the free list.
     void clear();
 
     ktl::result<HandleId> duplicate(HandleId source, Rights rights_mask);
@@ -68,38 +63,28 @@ class HandleTable {
     // Clear these bits from the current rights under the lock; only invalid handles fail.
     ktl::result<void> remove_rights(HandleId id, Rights rights);
     ktl::result<void> close(HandleId id);
-    // Remove a live entry but hand its reference and rights to the caller instead of dropping
-    // them. This is the move half of handle transfer: the returned reference is what keeps the
-    // object alive while the handle is between tables.
+    // Remove the handle and transfer its ownership to the caller.
     ktl::result<VerifiedHandle> take(HandleId id);
 
-    // The one verification path every handle operation goes through: slot-and-generation lookup,
-    // then type check, then rights check, under a single lock acquisition. Errors come out in that
-    // order (handle_invalid, wrong_type, rights_violation) so a caller learns the first thing wrong
-    // and nothing more. expected_type type_ids::INVALID means any type.
+    // Under one lock, check validity, type, then rights; errors follow that order.
+    // type_ids::INVALID accepts any type. The returned reference pins the object after unlock.
     ktl::result<VerifiedHandle> verify(HandleId id, Rights required_rights, TypeId expected_type = type_ids::INVALID);
 
     template <typename T> ktl::result<ktl::ref<T>> get(HandleId id, Rights required_rights = 0);
 
     bool is_valid(HandleId id);
     size_t count();
-    // Copy every live entry's metadata under one lock acquisition, so callers can print or
-    // inspect without holding it. Returns false if the copy failed to allocate; out may be
-    // partially filled in that case.
+    // Append live metadata under one lock. Allocation failure returns false and may leave a partial copy.
     bool snapshot(ktl::vector<HandleInfo>& out);
 
 #if CONFIG_KERNEL_TESTING
-    // Test-only seam: force a slot's generation so generation-wrap retirement can be
-    // exercised without 2^32 close/reopen cycles. Returns the updated id for the live handle.
+    // Force generation retirement in tests; returns the updated live handle ID.
     ktl::maybe<HandleId> testing_set_generation(HandleId id, uint32_t generation);
 #endif
 
    private:
     struct HandleEntry {
-        // `object` marks a live entry and is what lookups read; `strong` holds the table's
-        // reference.
-        ktl::unowned_ref<Object> object;
-        ktl::ref<Object> strong;
+        ktl::ref<Object> object;
         Rights rights       = 0;
         uint32_t generation = 0;
         int32_t next_free   = -1;
@@ -116,8 +101,6 @@ class HandleTable {
     HandleEntry* lookup_entry(HandleId id);
     ktl::result<HandleId> create_handle(ktl::ref<Object> object, Rights rights);
 };
-
-// Template implementations
 
 template <typename T, typename... Args> ktl::result<HandleId> HandleTable::emplace(Rights rights, Args&&... args) {
     auto obj = ktl::make_ref<T>(ktl::forward<Args>(args)...);

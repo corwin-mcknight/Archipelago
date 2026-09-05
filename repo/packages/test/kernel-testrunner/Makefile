@@ -53,7 +53,7 @@ HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
 SUPPORT_SRCS := $(KSRC)/core/std/stdlib.cpp $(KSRC)/obj/object.cpp $(KSRC)/obj/handle_table.cpp \
 	$(KSRC)/obj/channel.cpp $(KSRC)/obj/socket.cpp $(KSRC)/obj/type_registry.cpp $(KSRC)/task/task.cpp \
 	$(KSRC)/task/sync/execution_context.cpp $(KSRC)/task/sync/lockdep.cpp \
-	$(KSRC)/task/sync/mutex.cpp $(KSRC)/elf/elf_parse.cpp $(KSRC)/obj/handle_dispatch.cpp \
+	$(KSRC)/task/sync/mutex.cpp $(KSRC)/elf/elf_parse.cpp $(KSRC)/syscalls/handle.cpp $(KSRC)/syscalls/common.cpp $(KSRC)/task/ipc_range.cpp \
 	$(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)

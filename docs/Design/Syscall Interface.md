@@ -1,33 +1,39 @@
 # Syscall Interface
 
-> [!info] Design
-> This feature is not yet implemented. This page describes the planned design.
-
 The syscall interface is the boundary between userspace and the kernel.
-All userspace operations on kernel objects pass through this single entry point.
+The installed ABI lives in `src/sys/kernel/includes/abi/syscall.h`.
 
 ## Entry Point
-There is one syscall entry point.
-It uses the x86_64 `SYSCALL`/`SYSRET` instructions for the user-to-kernel-to-user transition.
-Arguments are passed in registers -- there is no stack-based parameter passing.
+Architecture entry code passes the syscall number and register arguments to one shared dispatcher.
+It pins the current thread once; the thread's parent task supplies the handle table and address space.
+Every handler return crosses a common exit boundary that checks for termination, including unknown syscall numbers.
+References and locks are released before thread exit abandons the syscall stack.
 
 ## Dispatch
-Every syscall that operates on a handle follows the [[Object Model#Three-Path Dispatch|three-path dispatch pipeline]]:
+A single switch routes syscall numbers to ordinary handlers.
+Typed operations call `HandleTable::get<T>()`, checking handle validity, type, and rights in that order.
+Generic object operations use `verify()`; handle mutations validate within the table operation itself.
+Acquired object references remain valid across concurrent handle closes, and operations run after the table lock is released.
 
-1. **Handle lookup** -- resolve the handle ID in the calling task's [[Handle Table]], validate the generation counter
-2. **Rights check** -- verify the handle carries sufficient rights for the requested operation
-3. **Operation dispatch** -- execute the [[Object Transaction Programs|transaction program]] if one is attached, otherwise forward to the owning server via [[IPC Primitives|IPC]]
+Uniform server routing and [[Object Transaction Programs]] remain part of the planned [[Object Model#Three-Path Dispatch|three-path dispatch]] design.
 
-This is the same pipeline regardless of object type.
-The kernel does not have per-type syscall handlers -- the object model provides uniform dispatch.
+## Buffered Arguments
+Memory arguments are offsets and lengths into the calling thread's pinned IPC buffer.
+A checked range rejects invalid buffers, out-of-bounds offsets, and overflowing lengths before an operation starts.
+Ranges yield bounded, contiguous page chunks and provide copies across noncontiguous backing frames.
+An empty range at the end of a valid buffer is allowed; no frame is accessed for an empty copy.
+Ranges borrow the buffer and must not outlive or mutate its backing description.
+
+Socket handlers preserve partial progress: a short transfer or a later error returns the bytes already transferred.
+Channel and socket creation share endpoint installation and rollback; handle IDs are copied out only after both inserts succeed.
 
 ## Non-Handle Syscalls
 A small number of syscalls do not operate on handles:
-- Thread yield and exit
-- System information queries
+- Thread yield, sleep, and exit
+- Object creation
 - Debug output
 
-These bypass the three-path pipeline because there is no handle to look up.
+These operations do not require a handle lookup.
 Service discovery is deliberately not in this list: reaching a named service is a conversation with the [[Service Coordination|coordinator]] over the bootstrap channel, not a syscall.
 
 Debug output is a kernel debugging convenience, not the system's I/O mechanism, and there is deliberately no console object or console handle behind it. Real input and output are an open design question -- see below -- and nothing about the debug write should be read as answering it.
@@ -45,9 +51,9 @@ The calling task decides how to handle backpressure -- wait on the `WRITABLE` si
 See [[IPC Primitives#Signals]].
 
 ## Relationship to Other Subsystems
-- [[Object Model#Three-Path Dispatch]] -- the dispatch pipeline that every handle syscall follows
+- [[Object Model#Three-Path Dispatch]] -- planned uniform server routing
 - [[Handle Table]] -- handle resolution is the first step of dispatch
 - [[Object Transaction Programs]] -- the programmable layer between rights check and IPC
-- [[IPC Primitives]] -- the fallback path when an operation reaches dispatch
+- [[IPC Primitives]] -- channels, sockets, signals, and ports
 - [[Task Model]] -- syscalls are the boundary between task code and kernel code
 - [[Scheduling]] -- syscall entry and exit are context switch points

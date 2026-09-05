@@ -7,13 +7,6 @@ namespace kernel::sched {
 
 namespace { constexpr size_t PAGE_SIZE = KERNEL_MINIMUM_PAGE_SIZE; }  // namespace
 
-uintptr_t ipc_buffer::kernel_at(uint64_t offset, size_t& run_out) const {
-    size_t page    = static_cast<size_t>(offset / PAGE_SIZE);
-    size_t in_page = static_cast<size_t>(offset % PAGE_SIZE);
-    run_out        = PAGE_SIZE - in_page;
-    return m_frames[page] + in_page;
-}
-
 void release_thread_ipc(Task& task, const ipc_buffer& buffer) {
     if (!buffer.valid()) { return; }
     // Unmap before returning the slot: the slot is only reusable once its address range is free,

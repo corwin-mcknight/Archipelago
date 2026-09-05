@@ -30,11 +30,7 @@ void reap(ktl::ref<Thread> zombie) {
     // before touching its stack or its task's address space.
     while (zombie->on_cpu()) {}
     if (lifecycle_log_enabled()) { g_log.debug("sched: reap id={0}", zombie->id()); }
-    auto task = ktl::static_ref_cast<Task>(zombie->owner());
-    // Both spawn paths construct a Thread with an owner, so this only catches ownerless threads
-    // from the bare constructor (tests build those directly): fall back to kernel_task, where
-    // remove_thread is a harmless no-op.
-    if (!task) { task = kernel_task(); }
+    auto task = zombie->owner();
     task->remove_thread(zombie->id());
     // Return the thread's IPC buffer alongside its kernel stack: both are resources the task holds
     // on the thread's behalf, and a task that spawns and reaps workers would otherwise run out of

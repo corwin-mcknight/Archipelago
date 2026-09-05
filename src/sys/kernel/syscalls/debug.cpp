@@ -1,13 +1,4 @@
 #include <kernel/log.h>
-#include <kernel/mm/vm_aspace.h>
-#include <kernel/mm/vmo.h>
-#include <kernel/obj/channel.h>
-#include <kernel/obj/handle_dispatch.h>
-#include <kernel/obj/port.h>
-#include <kernel/obj/socket.h>
-#include <kernel/sched/scheduler.h>
-#include <kernel/sched/user_task.h>
-#include <kernel/time.h>
 
 #include "internal.h"
 
@@ -39,29 +30,17 @@ void log_putc(char c) {
 
 }  // namespace
 
-// Emit [offset, offset + length) of the calling thread's IPC buffer. Output goes through the log
-// rather than straight at the UART so it stays serialized against kernel log output and the test
-// harness's protocol lines, which share the device.
-//
-// No user pointer is involved: the buffer's frames were resolved when the thread was created, so
-// this validates a range against a size the kernel already knows and then reads its own physmap.
-uint64_t sys_write(uint64_t offset, uint64_t length) {
-    auto self = kernel::sched::current();
-    if (!self) { return static_cast<uint64_t>(ktl::errc::invalid_operation); }
+// Use the logger to serialize output with kernel logs and test protocol lines.
+uint64_t sys_write(sched::Thread& self, uint64_t offset, uint64_t length) {
+    const auto& buffer = self.ipc();
+    auto checked       = buffer.range(offset, length);
+    if (checked.is_err()) { return errc_of(checked.unwrap_err()); }
+    auto bytes       = checked.unwrap();
 
-    const auto& buffer = self->ipc();
-    if (!buffer.valid() || !buffer.contains(offset, length)) { return static_cast<uint64_t>(ktl::errc::out_of_range); }
-
-    // Page by page: the backing frames are not physically contiguous, so a multi-page buffer is
-    // several runs. A one-page buffer is a single pass.
     uint64_t written = 0;
-    while (written < length) {
-        size_t run         = 0;
-        const char* chunk  = reinterpret_cast<const char*>(buffer.kernel_at(offset + written, run));
-        uint64_t remaining = length - written;
-        uint64_t take      = run < remaining ? run : remaining;
-        for (uint64_t i = 0; i < take; ++i) { log_putc(chunk[i]); }
-        written += take;
+    for (auto chunk = bytes.next(); !chunk.empty(); chunk = bytes.next()) {
+        for (uint8_t byte : chunk) { log_putc(static_cast<char>(byte)); }
+        written += chunk.size();
     }
     return written;
 }

@@ -31,6 +31,11 @@ The kernel holds a handle to every task.
 This makes the kernel the owner-of-last-resort for task lifecycle.
 A terminated task is not truly dead until the kernel closes its handle, which triggers the destructor chain.
 
+## Thread Ownership
+Every thread has one non-null parent task for its entire lifetime, including boot and idle threads, which belong to the kernel task.
+The thread holds an immutable owning reference to its task; it cannot be reparented or added to another task's thread list.
+The reaper removes dead threads from their parent's list, breaking the task/thread ownership cycle.
+
 ## First Thread Authority
 When a task's first thread begins execution, it receives two handles:
 - A handle to its own task

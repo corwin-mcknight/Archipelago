@@ -32,6 +32,8 @@ void Task::set_state(task_state state) {
 }
 
 ktl::result<void> Task::add_thread(ktl::ref<Thread> thread) {
+    if (!thread) { return ktl::err(ktl::errc::null_argument); }
+    if (thread->owner().get() != this) { return ktl::err(ktl::errc::invalid_operation); }
     kernel::synchronization::lock_guard guard(m_lock);
     if (!m_threads.push_back(ktl::move(thread))) { return ktl::err(ktl::errc::oom); }
     return ktl::result<void>::ok();

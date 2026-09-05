@@ -33,20 +33,32 @@ KTEST_CASE(sched_task_kernel_task_singleton_and_handles) {
 
 // Thread membership: add, snapshot, remove, and remove-absent over one task.
 KTEST_CASE(sched_task_thread_membership) {
-    Task task;
-    auto t1 = ktl::make_ref<Thread>();
-    auto t2 = ktl::make_ref<Thread>();
-    KTEST_REQUIRE_TRUE(task.add_thread(t1).is_ok());
-    KTEST_REQUIRE_TRUE(task.add_thread(t2).is_ok());
-    KTEST_EXPECT_EQUAL(task.thread_count(), 2u);
+    auto task = ktl::make_ref<Task>();
+    auto t1   = ktl::make_ref<Thread>(task);
+    auto t2   = ktl::make_ref<Thread>(task);
+    KTEST_REQUIRE_TRUE(task->add_thread(t1).is_ok());
+    KTEST_REQUIRE_TRUE(task->add_thread(t2).is_ok());
+    KTEST_EXPECT_EQUAL(task->thread_count(), 2u);
 
     ktl::vector<ktl::ref<Thread>> snap;
-    KTEST_REQUIRE_TRUE(task.snapshot_threads(snap));
+    KTEST_REQUIRE_TRUE(task->snapshot_threads(snap));
     KTEST_EXPECT_EQUAL(snap.size(), 2u);
 
-    task.remove_thread(t1->id());
-    KTEST_EXPECT_EQUAL(task.thread_count(), 1u);
+    task->remove_thread(t1->id());
+    KTEST_EXPECT_EQUAL(task->thread_count(), 1u);
     KTEST_EXPECT_EQUAL(snap.size(), 2u);  // snapshot is a copy, not a view
-    task.remove_thread(t1->id());         // removing an absent id is a no-op
-    KTEST_EXPECT_EQUAL(task.thread_count(), 1u);
+    task->remove_thread(t1->id());        // removing an absent id is a no-op
+    KTEST_EXPECT_EQUAL(task->thread_count(), 1u);
+    task->remove_thread(t2->id());
+}
+
+KTEST_CASE(sched_task_rejects_foreign_thread) {
+    auto owner = ktl::make_ref<Task>();
+    auto other = ktl::make_ref<Task>();
+    KTEST_REQUIRE_TRUE(owner && other);
+    auto thread = ktl::make_ref<Thread>(owner);
+    KTEST_REQUIRE_TRUE(static_cast<bool>(thread));
+    KTEST_EXPECT_ERR(other->add_thread(thread), ktl::errc::invalid_operation);
+    KTEST_EXPECT_ERR(owner->add_thread({}), ktl::errc::null_argument);
+    KTEST_EXPECT_ALL(owner->thread_count() == 0, other->thread_count() == 0, thread->owner() == owner);
 }

@@ -5,6 +5,7 @@
 #include <kernel/obj/object.h>
 #include <kernel/obj/type_registry.h>
 #include <kernel/obj/types.h>
+#include <kernel/panic.h>
 #include <kernel/sched/ipc_buffer.h>
 #include <kernel/synchronization/execution_context.h>
 #include <std/new.h>
@@ -14,6 +15,8 @@
 #include <ktl/result>
 
 namespace kernel::sched {
+
+class Task;
 
 using thread_entry_fn = void (*)(void*);
 
@@ -42,33 +45,38 @@ class Thread : public kernel::obj::Object {
     DECLARE_OBJECT_TYPE(Thread, kernel::obj::type_ids::THREAD)
     static constexpr uint32_t SIGNAL_TERMINATED = 1u << 0;
 
-    // Bare thread: no name, no owner, no stack. Kernel code uses one of the two constructors
-    // below; this exists for tests exercising Thread/Task bookkeeping in isolation.
     // Threads allocate from their AUMI arena (exact-size zeroed slots) rather than the general
     // heap. Defined in mm/object_arena.cpp beside the arena so hosted builds link them without
     // building this class's kernel-only translation units.
     static void* operator new(size_t size, const std::nothrow_t&) noexcept;
     static void operator delete(void* ptr);
 
-    Thread() : Object(TYPE_ID) {}
+    explicit Thread(ktl::ref<Task> owner) : Object(TYPE_ID), m_owner(ktl::move(owner)) {
+        if (!m_owner) { panic("thread requires a parent task"); }
+    }
+
+    Thread(const Thread&)            = delete;
+    Thread& operator=(const Thread&) = delete;
 
     // Adopting constructor: wraps an already-running context (the boot/idle thread). It owns no
     // stack, and the context is already executing, so it starts RUNNING. kstack_floor is whatever
     // tripwire the arch established for that stack (0 disables the check).
-    Thread(const char* name, ktl::ref<kernel::obj::Object> owner, uintptr_t kstack_floor)
+    Thread(const char* name, ktl::ref<Task> owner, uintptr_t kstack_floor)
         : Object(TYPE_ID), m_state(thread_state::RUNNING), m_kstack_floor(kstack_floor), m_owner(ktl::move(owner)) {
+        if (!m_owner) { panic("thread requires a parent task"); }
         set_name(name);
     }
 
     // Spawned thread: owns the stack identified by its physical base and its HHDM-mapped virtual
     // base. Starts READY; the scheduler prepares the initial switch frame and records it via
     // set_saved_sp().
-    Thread(const char* name, ktl::ref<kernel::obj::Object> owner, uintptr_t kstack_phys, uintptr_t kstack_virt_base)
+    Thread(const char* name, ktl::ref<Task> owner, uintptr_t kstack_phys, uintptr_t kstack_virt_base)
         : Object(TYPE_ID),
           m_kstack_phys(kstack_phys),
           m_kstack_floor(kstack_virt_base + CONFIG_KERNEL_STACK_TRIPWIRE_MARGIN),
           m_kstack_top(kstack_virt_base + CONFIG_KERNEL_STACK_SIZE),
           m_owner(ktl::move(owner)) {
+        if (!m_owner) { panic("thread requires a parent task"); }
         set_name(name);
     }
 
@@ -105,7 +113,7 @@ class Thread : public kernel::obj::Object {
     void set_kstack_floor(uintptr_t floor) { m_kstack_floor = floor; }
     uintptr_t kstack_top() const { return m_kstack_top; }
 
-    ktl::ref<kernel::obj::Object>& owner() { return m_owner; }
+    const ktl::ref<Task>& owner() const { return m_owner; }
 
     uintptr_t saved_sp() const { return m_saved_sp; }
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
@@ -163,7 +171,7 @@ class Thread : public kernel::obj::Object {
     uintptr_t m_kstack_floor   = 0;
     uintptr_t m_kstack_top     = 0;
     uintptr_t m_saved_sp       = 0;
-    ktl::ref<kernel::obj::Object> m_owner;
+    const ktl::ref<Task> m_owner;
     uint32_t m_slice         = CONFIG_SCHED_TIMESLICE_TICKS;
     uint32_t m_syscall_depth = 0;
     thread_stats m_stats;

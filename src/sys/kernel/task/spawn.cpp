@@ -14,6 +14,7 @@ namespace kernel::sched {
 
 ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* name, thread_entry_fn entry,
                                                void* arg) {
+    if (!task) { return ktl::err(ktl::errc::null_argument); }
     constexpr size_t STACK_PAGES            = CONFIG_KERNEL_STACK_SIZE / KERNEL_MINIMUM_PAGE_SIZE;
 
     ktl::maybe<kernel::mm::vm_paddr_t> phys = stack_pool_acquire();
@@ -71,7 +72,7 @@ ktl::result<ktl::ref<Thread>> thread_create_in(ktl::ref<Task> task, const char* 
 }
 
 void thread_discard(ktl::ref<Thread> thread) {
-    auto task = ktl::static_ref_cast<Task>(thread->owner());
+    auto task = thread->owner();
     note_thread_reaped();
     task->remove_thread(thread->id());
     release_thread_ipc(*task, thread->ipc());

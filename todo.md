@@ -98,26 +98,18 @@
 - IST-backed exception/NMI stacks on x86 -- today a fault or NMI during the stack-overflow panic path re-enters the interrupt handler on the live emergency stack, bounded only by the crash dump's recursion guard.
 
 ## Handles & Syscalls
-- Handle dispatch follow-ups (the pipeline itself landed with Milestone 1: verify-then-execute over a declarative op table, `close`/`duplicate`/`obj_info` as first operations):
-    - Type ids remain kernel constants; rights bits are installed ABI for SYS_HANDLE_RESTRICT. Publish type ids when a userspace consumer needs to name them.
-    - Every operation so far is type-generic; the op table's expected-type column gets its first real user with the first task- or thread-specific operation.
-- Add kernel-owned handle tables for internal object references.
+- Type ids remain kernel constants; rights bits are installed ABI for SYS_HANDLE_RESTRICT. Publish type ids when a userspace consumer needs to name them.
 - Add handle revocation flows for server crash cleanup.
 - Per-thread IPC buffer follow-ups (buffered syscalls read only this buffer, so no user pointer crosses the boundary and no copy-in helper is needed):
     - The per-task size cap is a compile-time constant standing in for real per-task quotas, which belong with the task/IPC milestone. Many threads each under the cap can still pin a lot of wired memory.
     - Buffers occupy fixed slots in a reserved address-space region (64 slots per task, one bitmap word), predating the VMM's first-fit search; moving them onto `map_anywhere` retires the slot bitmap.
     - Buffers are wired for the thread's life and never reclaimed under pressure, which is what makes the cached frames safe. Eviction would have to unpick that.
-- Post-Milestone-1 review findings, syscall and handle pipeline:
-    - `syscalls/handle.cpp` reaches a task through `static_ref_cast<Task>(self->owner())` with no type check; `Thread` accepts any `Object` owner, so a non-Task owner is silent type confusion. Same pattern in `task/scheduler.cpp` and `task/reaper.cpp`.
+- Remaining syscall and handle review findings:
     - `SYS_SLEEP` passes its argument straight into `now() + ticks`, so a large value wraps to a deadline in the past and returns on the next tick.
     - `sys_write`'s copy loop runs with interrupts masked for a user-chosen length up to the full IPC buffer; cap the per-call length or re-enable interrupts around it.
-    - `ipc_buffer::kernel_at` indexes `m_frames[]` with no bound, safe only because its one caller checks `contains()` first; assert the invariant in the function.
-    - `dispatch_handle_op` takes the table lock in `verify` and again in each handler, re-resolving the id, so verify-then-execute is not actually held across one lock; and `unpack(handle)` is computed twice.
-    - A partial `grow()` failure returns after appending some entries without chaining them, orphaning those slots permanently.
-    - `create_handle` uses the free-list head without asserting `grow()` actually produced a slot; `-1` would index as `SIZE_MAX`.
     - `TypeRegistry` writes take `m_lock` but `lookup`, `count`, and `index_for_id` read unlocked, including on the handle-creation path. Either lock the readers or seal the registry after boot.
     - The rights argument is truncated from 64 to 32 bits without rejecting a nonzero upper half; `a2..a5` traverse the whole ABI unvalidated and discarded.
-    - An unknown syscall number returns raw `-1` while an unknown handle op returns `invalid_operation`; pick one.
+    - Unknown syscall numbers still return raw `-1`; consider standardizing on `invalid_operation` in a future ABI change.
     - Dead: `TypeDescriptor::default_rights` (written by every registration, read by none), `HandleTable::info`, `HandleTable::is_valid`, the `break` after the `[[noreturn]]` `exit_current()`, and `insert()` as a pure forwarder to `create_handle()`.
 - User memory syscall surface is create/map/unmap only (SYS_VMO_*); resize, protect, commit/decommit, EXEC mappings, and per-task memory quotas each wait for a consumer that names them (growable arenas, guard pages, the userspace loader, real quota policy). Absurd VMO sizes succeed at create and fail lazily at touch -- the accepted no-cap stance until quotas land.
 - Enable SMAP/SMEP on x86_64 and leave `sstatus.SUM` clear on riscv64, so a stray kernel dereference of a user address traps instead of succeeding. The kernel never intentionally reads user mappings -- the ELF loader and the IPC buffer both go through the physmap -- so nothing needs an access window today, which makes this cheap to turn on and a real backstop if something later reaches for a user pointer by mistake.
@@ -145,7 +137,7 @@
 ## IPC & Services
 - Handle-transfer gaps: no per-handle transfer right yet (no object type registers TRANSFER; the channel-handle gate is the only check), a receiver-table insert failure on dequeue closes the arrived handle rather than failing the recv (the message is already dequeued), and an endpoint escrowed on its own pair's queue is an unreclaimable reference cycle (the exact self-channel case is refused; the peer-through-itself shape is not detectable cheaply).
 - Port gaps: one global lock for the whole subsystem with a non-IRQ guard (split it when contention shows; switch to the IRQ guard before interrupt objects signal from handlers), a forgotten binding pins its object forever (strong refs by design -- weak bindings with a closure packet are the upgrade), and packets carry no server-defined payload yet.
-- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers). The channel syscalls are hand-dispatched in `syscalls/channel.cpp` because they carry up to five args and touch the IPC buffer; fold them into the declarative op table when it learns both.
+- Channel follow-ups toward the full `docs/Design/IPC Primitives.md` design: server dispatch / capability-aware routing, and per-task quotas replacing the fixed `MAX_MESSAGE_BYTES`/`QUEUE_DEPTH` caps (message storage is already page-per-message from the PMM -- `mm/channel_pages.cpp` -- so a quota can count pages, the same currency as the IPC buffers).
 - Add shared memory/VMO duplication rules, lifetime management, and coherence guarantees.
 - The bootstrap channel is parent-to-task, not kernel-to-task (the kernel holds the parent end as `Task::mailbox()` only for the coordinator, its one child; spawned tasks' parent ends live in the spawner's handle table). A task that wants a kernel control plane will get it through a dedicated planned syscall, not through its bootstrap channel. Accepted costs of the always-open parent end: a task can pin up to `QUEUE_DEPTH` undrained mailbox pages until it dies, and parent death observed as `PEER_CLOSED` is the orphan signal.
 - Coordinator follow-ups (the register/connect layer itself landed: `sys/init`, `docs/Design/Service Coordination.md`):

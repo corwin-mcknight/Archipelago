@@ -1,146 +1,64 @@
 # Handle Table
+The handle table maps a task's handle IDs to object references and rights.
+Userspace can name only entries in its calling task's table; the kernel task has a separate table for internal handles and channel-transfer escrow.
+The table provides ownership and capability checks for the [[Object Model]].
 
-> [!info] Partial Implementation
-> The handle table is implemented with create (via emplace), duplicate, close, type-safe get, and info.
-> Transfer between tables, kernel-owned tables, and dispatch routing are not yet implemented.
+## Identity and Lifetime
+A handle contains a 32-bit slot index and a generation counter.
+Closing or taking a handle invalidates that ID before the slot can be reused.
+Generations are capped at `0x7fffffff`, preserving the sign bit used to distinguish handles from syscall errors; saturated slots are retired instead of wrapping.
+A fresh table allocates slot zero first for the bootstrap channel.
 
-The handle table is a per-process data structure that maps handle IDs to `(object, rights)` pairs.
-It is the gateway to the [[Object Model]] -- every operation on a kernel object begins with a handle table lookup.
-
-## Structure
-Each entry contains:
-
-- **Object reference** -- `ktl::ref<Object>` managing object lifetime through external reference counting
-- **Rights** -- capability bitfield, only reducible (see [[Object Model#What is a handle?]])
-- **Generation counter** -- 32-bit counter incremented each time a slot is recycled,
-  preventing stale handle IDs from resolving to a different object (use-after-free prevention)
-
-Handle IDs combine a 32-bit index and a 32-bit generation counter.
-When a handle is closed, its slot is returned to a free list for reuse.
-The generation counter on the recycled slot ensures that any outstanding references to the old handle ID will fail validation rather than silently resolving to whatever object now occupies that slot.
-
-The handle table grows dynamically -- it starts empty and allocates entries in batches as needed.
-Handle creation only fails on memory exhaustion, not on a fixed capacity limit.
-Entry internals are never exposed to callers; all access goes through typed accessors that return value copies or borrowed pointers to heap-allocated objects.
+Each live entry holds one owning `ktl::ref<Object>`, its rights, and its generation.
+The table reserves a complete batch before adding slots and tracks reusable slots in a free list.
+Allocation failure leaves the existing entries and free list unchanged.
+An object can also be owned by other handles, mappings, or kernel references; closing a handle destroys the object only when its last reference is released.
 
 ## Lookup
-Lookup takes a handle ID and validates it in a fixed sequence: bounds check, generation check, and liveness check (object reference non-null).
-Invalid or stale handles return `errc::handle_invalid`.
+`get<T>(id, required_rights)` checks handle validity, object type, and rights under one lock, in that order.
+It returns an owning `ktl::ref<T>` or `handle_invalid`, `wrong_type`, or `rights_violation`.
+The reference keeps the object alive even if the handle is subsequently closed.
 
-The primary accessor is `get<T>(id, required_rights)`, which performs type validation (comparing the object's stored type ID against the expected type) and rights checking in a single locked operation.
-It returns a borrowed pointer to the concrete object type, or a typed error (`errc::wrong_type`, `errc::rights_violation`).
-A separate `info(id)` accessor returns a value-copy snapshot of handle metadata (rights, type ID, object ID) that is safe to hold across table mutations.
+`verify()` performs the same checks and returns an object reference plus the handle's rights.
+It accepts any object type when no expected type is supplied.
+Use it for generic object operations or when the caller needs the rights; use `get<T>()` for typed operations.
+`snapshot()` copies live handle metadata for inspection without exposing table entries.
 
-## Handle Operations
-Five operations define the handle lifecycle.
-They are composable primitives -- combined operations like "duplicate and transfer" are expressed as a duplicate followed by a transfer, keeping the operation set small and auditable.
+## Creation and Duplication
+`emplace<T>()` constructs an object and inserts a handle; `insert()` gives an existing object a handle.
+Requested rights must fit the object's registered type contract.
+Both paths can fail without publishing a handle.
 
-### Create
-The primary creation path is `emplace<T>(rights, args...)`, which constructs the object and its handle atomically.
-Objects should not exist outside of a handle table -- emplace enforces this by combining allocation, construction, and handle creation into a single call.
+`duplicate()` requires `RIGHT_DUPLICATE` and creates another handle to the same object.
+The new rights are the source rights ANDed with the supplied mask, so duplication cannot add authority.
 
-If the free list is empty, the table grows by allocating a batch of new entries.
-The object is wrapped in a `ktl::ref<Object>` with reference counting managed by the control block.
+## Rights Restriction
+`SYS_HANDLE_RESTRICT(handle, rights, mode)` changes rights in place without changing the handle ID or object reference.
+Both modes operate under the table lock, require no special right, and allocate nothing:
 
-Create is the only way handles come into existence.
-Every other operation that produces a handle (duplication, transfer) is defined in terms of creating a new entry.
+- `RETAIN` replaces rights with an exact subset. Bits absent from the current rights, including nonzero bits above the 32-bit field, fail with `rights_violation` and leave the handle unchanged.
+- `REMOVE` clears selected bits. Absent or unknown bits are ignored; only an invalid handle can fail this mode.
 
-### Duplicate
-Creates a new handle in the same table pointing to the same object, with equal or fewer rights.
-The caller provides a rights mask that is ANDed with the existing handle's rights -- this enforces the [[Object Model#What is a handle?|monotonic rights property]].
-The object's reference count is incremented (two handles now reference it).
+Equal rights and zero rights are valid. Unknown modes return `invalid_operation` for a valid handle.
+Other handles to the object are unaffected, and operations already verified may finish with their acquired authority.
+A zero-rights handle still owns the object and can be inspected, restricted, or closed.
 
-Duplication requires the duplicate right and can attenuate the new handle.
-Before passing a handle to less-trusted code or transferring it to another process, the caller duplicates it with a restricted mask and operates on the duplicate.
+## Close and Transfer
+`close()` invalidates a handle and releases its reference after unlocking, because object destructors may re-enter the table.
+`clear()` releases all live handles and rebuilds the free list, also dropping references outside the lock.
+`take()` invalidates a handle but returns its owning reference and rights to the caller.
 
-### Restrict
-`SYS_HANDLE_RESTRICT(handle, rights, mode)` changes rights in place.
-`RETAIN` (mode 0, exposed by `sys_handle_restrict`) replaces them with an exact subset.
-It requires no special right, preserves the handle ID and object reference, and allocates nothing.
-Equal rights and zero rights are valid; any requested bit absent from the current rights is rejected with `rights_violation`, leaving the handle unchanged.
-Retain mode also rejects nonzero bits above the 32-bit rights field rather than truncating them.
-Validation and replacement happen under one table lock, so concurrent restrictions cannot restore dropped rights.
-
-`REMOVE` (mode 1, exposed by `sys_handle_remove_rights`) clears the requested bits from the current rights under the same table lock.
-It needs no prior lookup, so concurrent removals accumulate without retries or lost updates.
-Absent or unknown bits, including bits above the 32-bit rights field, are ignored; zero is a no-op and an all-ones mask removes every right.
-For this mode only an invalid or stale handle can fail. Unknown mode values return `invalid_operation` without changes.
-
-These operations let move-only socket ends become unidirectional before transfer.
-Other handles to the same object are unaffected, and operations already verified may finish with their previously acquired authority.
-A zero-rights handle still owns its reference and can be inspected, restricted to zero again, or closed.
-
-### Transfer
-Moves a handle from one table to another atomically.
-The source entry is removed and a new entry is created in the destination table.
-The handle ID changes (it is an index into a different table), but the object reference and rights are preserved.
-The object's reference count is unaffected -- the reference moves rather than being copied and released.
-
-If the destination table is full, the transfer fails and the source handle remains intact.
-At no point does the handle exist in both tables or neither table.
-
-Transfer is the mechanism behind [[IPC Primitives#Handle Transfer|capability passing through channels]].
-A transfer right on the channel gates whether transfer is permitted.
-
-### Close
-Destroys a handle.
-The object's reference count is decremented.
-If this was the last reference, the object is destroyed (see [[Object Model#Object lifetime]]).
-The table slot is returned to the free list with an incremented generation counter, ensuring future lookups against the old handle ID fail cleanly.
-
-Closing an already-closed handle returns `ERR_BAD_HANDLE` through the generation check -- there is no special "double close" error and no undefined behavior.
-
-## Type-Safe Access
-When the kernel processes an operation, it often needs to verify that a handle refers to a specific kind of object -- a channel operation should not succeed against a VMO handle.
-
-The `get<T>(id, required_rights)` accessor performs this check by calling the object's `type_id()` method and comparing it against the expected type's compile-time `TYPE_ID`.
-Mismatches are rejected with `errc::wrong_type` before the operation reaches the object.
-Rights are validated in the same operation -- `errc::rights_violation` is returned if the handle lacks the required rights.
-
-On success, `get<T>()` returns a raw pointer to the concrete object type via `static_cast`.
-The pointer is borrowed -- the handle table owns the object's lifetime through its `ktl::ref<Object>`, so the pointer remains valid as long as the handle is open.
-
-## Kernel-Owned Handle Tables
-The kernel itself sometimes needs to hold references to objects -- interrupt objects, boot-time channel endpoints, or internal bookkeeping resources.
-Kernel-owned handle tables serve this purpose.
-
-They are structurally identical to per-process tables: same entry format, same generation counters, same operations.
-The difference is ownership and visibility.
-
-### Isolation
-Kernel tables are not reachable from userspace.
-No handle ID that a process can present through a syscall will resolve against a kernel table.
-A process cannot name, inspect, or revoke a kernel-held handle.
-This is a hard boundary -- kernel handles exist outside the userspace capability model entirely.
-
-### Sharing objects with processes
-When the kernel wants to give a process access to an object it holds internally, it creates a new handle in the process's table with appropriate rights.
-The kernel's own handle is unaffected.
-
-The kernel never transfers its own handles -- it always creates fresh ones in the target table.
-This ensures the kernel retains its reference regardless of what the process does with its handle.
-
-### Server crash
-When a [[Server Lifecycle#Crash and Recovery|server crashes]], kernel-held handles to that server's objects are invalidated through the same mechanism as process-held handles.
-The kernel is not exempt from the [[Design Principles#Fail hard, recover clean|crash protocol]].
+Channel transfer uses `take()` and `insert()` to move ownership through the kernel task's escrow table and into the receiver's table.
+The transfer right on the sending channel handle gates this operation.
+Transfers are not atomic across tables: once a send starts consuming handles, later failures close those already consumed.
+A dropped message closes its escrowed handles; a receiver insertion failure closes that handle and reduces the reported delivery count.
+The syscall contract is defined in `src/sys/kernel/includes/abi/syscall.h`; see [[IPC Primitives#Handle Transfer|Handle Transfer]] for the broader design.
 
 ## Dispatch
-The handle table is the entry point for the [[Object Model#Three-Path Dispatch|three-path dispatch]]:
+One syscall switch calls ordinary handlers.
+Typed object operations use `get<T>()`; generic metadata and signal operations use `verify()`.
+Close, duplicate, and rights restriction call table operations directly, without a preliminary lookup.
+The handle table owns validation and reference acquisition; object operations run after its lock is released.
 
-1. Look up handle by ID
-2. Validate generation
-3. Check rights
-4. Route by type identifier to the object's [[Object Transaction Programs|type dispatch]]
-
-This path is identical regardless of object type.
-The first three steps use only data from the handle entry itself.
-
-## Relationship to Other Subsystems
-- [[Object Model]] -- objects are what handles reference; type descriptors define valid rights and type identifiers
-- [[Object Model#Three-Path Dispatch]] -- the dispatch pipeline that begins at handle lookup
-- [[IPC Primitives#Handle Transfer]] -- handle transfer through channel messages is built on the [[#Transfer]] operation
-- [[Object Transaction Programs]] -- dispatch enters transaction programs after handle lookup,
-  generation check, rights check, and type routing
-- [[Server Lifecycle#Crash and Recovery]] -- server crash invalidates handles across all tables,
-  including [[#Kernel-Owned Handle Tables|kernel-owned ones]]
-- [[Memory Subsystem]] -- handle table memory is managed by the kernel's allocators
+Uniform server routing and [[Object Transaction Programs]] belong to the planned [[Object Model#Three-Path Dispatch|three-path dispatch]] design.
+Server-crash revocation is also future work; see [[Server Lifecycle#Crash and Recovery|Crash and Recovery]].

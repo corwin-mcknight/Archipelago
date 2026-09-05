@@ -371,7 +371,7 @@ void teardown_user_task(ktl::ref<Task> task) {
 
 [[noreturn]] void terminate_current_user_task_from_fault(uint64_t cause, uint64_t detail, uintptr_t pc) {
     auto thread = current();
-    auto task   = ktl::static_ref_cast<Task>(thread->owner());
+    auto task   = thread->owner();
     assert(task && task.get() != kernel_task().get(), "user fault has no user task");
 
     // Keep this a single parseable record: a fault path must report enough to correlate an
