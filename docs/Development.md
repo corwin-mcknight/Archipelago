@@ -74,10 +74,15 @@ src/sys/kernel/          Kernel source
     std/                 Standard library replacement headers
   x86_64/                Architecture-specific code
     platforms/pc/        PC board facts (PIT calibration reference, debug exit)
-    testing/             Test runner
+    tests/               Architecture tests
+  riscv64/               Architecture-specific code
+    platforms/virt/      QEMU virt board support
+    platforms/jh7110/    JH7110 board support
+    tests/               Architecture tests
+  boot/limine/           Limine boot-protocol support
 plume/                   Build system source (Python)
 repo/
-  config.yaml            Build configuration
+  config/                Architecture and board target configurations
   packages.yml           Package definitions
   packages/              Per-package Makefiles
   sets/                  Package sets (@system)
@@ -89,7 +94,7 @@ tools/                   Test harness and scripts
 ```
 
 ## Persistent Volumes
-The devcontainer mounts three named volumes so state survives container rebuilds:
+The devcontainer mounts two named volumes so state survives container rebuilds:
 
 | Volume                | Path                              | Contents                             |
 | --------------------- | --------------------------------- | ------------------------------------ |

@@ -9,7 +9,7 @@ The entry point is `_start` for the kernel image. The sequence is as follows:
 ### 1. Early Boot
 Runs on the Bootstrap Processor (BSP) before any other core is started.
 
-1. **Early heap** -- A bump allocator is initialized using a dedicated region in BSS
+1. **Early heap** -- A block allocator with splitting, reuse, and coalescing is initialized using a dedicated region in BSS
    (between the `_initial_heap_start` and `_initial_heap_end` linker symbols).
    This provides `new`/`delete` before the page allocator is available.
    See [[Memory Subsystem#Early Heap]].
@@ -38,11 +38,15 @@ The virtual memory manager initializes on top of it -- page descriptors, the ker
 See [[Memory Subsystem#Physical Memory Manager]].
 
 ### 5. Kernel Entry
-If `CONFIG_KERNEL_TESTING` is enabled (the default), the kernel enters the test runner.
-See [[Testing]].
+The kernel initializes the object system and scheduler, makes the boot context the idle thread, and starts the background page-zeroing thread.
+The boot command line selects whether to start userspace immediately or first enter the kernel shell:
 
-Otherwise, the boot context becomes the idle thread, and the shell runs as a kernel thread when shell boot is selected.
-There is still no userspace.
+- With neither shell token, boot launches the userspace coordinator (`init`).
+- `shell` starts the kernel shell as a thread and holds userspace startup until `boot continue`.
+- `shell+boot` starts the shell alongside userspace startup.
+
+The shell modes require `CONFIG_KERNEL_SHELL`; if it is disabled, boot proceeds directly to userspace.
+`CONFIG_KERNEL_TESTING` enables the shell's test commands without changing the boot mode. The host harness drives those commands through the shell protocol. See [[Testing]] and [[Tasks]].
 
 ## Limine Requests
 The kernel communicates with Limine through request structures placed in the `__limine_requests` linker section (`limine.cpp`).

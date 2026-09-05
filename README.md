@@ -1,6 +1,6 @@
 # Archipelago
 
-Archipelago is a minimal, security-focused operating system for x86_64, written in freestanding C++20. It's a blend of a microkernel and exokernel.
+Archipelago is a minimal, security-focused operating system for x86_64 and riscv64, written in freestanding C++20. It's a blend of a microkernel and exokernel.
 
 It boots via [Limine](https://github.com/limine-bootloader/limine), runs on QEMU, and is developed against a fully automated test harness with fuzzing, thread-sanitizer, and crash-forensics lanes.
 
@@ -18,9 +18,9 @@ Subsystems like filesystems and networking are userspace servers, which register
 Teaching happens by attaching kernel-validated [transaction programs](docs/Design/Object%20Transaction%20Programs.md) to optimize common operations on user-defined objects. This can skip IPC entirely in some cases.
 
 ## Where it is now
-Today, the kernel boots, brings up SMP cores, initializes the object/handle system, and drops into an interactive shell.
+Today, the kernel boots on x86_64 and riscv64, schedules kernel threads across SMP cores, and runs userspace ELF programs with task-owned address spaces, capability handles, and syscalls. Boot can launch userspace directly or provide an interactive kernel shell.
 
-Progressing towards [Milestone 1](MILESTONES.md): a user-mode hello world, which drives the virtual memory manager, tasks, threads, the ELF loader, and the syscall path.
+User-mode hello world is implemented on both architectures. The [roadmap](MILESTONES.md) describes the next milestones, including an interactive userspace shell and file services.
 
 ## Engineering practice
 The distinguishing feature of this project is not the kernel's size but how it is built.

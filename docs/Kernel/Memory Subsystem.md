@@ -52,8 +52,8 @@ A per-slab bitmap of live slots turns a double free, a free of a slot never allo
 
 ## Architecture
 ### Virtual Memory Manager
-The VMM described here is implemented for the kernel address space: the arch paging boundary, page descriptors, region tree, VMOs with anonymous and device pagers, demand paging with zero-page copy-on-write, and VMO resize.
-Task-owned address spaces, region handles, and the userspace pager protocol arrive with the task and IPC milestones.
+The VMM supports the kernel address space and task-owned userspace address spaces: the arch paging boundary, page descriptors, region tree, fixed-size VMOs with anonymous and device pagers, and demand paging with zero-page copy-on-write.
+Region handles and the userspace pager protocol are planned; VMO resize is not implemented.
 
 **Priorities**: isolation > simplicity > latency > throughput.
 

@@ -128,9 +128,9 @@ Events (kernel to host) are emitted as `@@HARNESS {...}` JSON lines:
 ### Harness Options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--iso` | `build/image.iso` | Path to bootable image |
-| `--memory` | 64 | Guest RAM in MiB |
-| `--boot-timeout` | 30s | Wait for boot handshake |
+| `--iso` | `build/<arch>/image.iso` | Path to bootable image |
+| `--memory` | 64 (x86_64), 256 (riscv64) | Guest RAM in MiB |
+| `--boot-timeout` | 30s (x86_64), 60s (riscv64) | Wait for boot handshake |
 | `--test-timeout` | 5s | Wait for test completion |
 | `--retries` | 3 | Infrastructure failure retries |
 | `--no-artifacts` | false | Skip artifact generation |

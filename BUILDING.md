@@ -21,7 +21,7 @@ The development container provides everything needed. For host builds, you need:
 2. **Docker directly**:
    ```bash
    docker build -t archipelago-dev -f .devcontainer/Dockerfile .
-   docker run -it --rm -v $(pwd):/workspaces/archipelago archipelago-dev
+   docker run -it --rm -v "$(pwd):/workspaces/archipelago" -w /workspaces/archipelago archipelago-dev
    ```
 
 ## Build Commands
@@ -121,7 +121,7 @@ Day-to-day work on the board uses netboot instead of reflashing the card: `make 
 ```
 build/
   <arch>/                # Per-target build tree (x86_64/, riscv64/)
-    obj/sys/kernel/      # Kernel object files and kernel.elf
+    obj/sys/kernel^<board>/ # Kernel object files and kernel.elf (pc, virt, jh7110)
     sysroot/             # Assembled system root (kernel + boot files)
     tmp/                 # Per-package working directories
     image.iso            # Bootable ISO image
