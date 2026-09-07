@@ -28,7 +28,12 @@ uint64_t sys_port_create(sched::Thread& self);
 uint64_t sys_port_bind(sched::Thread& self, uint64_t port_handle, uint64_t object_handle, uint64_t key, uint64_t mask);
 uint64_t sys_port_unbind(sched::Thread& self, uint64_t port_handle, uint64_t key);
 uint64_t sys_port_wait(sched::Thread& self, uint64_t port_handle, uint64_t offset, uint64_t timeout_ns);
-uint64_t sys_task_spawn(sched::Thread& self, uint64_t handle, uint64_t offset);
+uint64_t sys_thread_start(sched::Thread& self, uint64_t factory, uint64_t entry, uint64_t stack);
+uint64_t sys_task_build_create(sched::Thread& self, uint64_t factory, uint64_t name_offset, uint64_t name_size);
+uint64_t sys_task_build_map(sched::Thread& self, uint64_t factory, uint64_t vmo, uint64_t descriptor_offset);
+uint64_t sys_task_build_start(sched::Thread& self, uint64_t factory, uint64_t entry, uint64_t stack,
+                              uint64_t output_offset);
+uint64_t sys_task_build_abort(sched::Thread& self, uint64_t factory);
 uint64_t sys_socket_create(sched::Thread& self, uint64_t offset);
 uint64_t sys_socket_write(sched::Thread& self, uint64_t handle, uint64_t offset, uint64_t length);
 uint64_t sys_socket_read(sched::Thread& self, uint64_t handle, uint64_t offset, uint64_t capacity);

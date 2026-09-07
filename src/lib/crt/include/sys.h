@@ -92,12 +92,18 @@ uint64_t sys_port_create(void);
 uint64_t sys_port_bind(uint64_t port, uint64_t object, uint64_t key, uint64_t mask);
 uint64_t sys_port_unbind(uint64_t port, uint64_t key);
 
-// Task lifecycle: kill and status act on a task handle; spawn turns an image VMO handle into a
-// running child, writing the new task handle then the bootstrap channel handle (two uint64s) at
-// `offset` in the IPC buffer. See <abi/syscall.h> for semantics and rights.
+// Task lifecycle: kill and status act on ordinary task handles.
 uint64_t sys_task_kill(uint64_t task);
 uint64_t sys_task_status(uint64_t task);
-uint64_t sys_task_spawn(uint64_t image, uint64_t offset);
+// thread_start requires a task-bound ThreadFactory, independently of TaskFactory.
+uint64_t sys_thread_start(uint64_t factory, uint64_t entry, uint64_t stack);
+__attribute__((noreturn)) void sys_thread_exit(void);
+// TaskFactory-authorized construction of this thread's pending child. No executable parser in
+// these operations: the caller provides private mapping snapshots and the initial register values.
+uint64_t sys_task_build_create(uint64_t factory, uint64_t name_offset, uint64_t name_size);
+uint64_t sys_task_build_map(uint64_t factory, uint64_t vmo, uint64_t descriptor_offset);
+uint64_t sys_task_build_start(uint64_t factory, uint64_t entry, uint64_t stack, uint64_t output_offset);
+uint64_t sys_task_build_abort(uint64_t factory);
 uint64_t sys_port_wait(uint64_t port, uint64_t offset, uint64_t timeout_ns);
 
 // Sockets: a byte-stream pair with no message boundaries. create writes the two endpoint handles

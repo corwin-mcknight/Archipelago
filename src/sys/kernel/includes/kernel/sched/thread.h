@@ -17,6 +17,7 @@
 namespace kernel::sched {
 
 class Task;
+class TaskConstruction;
 
 using thread_entry_fn = void (*)(void*);
 
@@ -115,6 +116,12 @@ class Thread : public kernel::obj::Object {
 
     const ktl::ref<Task>& owner() const { return m_owner; }
 
+    const ktl::ref<TaskConstruction>& construction() const { return m_construction; }
+    void set_construction(ktl::ref<TaskConstruction> construction) { m_construction = ktl::move(construction); }
+
+    uintptr_t user_stack_pointer() const { return m_user_stack_pointer; }
+    void set_user_stack_pointer(uintptr_t value) { m_user_stack_pointer = value; }
+
     uintptr_t saved_sp() const { return m_saved_sp; }
     uintptr_t* saved_sp_slot() { return &m_saved_sp; }
     void set_saved_sp(uintptr_t sp) { m_saved_sp = sp; }
@@ -162,21 +169,23 @@ class Thread : public kernel::obj::Object {
 
    private:
     // Mutated under the scheduler lock (block_if additionally holds the wait queue's lock).
-    thread_state m_state       = thread_state::READY;
-    ktl::atomic<bool> m_on_cpu = false;
-    bool m_killed              = false;
-    wait_queue* m_parked_queue = nullptr;
-    wait_node* m_parked_node   = nullptr;
-    uintptr_t m_kstack_phys    = 0;
-    uintptr_t m_kstack_floor   = 0;
-    uintptr_t m_kstack_top     = 0;
-    uintptr_t m_saved_sp       = 0;
+    thread_state m_state           = thread_state::READY;
+    ktl::atomic<bool> m_on_cpu     = false;
+    bool m_killed                  = false;
+    wait_queue* m_parked_queue     = nullptr;
+    wait_node* m_parked_node       = nullptr;
+    uintptr_t m_kstack_phys        = 0;
+    uintptr_t m_kstack_floor       = 0;
+    uintptr_t m_kstack_top         = 0;
+    uintptr_t m_saved_sp           = 0;
+    uintptr_t m_user_stack_pointer = 0;
     const ktl::ref<Task> m_owner;
     uint32_t m_slice         = CONFIG_SCHED_TIMESLICE_TICKS;
     uint32_t m_syscall_depth = 0;
     thread_stats m_stats;
     uint64_t m_ready_ts = 0;
     ipc_buffer m_ipc;
+    ktl::ref<TaskConstruction> m_construction;
     alignas(kernel::arch::FPU_AREA_ALIGN) uint8_t m_fpu_area[kernel::arch::FPU_AREA_SIZE] = {};
 #ifndef NDEBUG
     kernel::synchronization::held_lock m_held_locks[CONFIG_LOCKDEP_MAX_HELD] = {};

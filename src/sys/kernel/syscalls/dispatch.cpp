@@ -31,7 +31,12 @@ uint64_t dispatch(sched::Thread& self, uint64_t nr, uint64_t a0, uint64_t a1, ui
         case kernel::syscall::SYS_PORT_BIND: return sys_port_bind(self, a0, a1, a2, a3);
         case kernel::syscall::SYS_PORT_UNBIND: return sys_port_unbind(self, a0, a1);
         case kernel::syscall::SYS_PORT_WAIT: return sys_port_wait(self, a0, a1, a2);
-        case kernel::syscall::SYS_TASK_SPAWN: return sys_task_spawn(self, a0, a1);
+        case ABI_SYS_THREAD_START: return sys_thread_start(self, a0, a1, a2);
+        case ABI_SYS_THREAD_EXIT: return 0;
+        case ABI_SYS_TASK_BUILD_CREATE: return sys_task_build_create(self, a0, a1, a2);
+        case ABI_SYS_TASK_BUILD_MAP: return sys_task_build_map(self, a0, a1, a2);
+        case ABI_SYS_TASK_BUILD_START: return sys_task_build_start(self, a0, a1, a2, a3);
+        case ABI_SYS_TASK_BUILD_ABORT: return sys_task_build_abort(self, a0);
         case kernel::syscall::SYS_VMO_CREATE: return sys_vmo_create(self, a0);
         case kernel::syscall::SYS_VMO_MAP: return sys_vmo_map(self, a0, a1, a2, a3, a4);
         case kernel::syscall::SYS_VMO_UNMAP: return sys_vmo_unmap(self, a0);
@@ -56,7 +61,7 @@ extern "C" uint64_t syscall_dispatch(uint64_t nr, uint64_t a0, uint64_t a1, uint
         auto self = kernel::sched::current();
         ret       = self ? kernel::syscalls::dispatch(*self, nr, a0, a1, a2, a3, a4)
                          : kernel::syscalls::errc_of(ktl::errc::invalid_operation);
-        exit_now  = self && (nr == kernel::syscall::SYS_EXIT || self->killed());
+        exit_now  = self && (nr == kernel::syscall::SYS_EXIT || nr == ABI_SYS_THREAD_EXIT || self->killed());
     }
     // Every return, including unknown syscalls, crosses this kill boundary with references and
     // locks released. exit_current() abandons the stack without unwinding it.

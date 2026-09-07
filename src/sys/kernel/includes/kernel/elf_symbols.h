@@ -9,7 +9,7 @@
 namespace kernel::symbols::detail {
 
 // The validated symbol/string tables init() ingests, isolating the ELF parsing from the ingestion
-// loop.
+// loop. Section and symbol records must use the exact ELF64 struct sizes (no extended strides).
 struct symbol_tables {
     const elf::Elf64_Sym* syms;
     size_t count;

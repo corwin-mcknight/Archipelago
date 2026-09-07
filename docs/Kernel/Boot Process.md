@@ -63,3 +63,8 @@ The kernel communicates with Limine through request structures placed in the `__
 | Date at boot | Initial wall-clock epoch |
 | Framebuffer | First firmware framebuffer and pixel layout |
 | Paging mode (riscv64) | Requires the Sv39 mode implemented by the RISC-V page-table code |
+
+## First userspace task
+The kernel's boot-only loader starts `init.bin` once. Its fixed-layout `ARCHINIT` header describes text, constants, writable data, and zero-filled storage; it is not ELF. Init receives boot-module VMOs and the initial construction capability through its bootstrap channel.
+
+Init bootstraps `elf_loader.elf` in userspace and transfers construction authority to that service. All subsequent ELF loading runs in loader worker threads. The kernel accepts prepared mappings and initial execution parameters, never an executable image. See [[Executable Loading]].

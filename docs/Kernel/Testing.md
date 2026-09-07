@@ -136,3 +136,8 @@ Events (kernel to host) are emitted as `@@HARNESS {...}` JSON lines:
 | `--no-artifacts` | false | Skip artifact generation |
 | `--list` | -- | List tests and exit |
 | `--qemu-arg` | -- | Extra QEMU arguments (repeatable) |
+
+## Userspace executable loading
+The host runner also builds `src/lib/elf/tests/elf_loader_test.cpp` against the userspace parser. Its fuzz target lives beside those tests. The host runner and fuzz package track the source root so changes in both the kernel test support and userspace parser invalidate their builds.
+
+The QEMU coordinator test boots non-ELF init, checks that only the ELF loader retains construction authority, and exercises workers loading the echo and selftest programs. Native instruction fixtures test kernel lifecycle and faults without putting an executable parser back in the kernel.

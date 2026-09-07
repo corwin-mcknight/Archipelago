@@ -13,19 +13,19 @@ Given an init executable and an initrd supplied by Limine, Archipelago boots int
 #### System responsibilities
 | Component | Responsibility |
 |-----------|----------------|
-| Kernel | Load the initial init ELF, hand init the opaque in-memory initrd blob and bootstrap capabilities, and provide primitives for constructing and starting tasks. Enforce memory and capability boundaries. |
+| Kernel | Load the boot-only non-ELF init image, hand init the opaque in-memory initrd blob and bootstrap capabilities, and provide primitives for constructing and starting tasks. Enforce memory and capability boundaries. |
 | Init | Read enough of the initrd format to find bootstrap servers, load their ELF executables in userspace, and initialize the service environment. Construct and start subsequent programs through kernel primitives. |
 | File server | Own file, directory, and namespace semantics. Provide a writable anonymous filesystem at `/` and expose the read-only initrd at `/boot`. |
 | Shell | Interact with the file server to browse files and obtain executable contents, then ask init to execute those contents with arguments and standard streams. |
 
-The path structure is Unix-like, while file access is implemented through userspace services and capabilities. The kernel has no VFS and does not interpret files, paths, or the initrd format. Its built-in ELF loader is used to start init; subsequent executable loading belongs to init.
+The path structure is Unix-like, while file access is implemented through userspace services and capabilities. The kernel has no VFS and does not interpret files, paths, or the initrd format. Its boot-only image reader starts init once; ELF parsing belongs to the userspace loader service.
 
 Anonymous storage is a feature of the file server. Its contents are writable and last only for the current boot. The initrd remains a separate, read-only tree at `/boot`.
 
 #### Boot and execution flow
 1. Limine supplies the init executable and initrd as the two userspace boot inputs.
 2. The kernel loads init and endows it with the initrd blob and the capabilities needed to bootstrap userspace.
-3. Init locates the initial servers inside the blob and uses its own ELF loader and kernel task-building primitives to start them.
+3. Init locates the initial servers inside the blob and bootstraps the userspace ELF loader and delegates subsequent construction to it.
 4. The file server establishes the writable root and read-only `/boot` tree; init establishes the console streams and launches the shell from the initrd through file access.
 5. The shell obtains a requested executable through the file server and passes its contents to init for loading and execution.
 6. Programs use the file server for data access and standard streams for interactive input and output.
@@ -87,7 +87,7 @@ Boot-image ELF binaries run in user mode on x86_64 and riscv64, write to the con
 | Virtual memory | Per-task page tables and permissioned VMO mappings |
 | Task object | Owned address space, handle table, and threads |
 | Thread object | Saved context, kernel stack, and task/thread self-handles |
-| ELF loader | Static ET_EXEC parsing, segment VMOs, ELF entry point |
+| Userspace ELF loader | Static ET_EXEC parsing and capability-gated task construction |
 | Syscall entry | x86 SYSCALL/SYSRET; riscv64 ECALL/SRET; checked handle dispatch |
 | Context switching | Saved registers, trap frames, and per-thread FPU state |
 | Serial output | SYS_WRITE through per-thread IPC buffers and kernel logging |

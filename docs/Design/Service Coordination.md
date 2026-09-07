@@ -1,7 +1,7 @@
 # Service Coordination
 
 > [!info] Partial Implementation
-> The coordinator (`sys/init`), the spawn syscall, the message envelope, IMAGE endowment, and the register/connect/CONNECTION protocol are implemented, with open logged policy. Manifest-based policy, connection timeouts, and the userspace loader trajectory remain planned.
+> The coordinator (`sys/init`), the task-construction syscalls and ELF loader service, the message envelope, IMAGE endowment, and the register/connect/CONNECTION protocol are implemented, with open logged policy. Manifest-based policy and connection timeouts remain planned.
 
 Service coordination is how a program reaches a service it was not endowed with at creation.
 The kernel provides no naming: names, registration, and connection policy live in one userspace task, the coordinator.
@@ -20,9 +20,8 @@ Until task restart and supervision exist, it is a single point of failure; this 
 A task observes coordinator death as `PEER_CLOSED` on its mailbox -- the existing orphan signal.
 
 ## Spawning
-The coordinator creates tasks through a spawn syscall whose source argument is a [[Memory Subsystem#Virtual Memory Manager|VMO]] handle.
-Spawn returns two handles: the new task's handle, and the parent end of its bootstrap channel.
-Holding an executable image's VMO *is* the authority to spawn it -- there is no ambient spawn privilege and no kernel-side list of programs.
+The coordinator sends executable-content VMOs to the ELF loader service. A successful reply returns the new task's handle and the parent end of its bootstrap channel.
+The VMO supplies content; the loader's separate TaskFactory capability supplies construction authority. There is no kernel-side list of programs.
 
 Spawning is also where [[Standard Streams|stdio]] is wired: the coordinator mints the socket pairs behind a new task's input, output, and error streams, mails the task its ends, and routes the read ends of output and error to the console server.
 
@@ -31,12 +30,12 @@ At boot the kernel wraps each module's bytes in a read-only wired VMO and mails 
 Per-module mail rather than one manifest message, because a message carries only a handful of handle slots and the set of programs will outgrow them.
 Modules are a stopgap for the missing initrd; when a filesystem or package server exists, it will mint VMOs the same way, and spawn does not change.
 
-### The loader trajectory
-The spawn syscall parses ELF in the kernel.
-This is scaffolding, and it is the piece of this design that gets deleted.
-The end state is a set of builder primitives -- create an empty task, map VMO ranges into its address space through [[Task Model#Structure|region delegation]], start a thread at an entry point -- with binary format loaders (ELF, Mach-O, others) living in the coordinator.
-The kernel's ELF loader then shrinks to the boot path only, where it must still load the coordinator itself.
-Builder primitives wait on VMO map operations and region handle exposure, which are their own milestone.
+### Executable loading
+The kernel loads only init, once, from a fixed-layout non-ELF boot image. Init bootstraps the ELF loader service using `lib/elf`, then transfers its TaskFactory capability to the service.
+
+For each subsequent image, init sends the loader an image VMO, its exact byte size, and its name. The loader starts a worker thread that parses ELF, prepares private mappings in a dormant container, and starts the child through the construction syscalls. The reply returns the task handle and parent bootstrap endpoint to init. The child therefore reaches the coordinator through its original bootstrap endpoint, even though a loader worker performed construction.
+
+Images received before the loader image are held until the loader is available. Applications receive no construction authority. Routine loading errors return failure; an unexpected worker fault ends the loader service so its task-owned temporary resources are reclaimed. Restart remains part of future supervision policy. See [[Executable Loading]].
 
 ## Message Envelope
 Every message on a coordinator channel -- and by convention, on any service channel -- begins with one fixed envelope, defined in the ABI headers alongside the syscall interface: an opcode, a status, and a transaction id, followed by a per-opcode packed struct.

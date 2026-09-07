@@ -24,7 +24,7 @@ constexpr size_t kStringPoolBytes = 48 * 1024;
 
 struct func_entry {
     uintptr_t addr;
-    uint32_t size;
+    uint64_t size;
     uint32_t name_off;
 };
 
@@ -92,7 +92,7 @@ maybe<const func_entry&> find_entry(uintptr_t addr) {
     if (lo == 0) { return nothing; }
 
     const func_entry& e = g_entries[lo - 1];
-    if (addr >= e.addr + e.size) { return nothing; }
+    if (addr - e.addr >= e.size) { return nothing; }
     return e;
 }
 
@@ -106,7 +106,8 @@ maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size)
     if (hdr == nullptr) { return nothing; }
 
     const auto* base = static_cast<const uint8_t*>(elf_data);
-    if (hdr->e_shoff == 0 || hdr->e_shentsize < sizeof(Elf64_Shdr)) { return nothing; }
+    // Typed array traversal uses sizeof strides; reject extended or undersized records.
+    if (hdr->e_shoff == 0 || hdr->e_shentsize != sizeof(Elf64_Shdr)) { return nothing; }
     if (!region_in_bounds(hdr->e_shoff, static_cast<uint64_t>(hdr->e_shnum) * hdr->e_shentsize, elf_size)) {
         return nothing;
     }
@@ -119,7 +120,7 @@ maybe<symbol_tables> locate_symbol_tables(const void* elf_data, size_t elf_size)
     auto sym_sh          = ktl::find_if(sections, sections + hdr->e_shnum,
                                         [](const Elf64_Shdr& sh) { return sh.sh_type == elf::SHT_SYMTAB; });
     if (!sym_sh) { return nothing; }
-    if (sym_sh->sh_entsize < sizeof(Elf64_Sym)) { return nothing; }
+    if (sym_sh->sh_entsize != sizeof(Elf64_Sym) || sym_sh->sh_size % sizeof(Elf64_Sym) != 0) { return nothing; }
     if (!region_in_bounds(sym_sh->sh_offset, sym_sh->sh_size, elf_size)) { return nothing; }
     if (sym_sh->sh_link >= hdr->e_shnum) { return nothing; }
 
@@ -162,7 +163,7 @@ void init(const void* elf_data, size_t elf_size) {
 
         g_entries[g_entry_count++] = {
             .addr     = static_cast<uintptr_t>(s.st_value),
-            .size     = static_cast<uint32_t>(s.st_size),
+            .size     = s.st_size,
             .name_off = *name_off,
         };
     }

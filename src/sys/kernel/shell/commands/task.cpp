@@ -72,28 +72,12 @@ const char* state_name(kernel::sched::task_state state) {
 
 void task_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellOutput& output) {
     using namespace kernel::sched;
-    if (argc >= 2 && argv[1] == "demo") {
-        // Missing module and unloadable image are distinct failures: one means the boot image is
-        // wrong, the other means the binary is. The loader logs which rejection it was.
-        const auto* module = kernel::boot::find_module("selftest");
-        if (module == nullptr) {
-            output.print("task: no 'selftest' module in the boot image\n");
-            return;
-        }
-        auto created = create_user_task("udemo", module->data, module->size);
-        if (created.is_err()) {
-            output.print("task: create failed\n");
-            return;
-        }
-        output.print("task: launched id={0}\n", created.unwrap()->id());
-        return;
-    }
     if (argc >= 4 && argv[1] == "msg") {
         task_msg(argc, argv, output);
         return;
     }
     if (argc >= 2 && argv[1] != "list") {
-        output.print("usage: task list|demo|msg <id> <text>\n");
+        output.print("usage: task list|msg <id> <text>\n");
         return;
     }
 

@@ -1,16 +1,17 @@
 #include <abi/message.h>
 #include <kernel/boot.h>
-#include <kernel/elf.h>
 #include <kernel/log.h>
 #include <kernel/mm/physmap.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/obj/channel.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
+#include <kernel/sched/task_construction.h>
 #include <kernel/sched/user_task.h>
 #include <kernel/syscall.h>
 #include <kernel/testing/spawn.h>
 #include <kernel/testing/testing.h>
+#include <kernel/testing/user_program.h>
 #include <kernel/time.h>
 #include <std/string.h>
 
@@ -21,19 +22,16 @@ using namespace kernel::sched;
 
 KTEST_MODULE("kernel/task");
 
-// The exit status selftest reports when no coordinator answered its connect: everything passed,
-// echo roundtrip skipped. Mirrors STATUS_ECHO_SKIPPED in sys/selftest/main.cpp.
-constexpr uint32_t SELFTEST_STATUS_ECHO_SKIPPED = 0x100;
+// Native lifecycle fixture; the coordinator test below exercises userspace ELF loading.
+constexpr uint32_t NATIVE_STATUS = 42;
 
-// End to end over the real boot path: the selftest module is loaded from the boot image by the
-// ELF loader, runs in its own address space, and exits. A missing module fails the test loudly
-// rather than silently skipping, because an image without selftest is a broken image.
 KTEST_CASE(user_task_lifecycle) {
-    const auto* module = kernel::boot::find_module("selftest");
-    KTEST_REQUIRE_TRUE(module != nullptr);
-    KTEST_REQUIRE_TRUE(module->size > 0);
-
-    auto created = create_user_task("utest", module->data, module->size);
+    kernel::testing::UserProgram program;
+    program.syscall(ABI_SYS_YIELD);
+    program.syscall(ABI_SYS_YIELD);
+    program.syscall(ABI_SYS_SLEEP, 250);
+    program.syscall(ABI_SYS_EXIT, NATIVE_STATUS);
+    auto created = program.start("utest");
     KTEST_REQUIRE_TRUE(created.is_ok());
     ktl::ref<Task> task = created.unwrap();
     KTEST_EXPECT_TRUE(task->state() == task_state::RUNNING);
@@ -44,9 +42,8 @@ KTEST_CASE(user_task_lifecycle) {
 
     // The bootstrap ABI: a fresh table whose first-generation slot 0 holds a channel endpoint,
     // exactly as BOOTSTRAP_HANDLE promises, and the kernel holds the parent's end as the task's
-    // mailbox. The window is safe: selftest waits and sleeps before exiting, so the table cannot
-    // have been torn down yet. selftest asserts the message's contents from the other side
-    // ("bootstrap ok").
+    // mailbox. The native fixture sleeps before exiting so its bootstrap can be inspected here.
+    // The coordinator test covers consuming it from userspace.
     {
         using namespace kernel::obj;
         KTEST_UNWRAP(bootstrap, task->handles().verify(HandleId{0, 0}, 0, type_ids::CHANNEL));
@@ -114,15 +111,14 @@ KTEST_CASE(user_task_lifecycle) {
     KTEST_EXPECT_TRUE(threads[0]->stats().yields >= 2);
 
     // Termination is observable through the keeper handle: the TERMINATED signal is asserted (a
-    // wait on it returns immediately), and status reports a clean run -- every section passed,
-    // echo skipped, because no coordinator exists to answer the connect.
+    // wait on it returns immediately), and status reports a clean run -- the native fixture returned its expected
+    // status.
     {
         namespace sys = kernel::syscall;
         uint64_t sig  = syscall_dispatch(sys::SYS_OBJECT_WAIT, keeper, sys::TASK_SIGNAL_TERMINATED, 0, 0, 0, 0);
         KTEST_EXPECT_TRUE((sig & sys::TASK_SIGNAL_TERMINATED) != 0);
         uint64_t status = syscall_dispatch(sys::SYS_TASK_STATUS, keeper, 0, 0, 0, 0, 0);
-        KTEST_EXPECT_ALL((status >> 32) == sys::TASK_EXIT_EXITED,
-                         (status & 0xFFFFFFFF) == SELFTEST_STATUS_ECHO_SKIPPED);
+        KTEST_EXPECT_ALL((status >> 32) == sys::TASK_EXIT_EXITED, (status & 0xFFFFFFFF) == NATIVE_STATUS);
         KTEST_EXPECT_TRUE(syscall_dispatch(sys::SYS_HANDLE_CLOSE, keeper, 0, 0, 0, 0, 0) == 0);
     }
 
@@ -157,6 +153,7 @@ KTEST_CASE(coordinator_boot) {
     auto launched = launch_coordinator();
     KTEST_REQUIRE_TRUE(launched.is_ok());
     ktl::ref<Task> coordinator = launched.unwrap();
+    KTEST_EXPECT_TRUE(launch_coordinator().is_err());
 
     // The coordinator's children appear when it processes its IMAGE mail; find them by name.
     ktl::ref<Task> selftest;
@@ -169,10 +166,67 @@ KTEST_CASE(coordinator_boot) {
     KTEST_REQUIRE_TRUE(selftest);
     KTEST_REQUIRE_TRUE(echo);
 
+    auto loader = find_task_named("elf_loader");
+    KTEST_REQUIRE_TRUE(loader);
+    auto has_factory = [](const ktl::ref<Task>& task) {
+        ktl::vector<kernel::obj::HandleInfo> handles;
+        if (!task->handles().snapshot(handles)) { return true; }
+        for (const auto& handle : handles) {
+            if (handle.type_id == TaskFactory::TYPE_ID) { return true; }
+        }
+        return false;
+    };
+    KTEST_EXPECT_TRUE(has_factory(loader));
+    KTEST_EXPECT_FALSE(has_factory(coordinator));
+    KTEST_EXPECT_FALSE(has_factory(echo));
+
     // selftest runs everything -- including connect("echo") and the roundtrip -- and exits.
     for (int i = 0; i < 4000 && selftest->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
     KTEST_REQUIRE_TRUE(selftest->state() == task_state::TERMINATED);
     KTEST_EXPECT_ALL(selftest->exit_code() >> 32 == sys::TASK_EXIT_EXITED, (selftest->exit_code() & 0xFFFFFFFF) == 0);
+
+    // A malformed image must not poison the loader service. Queue a bad image followed by a
+    // real executable; fresh worker threads must reject the former and complete the latter.
+    auto mail_image = [&](ktl::ref<kernel::mm::vmo> image, uint64_t size, const char* name, size_t name_size) {
+        using namespace kernel::obj;
+        auto made = MessageBuffer::create(sizeof(abi_message_header) + sizeof(abi_image_payload) + name_size);
+        if (made.is_err()) { return false; }
+        auto mail = made.unwrap();
+        abi_message_header header{ABI_COORD_OP_IMAGE, 0, 0};
+        abi_image_payload payload{size};
+        __builtin_memcpy(mail.data(), &header, sizeof(header));
+        __builtin_memcpy(mail.data() + sizeof(header), &payload, sizeof(payload));
+        __builtin_memcpy(mail.data() + sizeof(header) + sizeof(payload), name, name_size);
+        auto escrow = kernel_task()->handles().insert(image, RIGHT_READ);
+        if (escrow.is_err()) { return false; }
+        if (!mail.attach_handle(escrow.unwrap())) {
+            (void)kernel_task()->handles().close(escrow.unwrap());
+            return false;
+        }
+        auto mailbox = coordinator->mailbox();
+        return mailbox && mailbox->write(ktl::move(mail)).is_ok();
+    };
+    auto bad_image = kernel::mm::create_anonymous_vmo(1);
+    KTEST_REQUIRE_TRUE(bad_image);
+    KTEST_REQUIRE_TRUE(mail_image(bad_image, KERNEL_MINIMUM_PAGE_SIZE, "badimage", 8));
+    const auto* module = kernel::boot::find_module("selftest");
+    KTEST_REQUIRE_TRUE(module != nullptr);
+    auto retry_image =
+        kernel::mm::create_wired_vmo(kernel::mm::direct_map_physical(module->data).value(),
+                                     (module->size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE);
+    KTEST_REQUIRE_TRUE(retry_image);
+    KTEST_REQUIRE_TRUE(mail_image(retry_image, module->size, "retrytest", 9));
+    ktl::ref<Task> retry;
+    for (int i = 0; i < 4000 && !retry; ++i) {
+        sleep_ticks(1);
+        retry = find_task_named("retrytest");
+    }
+    KTEST_REQUIRE_TRUE(retry);
+    for (int i = 0; i < 4000 && retry->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
+    KTEST_REQUIRE_TRUE(retry->state() == task_state::TERMINATED);
+    KTEST_EXPECT_EQUAL(retry->exit_code(), uint64_t{0});
+    KTEST_EXPECT_FALSE(static_cast<bool>(find_task_named("badimage")));
+    KTEST_EXPECT_TRUE(loader->state() == task_state::RUNNING);
 
     // Echo keeps serving until its parent dies. Kill the coordinator; echo observes the hangup
     // and exits of its own accord with a clean status.
@@ -181,22 +235,23 @@ KTEST_CASE(coordinator_boot) {
     for (int i = 0; i < 2000 && echo->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
     KTEST_REQUIRE_TRUE(coordinator->state() == task_state::TERMINATED);
     KTEST_REQUIRE_TRUE(echo->state() == task_state::TERMINATED);
+    for (int i = 0; i < 2000 && loader->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
+    KTEST_REQUIRE_TRUE(loader->state() == task_state::TERMINATED);
     KTEST_EXPECT_TRUE(coordinator->exit_code() >> 32 == sys::TASK_EXIT_KILLED);
     KTEST_EXPECT_ALL(echo->exit_code() >> 32 == sys::TASK_EXIT_EXITED, (echo->exit_code() & 0xFFFFFFFF) == 0);
 }
 
-// Task kill against a genuinely blocked victim: echo spawned without a client parks its only
-// thread in port_wait forever, so nothing but the kill can end it. The kill must find the thread
+// Task kill against a genuinely blocked native victim: it creates an empty port and parks its
+// only thread in port_wait forever, so nothing but the kill can end it. The kill must find the thread
 // parked on the port's wait queue, claim it, and force it out through the syscall boundary; the
 // task then tears down completely and reports the killed cause. Timing-independent: a kill landing
 // before echo reaches its wait still marks the thread, which then refuses to park.
 KTEST_CASE(user_task_kill_blocked) {
     using namespace kernel::obj;
-    namespace sys      = kernel::syscall;
-    const auto* module = kernel::boot::find_module("echo");
-    KTEST_REQUIRE_TRUE(module != nullptr);
-
-    auto created = create_user_task("ukill", module->data, module->size);
+    namespace sys = kernel::syscall;
+    kernel::testing::UserProgram program;
+    program.block_on_port();
+    auto created = program.start("ukill");
     KTEST_REQUIRE_TRUE(created.is_ok());
     ktl::ref<Task> task = created.unwrap();
     uint64_t owner      = pack_handle(task->owner_handle());
@@ -204,7 +259,7 @@ KTEST_CASE(user_task_kill_blocked) {
     uint64_t keeper     = syscall_dispatch(sys::SYS_HANDLE_DUPLICATE, owner, RIGHT_READ | RIGHT_WAIT, 0, 0, 0, 0);
     KTEST_REQUIRE_TRUE(static_cast<int64_t>(keeper) >= 0);
 
-    // Let echo reach its event loop so the interesting path -- claiming a parked thread -- is the
+    // Let the fixture reach its port wait so the interesting path -- claiming a parked thread -- is the
     // one usually taken.
     for (int i = 0; i < 50 && task->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
     KTEST_REQUIRE_TRUE(task->state() == task_state::RUNNING);
@@ -230,57 +285,6 @@ KTEST_CASE(user_task_kill_blocked) {
     KTEST_EXPECT_TRUE(task->exit_code() >> 32 == sys::TASK_EXIT_KILLED);
 
     KTEST_EXPECT_TRUE(syscall_dispatch(sys::SYS_HANDLE_CLOSE, keeper, 0, 0, 0, 0, 0) == 0);
-}
-
-// Spawn from an image VMO, end to end: wrap selftest's module bytes exactly as endowment does,
-// spawn through the buffer-free core (kernel test threads have no IPC buffer), and observe the
-// whole parent contract through the two returned handles -- typed handles, the child running and
-// then terminating cleanly, status readable, and the bootstrap channel's parent end reporting
-// PEER_CLOSED once the child's table is gone.
-KTEST_CASE(task_spawn_from_vmo) {
-    using namespace kernel::obj;
-    namespace sys      = kernel::syscall;
-    const auto* module = kernel::boot::find_module("selftest");
-    KTEST_REQUIRE_TRUE(module != nullptr);
-
-    uintptr_t phys = kernel::mm::direct_map_physical(module->data).value();
-    size_t pages   = (module->size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
-    auto image     = kernel::mm::create_wired_vmo(phys, pages);
-    KTEST_REQUIRE_TRUE(image);
-    image->set_name("selftest");
-
-    auto spawned = task_spawn(*kernel_task(), image);
-    KTEST_REQUIRE_TRUE(spawned.is_ok());
-    uint64_t child        = pack_handle(spawned.unwrap().task);
-    uint64_t mailbox      = pack_handle(spawned.unwrap().mailbox);
-
-    uint64_t child_info   = syscall_dispatch(sys::SYS_OBJ_INFO, child, 0, 0, 0, 0, 0);
-    uint64_t mailbox_info = syscall_dispatch(sys::SYS_OBJ_INFO, mailbox, 0, 0, 0, 0, 0);
-    KTEST_EXPECT_ALL((child_info & 0xFFFFFFFF) == type_ids::TASK,
-                     (child_info >> 32) == (RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT),
-                     (mailbox_info & 0xFFFFFFFF) == type_ids::CHANNEL);
-
-    // selftest runs its whole self-check and exits (echo skipped: no coordinator answers its
-    // connect); a bounded wait keeps a broken spawn from wedging the run. 30 seconds is orders of
-    // magnitude past a healthy pass.
-    uint64_t sig =
-        syscall_dispatch(sys::SYS_OBJECT_WAIT, child, sys::TASK_SIGNAL_TERMINATED, 30'000'000'000ull, 0, 0, 0);
-    KTEST_REQUIRE_TRUE((sig & sys::TASK_SIGNAL_TERMINATED) != 0);
-    uint64_t status = syscall_dispatch(sys::SYS_TASK_STATUS, child, 0, 0, 0, 0, 0);
-    KTEST_EXPECT_ALL((status >> 32) == sys::TASK_EXIT_EXITED, (status & 0xFFFFFFFF) == SELFTEST_STATUS_ECHO_SKIPPED);
-
-    // The child's death closed its end of the bootstrap channel: the parent end we hold reports
-    // the orphan signal's mirror image.
-    uint64_t mail_sig = syscall_dispatch(sys::SYS_OBJECT_WAIT, mailbox, 0, 0, 0, 0, 0);
-    KTEST_EXPECT_TRUE((mail_sig & sys::CHANNEL_SIGNAL_PEER_CLOSED) != 0);
-
-    KTEST_EXPECT_TRUE(syscall_dispatch(sys::SYS_HANDLE_CLOSE, child, 0, 0, 0, 0, 0) == 0);
-    KTEST_EXPECT_TRUE(syscall_dispatch(sys::SYS_HANDLE_CLOSE, mailbox, 0, 0, 0, 0, 0) == 0);
-
-    // Not an ELF: an anonymous VMO full of zeroes is refused, with nothing created.
-    auto garbage = kernel::mm::create_anonymous_vmo(2);
-    KTEST_REQUIRE_TRUE(garbage);
-    KTEST_EXPECT_TRUE(task_spawn(*kernel_task(), garbage).is_err());
 }
 
 // Boot-module endowment: every boot module arrives on the endowed task's mailbox as one IMAGE
@@ -417,62 +421,10 @@ KTEST_CASE(object_wait_timeout) {
     KTEST_EXPECT_TRUE(table.close(id).is_ok());
 }
 
-namespace {
-
-// Build a test-only copy of init with its entry overwritten by a small native store through the
-// unmapped null page. It remains a normal loader input, while avoiding a second user-program
-// package solely for this regression test.
-bool make_faulting_image(const kernel::boot::boot_module& module, ktl::vector<uint8_t>& image) {
-    if (!image.reserve(module.size)) { return false; }
-    for (size_t i = 0; i < module.size; ++i) {
-        if (!image.push_back(static_cast<const uint8_t*>(module.data)[i])) { return false; }
-    }
-
-    auto* header = reinterpret_cast<kernel::elf::Elf64_Ehdr*>(image.data());
-    if (header->e_phoff > image.size() || header->e_phnum == 0 ||
-        header->e_phentsize < sizeof(kernel::elf::Elf64_Phdr)) {
-        return false;
-    }
-
-    uint64_t entry_offset = 0;
-    bool found_entry      = false;
-    for (size_t i = 0; i < header->e_phnum; ++i) {
-        uint64_t offset = header->e_phoff + i * header->e_phentsize;
-        if (offset > image.size() || sizeof(kernel::elf::Elf64_Phdr) > image.size() - offset) { return false; }
-        auto* phdr = reinterpret_cast<kernel::elf::Elf64_Phdr*>(image.data() + offset);
-        if (phdr->p_type != kernel::elf::PT_LOAD || header->e_entry < phdr->p_vaddr ||
-            header->e_entry - phdr->p_vaddr >= phdr->p_filesz) {
-            continue;
-        }
-        entry_offset = phdr->p_offset + header->e_entry - phdr->p_vaddr;
-        found_entry  = true;
-        break;
-    }
-
-#if defined(ARCH_X86_64)
-    constexpr uint8_t FAULT_CODE[] = {0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00, 0xc6, 0x00, 0x00};
-#elif defined(ARCH_RISCV64)
-    constexpr uint8_t FAULT_CODE[] = {0x93, 0x02, 0x00, 0x00, 0x23, 0x80, 0x02, 0x00};
-#else
-#error unsupported architecture
-#endif
-
-    if (!found_entry || entry_offset > image.size() || sizeof(FAULT_CODE) > image.size() - entry_offset) {
-        return false;
-    }
-    memcpy(image.data() + entry_offset, FAULT_CODE, sizeof(FAULT_CODE));
-    return true;
-}
-
-}  // namespace
-
 KTEST_CASE(user_task_unresolved_fault_terminates_task) {
-    const auto* module = kernel::boot::find_module("init");
-    KTEST_REQUIRE_TRUE(module != nullptr);
-
-    ktl::vector<uint8_t> image;
-    KTEST_REQUIRE_TRUE(make_faulting_image(*module, image));
-    auto created = create_user_task("ufault", image.data(), image.size());
+    kernel::testing::UserProgram program;
+    program.fault();
+    auto created = program.start("ufault");
     KTEST_REQUIRE_TRUE(created.is_ok());
     ktl::ref<Task> task = created.unwrap();
 

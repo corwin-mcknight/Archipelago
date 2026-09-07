@@ -18,19 +18,13 @@ These findings remain visible in the source; this is a source review, not a fres
 - Protect the early-heap block list across CPUs, or prove/enforce that all remaining accesses are boot-core-only. Allocation switches to the slab before AP startup, but later frees of early pointers and statistics still enter `early_heap`; any lock must be constant-initialised for pre-constructor use.
 - Validate boot memmap overlaps before admitting USABLE ranges to the PMM (`core/boot.cpp`). Wrapping ranges and descriptor-cap exclusions are already handled; conflicting usable/reserved or kernel-image ranges remain a gap.
 
-### ELF validation
-- In `elf/elf_parse.cpp`, validate every program-header alignment, including the `e_phentsize` stride; cast before `i * e_phentsize` to avoid promoted signed multiplication overflow.
-- Require the entry point to fall in an executable segment, and reject `p_filesz > 0 && p_memsz == 0` before skipping empty segments.
-- Define/reject unrepresentable `PT_LOAD` permissions: without `PF_R`, x86 mappings become readable anyway, and riscv64 write-only PTEs are invalid.
-- Fix symbol-table stride validation/walking in `crash/symbols.cpp`: declared `e_shentsize`/`sh_entsize` and actual `sizeof` strides disagree. Avoid truncating `st_size` to 32 bits and wrapping the `find_entry` extent check.
-
 ### Traps, stacks, and boot
 - Clear DF in x86 `trap_sp_overflow` before entering C++ (`x86_64/interrupt_handlers.s`); the branch bypasses the normal entry's `cld`.
 - Resolve the stack-publication window in `task/scheduler.cpp::switch_to`: the incoming stack floor and TSS/syscall stack are published while still on the outgoing stack. Move publication to an appropriate incoming-stack hook, including first-run paths. Clear/poison the syscall stack for stackless threads instead of retaining the previous value.
 - Reconcile `enable_nxe()` ordering and its contract (`x86_64/main.cpp`): boot memory setup activates copied NX mappings before this helper runs, relying on Limine's NXE state.
 - Make boot CPU accessor bounds checks survive NDEBUG (`boot/limine/limine_boot.cpp`, `cpu_hw_id`/`start_cpu`).
 - Move `.init_array` into the read-only PHDR in both linker scripts and explain the extra `.bss` padding. Review GDT alignment explicitly; its packed layout currently has no requested alignment (an audit item, not a demonstrated boot failure).
-- Enable feature-detected SMAP/SMEP on x86_64; explicitly establish and verify clear `sstatus.SUM` on riscv64. ELF loading and IPC buffers use physical mappings, so current user-memory access needs no temporary access window.
+- Enable feature-detected SMAP/SMEP on x86_64; explicitly establish and verify clear `sstatus.SUM` on riscv64. Boot initialization, task construction, and IPC buffers use physical mappings, so current user-memory access needs no temporary access window.
 - Add VMM-mapped guard pages to kernel stacks after the kernel-mapping path is defined. Add x86 IST-backed exception/NMI stacks for stack-overflow and double-fault reporting; the current emergency-stack tripwire is already implemented.
 
 ### Syscalls and IPC boundaries
@@ -45,9 +39,7 @@ These findings remain visible in the source; this is a source review, not a fres
 [Milestone 2](MILESTONES.md) establishes the complete boot -> userspace shell -> program writes file -> separate program reads file path. The kernel loads only init and hands it the opaque initrd; file and path semantics belong to userspace.
 
 ### Task construction and userspace loading
-- Expose primitives to create an unstarted task, populate its address space through authorised region handles, prepare its first thread and bootstrap endowments, and start it. Define cleanup for abandoned or failed construction.
-- Enable authorised executable mappings with kernel-enforced executable-memory protections, including writable aliases, so init can load programs without the kernel interpreting their ELF images.
-- Add init's userspace ELF loader and move subsequent program launches onto task-building primitives; retain the kernel ELF loader for the initial init executable.
+Boot-only non-ELF init, thread-owned task construction, private W^X mappings, and the dedicated userspace ELF loader are implemented; see [Executable Loading](docs/Design/Executable%20Loading.md). General region delegation and loader restart remain separate work.
 
 ### Bootstrap and file services
 - Build an initrd containing the bootstrap servers, shell, programs, and data files. Supply init and the initrd as the two userspace Limine boot inputs.
@@ -157,6 +149,7 @@ Work here can accompany every feature slice; fix protocol reliability before rel
 - Add KTL self-move assignment cases (vector/ref/result), refcount-overflow failure coverage, and negative-compilation checks for deleted overloads such as `maybe<T&>` rvalue binding.
 
 ### Build and debugging tools
+- Include dependency content in Plume package staleness: rebuilding a static library currently does not by itself schedule otherwise-unchanged executable consumers for relinking. Make-level library prerequisites only apply once the consumer package is scheduled.
 - Include board `*.s` files in the kernel Makefile's platform source discovery, alongside `*.cpp`/`*.S`.
 - Fix the Doxygen inputs to use existing sources and `docs/Kernel/`; its current `src/sys/kernel/docs/` inputs do not exist, and PROJECT_BRIEF still names only x86_64.
 - Decide whether Plume should validate composed sysroot contents before imaging. Its stamp detects package changes, not external deletion/tampering; deleting the sysroot or its adjacent `.stamp` forces recomposition today.
@@ -181,9 +174,9 @@ Work here can accompany every feature slice; fix protocol reliability before rel
 - NUMA policy after topology discovery and multi-node hardware/workloads; reserved regions are already excluded from allocation, with overlap validation tracked above.
 - Owned 2M/1G mappings after a concrete large-page consumer; current allocation/mapping uses 4K, while page walks already understand bootloader large leaves.
 - User-pager eviction/clock replacement after a user-pager interface exists. Revisit ACTIVE versus WIRED page-table descriptors then; anonymous swap is intentionally out of scope.
-- General VMO resize/protect/commit/decommit operations beyond the Milestone 2 loader's needs when growable arenas, guard pages, or pager consumers define the contracts. Region-based task construction and executable mappings are active Milestone 2 work above.
+- General VMO resize/protect/commit/decommit operations beyond the Milestone 2 loader's needs when growable arenas, guard pages, or pager consumers define the contracts. Loader construction currently uses private snapshots; general region delegation remains future work.
 - Replace fixed IPC-buffer slots with `map_anywhere` when address-space layout needs it; any buffer eviction must invalidate the cached physical-frame contract.
-- Generalise ELF segment packing, the eight-segment limit, stack layout, and PT_GNU_STACK policy when supported toolchains require it. Keep the default stack non-executable. Failed spawn parsing can leave image pages committed until VMO destruction; add rollback/decommit with reclaimable image VMOs.
+- Generalise ELF segment packing, the eight-segment limit, stack layout, and PT_GNU_STACK policy when supported toolchains require it. Keep the default stack non-executable. Add decommit when loaders need to reclaim committed source VMO pages before destroying their VMOs.
 - Optional weak port bindings with closure packets, and server-defined packet payloads, when a server needs them. Current strong bindings intentionally pin their objects.
 - Allocate FPU save storage only for user threads when Thread footprint matters; the embedded area currently costs kernel threads too. Add teardown ownership with that change.
 - Lift the host page-source stub's 4096 live-run cap if a stress workload reaches it.

@@ -4,13 +4,13 @@
 #include <kernel/assert.h>
 #include <kernel/boot.h>
 #include <kernel/config.h>
-#include <kernel/elf_loader.h>
 #include <kernel/log.h>
 #include <kernel/mm/physmap.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/mm/vmo.h>
 #include <kernel/sched/internal.h>
 #include <kernel/sched/scheduler.h>
+#include <kernel/sched/task_construction.h>
 #include <kernel/sched/user_task.h>
 #include <std/new.h>
 #include <std/string.h>
@@ -19,13 +19,6 @@ namespace kernel::sched {
 
 namespace {
 
-// The stack is the kernel's choice, not the image's: nothing in an ELF says where it goes, and
-// first-fit virtual address search is still a VMM to-do. A segment that reached this far would
-// collide here and be rejected by Region::map rather than silently overlapping.
-constexpr uintptr_t USER_STACK_BASE = 0x800000;
-constexpr size_t USER_STACK_PAGES   = 4;
-constexpr uintptr_t USER_STACK_TOP  = USER_STACK_BASE + USER_STACK_PAGES * KERNEL_MINIMUM_PAGE_SIZE;
-
 [[noreturn]] void user_thread_entry(void* entry) {
     // The temporary ref from current() must die before enter_user: the kernel stack is
     // abandoned on exit, so a ref still live here would never run its destructor and
@@ -33,13 +26,15 @@ constexpr uintptr_t USER_STACK_TOP  = USER_STACK_BASE + USER_STACK_PAGES * KERNE
     uintptr_t kstack_top = 0;
     uintptr_t ipc_base   = 0;
     uintptr_t ipc_size   = 0;
+    uintptr_t user_sp    = 0;
     {
         auto self  = current();
         kstack_top = self->kstack_top();
         ipc_base   = self->ipc().user_base();
         ipc_size   = self->ipc().size_bytes();
+        user_sp    = self->user_stack_pointer();
     }
-    kernel::arch::enter_user(reinterpret_cast<uintptr_t>(entry), USER_STACK_TOP, kstack_top, ipc_base, ipc_size);
+    kernel::arch::enter_user(reinterpret_cast<uintptr_t>(entry), user_sp, kstack_top, ipc_base, ipc_size);
 }
 
 // Escrow `object` into the kernel table and attach it to `message`, the same escrow a user-to-user
@@ -58,43 +53,23 @@ bool escrow_into(kernel::obj::MessageBuffer& message, ktl::ref<kernel::obj::Obje
 
 }  // namespace
 
-ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size,
-                                             ktl::ref<kernel::obj::Channel>* parent_end_out) {
-    using namespace kernel::mm;
+ktl::result<ktl::ref<Task>> start_prepared_user_task(const char* name, kernel::mm::vm_aspace* aspace, uintptr_t entry,
+                                                     uintptr_t stack_pointer,
+                                                     ktl::ref<kernel::obj::Channel>* parent_end_out,
+                                                     ktl::ref<TaskFactory> factory) {
     using namespace kernel::obj;
-
-    auto parsed = kernel::elf::parse_image(elf, elf_size);
-    if (parsed.is_err()) {
-        g_log.warn("task: '{0}' rejected: {1}", name, kernel::elf::to_string(parsed.unwrap_err()));
-        return ktl::err(ktl::errc::invalid_operation);
-    }
-    auto img  = parsed.unwrap();
-
     auto task = ktl::make_ref<Task>();
-    if (!task) { return ktl::err(ktl::errc::oom); }
-    task->set_name(name);
-
-    auto* aspace = new (std::nothrow) vm_aspace();
-    if (aspace == nullptr || !aspace->init()) {
+    if (!task) {
         delete aspace;
         return ktl::err(ktl::errc::oom);
     }
+    task->set_owned_name(name);
     task->set_aspace(aspace);
-
     auto fail = [&](ktl::errc error) -> ktl::result<ktl::ref<Task>> {
         task->set_aspace(nullptr);
         delete aspace;
         return ktl::err(error);
     };
-
-    auto loaded = kernel::elf::map_image(*aspace, elf, elf_size, img);
-    if (loaded.is_err()) { return fail(loaded.unwrap_err()); }
-
-    auto stack = create_anonymous_vmo(USER_STACK_PAGES);
-    if (!stack) { return fail(ktl::errc::oom); }
-    auto stack_mapped = aspace->root().map(USER_STACK_BASE, USER_STACK_PAGES * KERNEL_MINIMUM_PAGE_SIZE, stack, 0,
-                                           vm_prot::USER | vm_prot::READ | vm_prot::WRITE);
-    if (stack_mapped.is_err()) { return fail(stack_mapped.unwrap_err()); }
 
     ktl::ref<kernel::obj::Object> task_object = task;
     auto owner = kernel_task()->handles().insert(task_object, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT);
@@ -128,21 +103,25 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     register_task(task);
     task->set_state(task_state::RUNNING);
 
-    auto created = thread_create_in(task, name, user_thread_entry, reinterpret_cast<void*>(img.entry));
+    auto created = thread_create_in(task, task->name(), user_thread_entry, reinterpret_cast<void*>(entry));
     if (created.is_err()) { return fail_wired(created.unwrap_err()); }
-    auto thread  = created.unwrap();
+    auto thread = created.unwrap();
+    thread->set_user_stack_pointer(stack_pointer);
 
     // The bootstrap message is queued while the thread cannot yet run, so the payload can never
     // observe missing self-handles -- the ordering the old slots-0-and-1 scheme kept safe by
     // holding interrupts off across spawn. The handles ride as owned escrow entries; the cycle
     // (task table -> endpoint -> queued message -> task) is broken by teardown_user_task, which
     // clears the table and drops the mailbox explicitly rather than waiting on refcounts.
-    auto message = MessageBuffer::create(0);
-    bool endowed = message.is_ok();
+    auto thread_factory = ktl::make_ref<ThreadFactory>(task->id());
+    auto message        = MessageBuffer::create(0);
+    bool endowed        = message.is_ok() && static_cast<bool>(thread_factory);
     if (endowed) {
         auto boot = message.unwrap();
-        endowed =
-            escrow_into(boot, task, RIGHT_READ | RIGHT_WRITE) && escrow_into(boot, thread, RIGHT_READ | RIGHT_WAIT);
+        endowed   = escrow_into(boot, task, RIGHT_READ | RIGHT_WRITE) &&
+                    escrow_into(boot, thread, RIGHT_READ | RIGHT_WAIT) &&
+                    escrow_into(boot, thread_factory, RIGHT_WRITE | RIGHT_DUPLICATE);
+        if (endowed && factory) { endowed = escrow_into(boot, factory, RIGHT_WRITE | RIGHT_DUPLICATE); }
         if (endowed) { endowed = pair.first->write(ktl::move(boot)).is_ok(); }
     }
     if (!endowed) {
@@ -168,77 +147,26 @@ ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, 
     return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
 }
 
-ktl::result<spawn_handles> task_spawn(Task& caller, ktl::ref<kernel::mm::vmo> image) {
+ktl::result<kernel::obj::HandleId> start_user_thread(ktl::ref<Task> task, uintptr_t entry, uintptr_t stack) {
     using namespace kernel::obj;
-    if (!image || image->size_pages() == 0) { return ktl::err(ktl::errc::invalid_operation); }
-
-    // The ELF loader wants one contiguous byte span. Commit page 0 alone first and check the ELF
-    // magic there, so obviously-not-an-image input costs one page rather than the whole span.
-    // Frames committed for an image that then fails contiguity or parsing stay committed until
-    // the VMO dies -- VMO decommit does not exist, and only kernel-minted wired VMOs (whose
-    // commit allocates nothing) reach here today. The contiguity requirement is true of every
-    // wired module VMO and dies with the in-kernel loader itself (the userspace loader will read
-    // page-wise).
-    size_t pages = image->size_pages();
-    auto first   = image->commit(0, 1);
-    if (first.is_err()) { return ktl::err(first.unwrap_err()); }
-    auto base = image->resident_frame(0);
-    if (!base.has_value()) { return ktl::err(ktl::errc::invalid_operation); }
-    const auto* head =
-        reinterpret_cast<const uint8_t*>(kernel::mm::direct_map_address(kernel::mm::physical_address(*base)));
-    if (head[0] != 0x7F || head[1] != 'E' || head[2] != 'L' || head[3] != 'F') {
+    if (!task->aspace() || !valid_user_start(*task->aspace(), entry, stack)) {
         return ktl::err(ktl::errc::invalid_operation);
     }
-    auto committed = image->commit(0, pages);
-    if (committed.is_err()) { return ktl::err(committed.unwrap_err()); }
-    for (size_t i = 1; i < pages; i++) {
-        auto frame = image->resident_frame(i);
-        if (!frame.has_value() || *frame != *base + i * KERNEL_MINIMUM_PAGE_SIZE) {
-            return ktl::err(ktl::errc::invalid_operation);
-        }
+    auto made = thread_create_in(task, task->name(), user_thread_entry, reinterpret_cast<void*>(entry));
+    if (made.is_err()) { return ktl::err(made.unwrap_err()); }
+    auto thread = made.unwrap();
+    thread->set_user_stack_pointer(stack);
+    auto handle = task->handles().insert(thread, RIGHT_READ | RIGHT_WAIT);
+    if (handle.is_err()) {
+        thread_discard(thread);
+        return ktl::err(handle.unwrap_err());
     }
-
-    // The VMO's debug name names the task -- for a boot module that is its role, and the string
-    // outlives any task (module roles are boot-protocol memory). Page-rounded size is a safe
-    // parse bound: the ELF's own extents are validated against it. The caller is the parent, so
-    // the bootstrap channel's parent end comes back here instead of settling in Task::mailbox --
-    // the child's orphan signal (PEER_CLOSED) tracks the caller's handle from birth.
-    const char* name = image->name() != nullptr ? image->name() : "task";
-    const void* elf =
-        reinterpret_cast<const void*>(kernel::mm::direct_map_address(kernel::mm::physical_address(*base)));
-    ktl::ref<Channel> parent_end;
-    auto created = create_user_task(name, elf, pages * KERNEL_MINIMUM_PAGE_SIZE, &parent_end);
-    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
-    auto task          = created.unwrap();
-
-    // The child is already running by now, so a failed insert cannot just unwind -- kill what was
-    // started. Dropping parent_end delivers the orphan signal for whatever the child ran first.
-    auto task_inserted = caller.handles().insert(task, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT);
-    if (task_inserted.is_err()) {
-        (void)task_kill(task);
-        return ktl::err(task_inserted.unwrap_err());
+    auto queued = thread_enqueue(thread);
+    if (queued.is_err()) {
+        (void)task->handles().close(handle.unwrap());
+        return ktl::err(queued.unwrap_err());
     }
-    auto mailbox_inserted = caller.handles().insert(ktl::move(parent_end), Channel::DEFAULT_RIGHTS);
-    if (mailbox_inserted.is_err()) {
-        (void)caller.handles().close(task_inserted.unwrap());
-        (void)task_kill(task);
-        return ktl::err(mailbox_inserted.unwrap_err());
-    }
-    return ktl::result<spawn_handles>::ok({task_inserted.unwrap(), mailbox_inserted.unwrap()});
-}
-
-ktl::result<ktl::ref<Task>> launch_coordinator() {
-    const auto* module = kernel::boot::find_module("init");
-    if (module == nullptr) {
-        g_log.warn("task: no 'init' module; coordinator not launched");
-        return ktl::err(ktl::errc::invalid_operation);
-    }
-    auto created = create_user_task("init", module->data, module->size);
-    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
-    auto task    = created.unwrap();
-    auto endowed = endow_boot_modules(task);
-    if (endowed.is_err()) { g_log.warn("task: coordinator endowment incomplete"); }
-    return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
+    return ktl::result<HandleId>::ok(handle.unwrap());
 }
 
 ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
@@ -307,10 +235,10 @@ ktl::result<void> task_kill(const ktl::ref<Task>& task) {
     if (!task || task.get() == kernel_task().get()) { return ktl::err(ktl::errc::invalid_operation); }
     if (task->state() == task_state::TERMINATED) { return ktl::result<void>::ok(); }
 
+    task->close_thread_creation();
     // Snapshot outside the interrupts-off window: snapshot_threads takes the task mutex, which may
-    // block. No thread can be added to a running user task today, so the snapshot cannot go stale
-    // in the way that matters (a missed new thread); a thread that dies in between is skipped by
-    // the DEAD check below.
+    // block. Creation was closed under the same mutex used by add_thread, so the snapshot cannot
+    // miss a new thread. A thread that dies in between is skipped by the DEAD check below.
     ktl::vector<ktl::ref<Thread>> threads;
     if (!task->snapshot_threads(threads)) { return ktl::err(ktl::errc::oom); }
 

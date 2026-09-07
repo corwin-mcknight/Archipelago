@@ -17,23 +17,34 @@ namespace {
 constexpr uint32_t STATUS_ECHO_SKIPPED = 0x100;
 
 // .rodata: read-only, no execute.
-const char* const GREETING = "hello from userspace\n";
+const char* const GREETING             = "hello from userspace\n";
 
 // .data: initialised and writable, so a wrong permission or a missed copy shows up as a fault or as
 // the wrong output rather than as silence.
-char g_marker[] = "selftest: data segment intact\n";
+char g_marker[]                        = "selftest: data segment intact\n";
 
 // .bss: zero-filled by the loader through the anonymous VMO rather than copied from the image.
 // volatile is load-bearing -- without it the compiler proves the array is all zeroes, folds the
 // check below to `true`, and drops the array entirely, leaving the image with no .bss to test.
 volatile char g_scratch[256];
 
-uint32_t g_failures = 0;
+uint32_t g_failures       = 0;
+uint32_t worker_completed = 0;
+extern "C" [[noreturn]] void application_worker(uintptr_t ipc, size_t size) {
+    __atomic_store_n(&worker_completed, ipc != 0 && size != 0 ? 1u : 2u, __ATOMIC_RELEASE);
+    sys_thread_exit();
+}
 
 void report(bool ok, const char* good, const char* bad) {
     sys_print(ok ? good : bad);
     if (!ok) { g_failures++; }
 }
+
+#if defined(__x86_64__)
+__attribute__((naked, noreturn)) void application_worker_entry() { __asm__ volatile("call application_worker\n\tud2"); }
+#else
+#define application_worker_entry application_worker
+#endif
 
 bool bss_is_zero() {
     for (size_t i = 0; i < sizeof(g_scratch) / sizeof(g_scratch[0]); i++) {
@@ -130,30 +141,66 @@ extern "C" int main() {
     sys_write(first, second);
 
     // The bootstrap contract: slot 0 is a channel endpoint whose first message carries our
-    // self-handles -- task, then thread. Recv it through the ordinary transfer path, then make the
-    // structural checks the contract promises: an empty payload, at least the two self-handles,
+    // self-handles -- task, thread, then ThreadFactory. Recv through the ordinary transfer path and make the
+    // structural checks the contract promises: an empty payload, three handles,
     // naming objects of different types, and an operation needing a right they lack (duplicate)
     // refused.
-    uint64_t self_task   = 0;
-    uint64_t self_thread = 0;
+    uint64_t self_task      = 0;
+    uint64_t self_thread    = 0;
+    uint64_t thread_factory = 0;
     {
         constexpr size_t ARRIVED_AT = 512;  // where recv lands the endowed handles
-        uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
-        bool ok      = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) >= 2;
+        uint64_t got                = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVED_AT, 4);
+        bool ok                     = !sys_is_error(got) && (got & 0xFFFFFFFF) == 0 && (got >> 32) == 3;
         sys_copy_in(&self_task, ARRIVED_AT, sizeof(self_task));
         sys_copy_in(&self_thread, ARRIVED_AT + sizeof(uint64_t), sizeof(self_thread));
+
+        sys_copy_in(&thread_factory, ARRIVED_AT + 2 * sizeof(uint64_t), sizeof(thread_factory));
 
         uint64_t task_info   = sys_obj_info(self_task);
         uint64_t thread_info = sys_obj_info(self_thread);
         ok                   = ok && !sys_is_error(task_info) && !sys_is_error(thread_info) &&
-             (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
+                               (task_info & 0xFFFFFFFF) != (thread_info & 0xFFFFFFFF);
 
         // The endpoint must not report hangup after the drain: the parent keeps its end open for
         // the task's whole life. No claim about READABLE -- the parent may have mailed more already.
-        uint64_t sig = sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0, 0);
-        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) == 0;
+        uint64_t sig         = sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, 0, 0);
+        ok                   = ok && (sig & abi::syscall::CHANNEL_SIGNAL_PEER_CLOSED) == 0;
 
         report(ok, "selftest: bootstrap ok\n", "selftest: BOOTSTRAP BROKEN\n");
+    }
+
+    // Neither self-handles nor thread creation authority permit constructing tasks.
+    sys_stage(0, "forbidden");
+    bool no_factory = sys_is_error(sys_task_build_create(self_task, 0, 9)) &&
+                      sys_is_error(sys_task_build_create(self_thread, 0, 9)) &&
+                      sys_is_error(sys_task_build_create(thread_factory, 0, 9)) &&
+                      sys_is_error(sys_thread_start(self_task, 0, 0));
+    report(no_factory, "selftest: construction authority isolated\n", "selftest: FACTORY AUTHORITY LEAKED\n");
+
+    // A normal application can start and join a thread without task construction authority.
+    {
+        constexpr uint64_t STACK_SIZE = 4 * ABI_VM_PAGE_SIZE;
+        uint64_t backing              = sys_vmo_create(STACK_SIZE);
+        uint64_t stack = sys_is_error(backing)
+                             ? backing
+                             : sys_vmo_map(backing, 0, 0, STACK_SIZE, ABI_VM_PROT_READ | ABI_VM_PROT_WRITE);
+        if (!sys_is_error(backing)) { (void)sys_handle_close(backing); }
+        bool ok = !sys_is_error(stack);
+        if (ok) {
+            uintptr_t top = stack + STACK_SIZE;
+            uint64_t worker =
+                sys_thread_start(thread_factory, reinterpret_cast<uintptr_t>(application_worker_entry), top);
+            ok = !sys_is_error(worker);
+            if (ok) {
+                uint64_t waited = sys_object_wait(worker, ABI_THREAD_SIGNAL_TERMINATED, 0);
+                if (sys_is_error(waited)) { return 1; }  // Keep the live worker's stack mapped until task exit.
+                ok = __atomic_load_n(&worker_completed, __ATOMIC_ACQUIRE) == 1;
+                (void)sys_handle_close(worker);
+            }
+            (void)sys_vmo_unmap(stack);
+        }
+        report(ok, "selftest: application thread ok\n", "selftest: APPLICATION THREAD FAILED\n");
     }
 
     uint64_t dup = sys_handle_duplicate(self_task, ~0ull);
@@ -173,14 +220,14 @@ extern "C" int main() {
         constexpr size_t REPLY_AT   = 768;  // where recv lands the message
         const char* ping            = "ping across the pair";
 
-        bool ok = !sys_is_error(sys_channel_create(HANDLES_AT));
+        bool ok                     = !sys_is_error(sys_channel_create(HANDLES_AT));
         uint64_t ends[2];
         sys_copy_in(ends, HANDLES_AT, sizeof(ends));
 
         // Poll (zero mask): a fresh endpoint is writable and has nothing to read.
-        uint64_t sig = sys_object_wait(ends[0], 0, 0);
-        ok           = ok && (sig & abi::syscall::CHANNEL_SIGNAL_WRITABLE) != 0 &&
-             (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0;
+        uint64_t sig    = sys_object_wait(ends[0], 0, 0);
+        ok              = ok && (sig & abi::syscall::CHANNEL_SIGNAL_WRITABLE) != 0 &&
+                          (sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0;
 
         size_t ping_len = sys_stage(0, ping);
         ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, ping_len, 0, 0));
@@ -233,13 +280,13 @@ extern "C" int main() {
 
         size_t note_len = sys_stage(0, note);
         sys_copy_out(SENT_AT, &cargo[0], sizeof(cargo[0]));
-        ok = ok && !sys_is_error(sys_channel_send(carrier[0], 0, note_len, SENT_AT, 1));
+        ok               = ok && !sys_is_error(sys_channel_send(carrier[0], 0, note_len, SENT_AT, 1));
 
         // Consumed by the send: the old handle value must no longer resolve in our table.
-        ok = ok && sys_is_error(sys_obj_info(cargo[0]));
+        ok               = ok && sys_is_error(sys_obj_info(cargo[0]));
 
-        uint64_t got = sys_channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
-        ok           = ok && !sys_is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
+        uint64_t got     = sys_channel_recv(carrier[1], REPLY_AT, 128, ARRIVED_AT, 1);
+        ok               = ok && !sys_is_error(got) && (got & 0xFFFFFFFF) == note_len && (got >> 32) == 1;
 
         uint64_t arrived = 0;
         sys_copy_in(&arrived, ARRIVED_AT, sizeof(arrived));
@@ -262,16 +309,16 @@ extern "C" int main() {
         constexpr size_t PACKET_AT = 640;
         constexpr uint64_t KEY     = 0xC0FFEE;
 
-        bool ok = !sys_is_error(sys_channel_create(ENDS_AT));
+        bool ok                    = !sys_is_error(sys_channel_create(ENDS_AT));
         uint64_t ends[2];
         sys_copy_in(ends, ENDS_AT, sizeof(ends));
 
-        uint64_t port = sys_port_create();
-        ok            = ok && !sys_is_error(port);
-        ok = ok && !sys_is_error(sys_port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
+        uint64_t port   = sys_port_create();
+        ok              = ok && !sys_is_error(port);
+        ok              = ok && !sys_is_error(sys_port_bind(port, ends[1], KEY, abi::syscall::CHANNEL_SIGNAL_READABLE));
 
         // Nothing queued yet: a bounded wait lapses instead of blocking forever.
-        ok = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(ABI_ERR_TIMED_OUT);
+        ok              = ok && sys_port_wait(port, PACKET_AT, 1'000'000) == static_cast<uint64_t>(ABI_ERR_TIMED_OUT);
 
         size_t note_len = sys_stage(0, "wake the event loop");
         ok              = ok && !sys_is_error(sys_channel_send(ends[0], 0, note_len, 0, 0));
@@ -295,24 +342,24 @@ extern "C" int main() {
         constexpr uint64_t RW    = ABI_VM_PROT_READ | ABI_VM_PROT_WRITE;
         constexpr uint64_t FIXED = 0x40000000;  // far above the kernel's first-fit floor
 
-        uint64_t vmo  = sys_vmo_create(2 * PAGE);
-        bool ok       = !sys_is_error(vmo);
-        uint64_t addr = ok ? sys_vmo_map(vmo, 0, 0, 2 * PAGE, RW) : 0;
-        ok            = ok && !sys_is_error(addr);
+        uint64_t vmo             = sys_vmo_create(2 * PAGE);
+        bool ok                  = !sys_is_error(vmo);
+        uint64_t addr            = ok ? sys_vmo_map(vmo, 0, 0, 2 * PAGE, RW) : 0;
+        ok                       = ok && !sys_is_error(addr);
 
-        volatile char* mem = reinterpret_cast<volatile char*>(static_cast<uintptr_t>(addr));
+        volatile char* mem       = reinterpret_cast<volatile char*>(static_cast<uintptr_t>(addr));
         if (ok) {
             // Pages arrive zero-filled on first touch; writes stick across both pages.
-            ok               = mem[0] == 0 && mem[2 * PAGE - 1] == 0;
-            mem[0]           = 'A';
-            mem[PAGE]        = 'B';
+            ok                = mem[0] == 0 && mem[2 * PAGE - 1] == 0;
+            mem[0]            = 'A';
+            mem[PAGE]         = 'B';
             mem[2 * PAGE - 1] = 'C';
-            ok = ok && mem[0] == 'A' && mem[PAGE] == 'B' && mem[2 * PAGE - 1] == 'C';
+            ok                = ok && mem[0] == 'A' && mem[PAGE] == 'B' && mem[2 * PAGE - 1] == 'C';
         }
 
         // The mapping keeps the VMO alive: close the handle, the memory still reads back.
-        ok = ok && !sys_is_error(sys_handle_close(vmo));
-        ok = ok && mem[PAGE] == 'B';
+        ok            = ok && !sys_is_error(sys_handle_close(vmo));
+        ok            = ok && mem[PAGE] == 'B';
 
         // Caller-placed map is honored exactly; a second map overlapping it is refused.
         uint64_t vmo2 = sys_vmo_create(PAGE);
@@ -321,15 +368,15 @@ extern "C" int main() {
         ok            = ok && sys_is_error(sys_vmo_map(vmo2, FIXED, 0, PAGE, RW));
 
         // Rejections: unaligned size, EXEC prot, unmap where nothing is mapped.
-        ok = ok && sys_is_error(sys_vmo_create(PAGE + 1));
-        ok = ok && sys_is_error(sys_vmo_map(vmo2, 0, 0, PAGE, ABI_VM_PROT_READ | ABI_VM_PROT_EXEC));
-        ok = ok && sys_is_error(sys_vmo_unmap(FIXED + PAGE));
+        ok            = ok && sys_is_error(sys_vmo_create(PAGE + 1));
+        ok            = ok && sys_is_error(sys_vmo_map(vmo2, 0, 0, PAGE, ABI_VM_PROT_READ | ABI_VM_PROT_EXEC));
+        ok            = ok && sys_is_error(sys_vmo_unmap(FIXED + PAGE));
 
         // An interior address names the whole mapping; once unmapped, the address is gone.
-        ok = ok && !sys_is_error(sys_vmo_unmap(addr + PAGE));
-        ok = ok && sys_is_error(sys_vmo_unmap(addr));
-        ok = ok && !sys_is_error(sys_vmo_unmap(FIXED));
-        ok = ok && !sys_is_error(sys_handle_close(vmo2));
+        ok            = ok && !sys_is_error(sys_vmo_unmap(addr + PAGE));
+        ok            = ok && sys_is_error(sys_vmo_unmap(addr));
+        ok            = ok && !sys_is_error(sys_vmo_unmap(FIXED));
+        ok            = ok && !sys_is_error(sys_handle_close(vmo2));
         report(ok, "selftest: vmo ok\n", "selftest: VMO BROKEN\n");
     }
 
@@ -367,37 +414,37 @@ extern "C" int main() {
         constexpr size_t ENDS_AT = 512;  // where create lands the two handles
         constexpr size_t OUT_AT  = 768;  // where reads land
 
-        bool ok = !sys_is_error(sys_socket_create(ENDS_AT));
+        bool ok                  = !sys_is_error(sys_socket_create(ENDS_AT));
         uint64_t ends[2];
         sys_copy_in(ends, ENDS_AT, sizeof(ends));
 
         // Fresh pair: writable, nothing to read, and a premature read says so without blocking.
         uint64_t sig = sys_object_wait(ends[0], 0, 0);
         ok           = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) != 0 &&
-             (sig & abi::syscall::SOCKET_SIGNAL_READABLE) == 0;
-        ok = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_WOULD_BLOCK;
+                       (sig & abi::syscall::SOCKET_SIGNAL_READABLE) == 0;
+        ok           = ok && static_cast<int64_t>(sys_socket_read(ends[1], OUT_AT, 64)) == ABI_ERR_WOULD_BLOCK;
 
         // Restrict the move-only ends in place, then exercise real syscall rights checks.
         const uint64_t original = sys_obj_info(ends[0]);
-        ok = ok && sys_is_error(sys_handle_restrict(ends[0], (1ull << 32) | ABI_RIGHT_WRITE));
-        ok = ok && sys_obj_info(ends[0]) == original;
-        ok = ok && sys_handle_restrict(ends[0], ABI_RIGHT_WRITE | ABI_RIGHT_WAIT) == 0;
-        ok = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE | (1ull << 63)) == 0;
-        ok = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE) == 0;
-        ok = ok && (sys_obj_info(ends[1]) >> 32) == (ABI_RIGHT_READ | ABI_RIGHT_WAIT);
-        ok = ok && (sys_obj_info(ends[0]) >> 32) == (ABI_RIGHT_WRITE | ABI_RIGHT_WAIT);
-        ok = ok && sys_is_error(sys_handle_restrict(ends[0], ABI_RIGHT_READ | ABI_RIGHT_WRITE));
-        ok = ok && sys_is_error(sys_socket_read(ends[0], OUT_AT, 1));
-        ok = ok && sys_is_error(sys_socket_write(ends[1], DATA_AT, 1));
-        ok = ok && sys_is_error(sys_handle_duplicate(ends[0], ABI_RIGHT_WRITE));
+        ok                      = ok && sys_is_error(sys_handle_restrict(ends[0], (1ull << 32) | ABI_RIGHT_WRITE));
+        ok                      = ok && sys_obj_info(ends[0]) == original;
+        ok                      = ok && sys_handle_restrict(ends[0], ABI_RIGHT_WRITE | ABI_RIGHT_WAIT) == 0;
+        ok                      = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE | (1ull << 63)) == 0;
+        ok                      = ok && sys_handle_remove_rights(ends[1], ABI_RIGHT_WRITE) == 0;
+        ok                      = ok && (sys_obj_info(ends[1]) >> 32) == (ABI_RIGHT_READ | ABI_RIGHT_WAIT);
+        ok                      = ok && (sys_obj_info(ends[0]) >> 32) == (ABI_RIGHT_WRITE | ABI_RIGHT_WAIT);
+        ok                      = ok && sys_is_error(sys_handle_restrict(ends[0], ABI_RIGHT_READ | ABI_RIGHT_WRITE));
+        ok                      = ok && sys_is_error(sys_socket_read(ends[0], OUT_AT, 1));
+        ok                      = ok && sys_is_error(sys_socket_write(ends[1], DATA_AT, 1));
+        ok                      = ok && sys_is_error(sys_handle_duplicate(ends[0], ABI_RIGHT_WRITE));
 
         // Two writes, one read: a stream has no boundaries.
-        const char* joined = "hello stream";
-        size_t first       = sys_stage(DATA_AT, "hello ");
-        ok                 = ok && sys_socket_write(ends[0], DATA_AT, first) == first;
-        size_t second      = sys_stage(DATA_AT, "stream");
-        ok                 = ok && sys_socket_write(ends[0], DATA_AT, second) == second;
-        ok                 = ok && sys_socket_read(ends[1], OUT_AT, 64) == first + second;
+        const char* joined      = "hello stream";
+        size_t first            = sys_stage(DATA_AT, "hello ");
+        ok                      = ok && sys_socket_write(ends[0], DATA_AT, first) == first;
+        size_t second           = sys_stage(DATA_AT, "stream");
+        ok                      = ok && sys_socket_write(ends[0], DATA_AT, second) == second;
+        ok                      = ok && sys_socket_read(ends[1], OUT_AT, 64) == first + second;
         for (size_t i = 0; ok && i < first + second; i++) { ok = ipc[OUT_AT + i] == joined[i]; }
 
         // Fill to backpressure: writes accept until the buffer is full, then fail; WRITABLE
@@ -410,9 +457,9 @@ extern "C" int main() {
             if (sys_is_error(wrote)) { break; }
             accepted += wrote;
         }
-        ok  = ok && accepted != 0;
-        sig = sys_object_wait(ends[0], 0, 0);
-        ok  = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) == 0;
+        ok               = ok && accepted != 0;
+        sig              = sys_object_wait(ends[0], 0, 0);
+        ok               = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) == 0;
 
         uint64_t drained = 0;
         for (;;) {
@@ -423,9 +470,9 @@ extern "C" int main() {
             }
             drained += got;
         }
-        ok  = ok && drained == accepted;
-        sig = sys_object_wait(ends[0], 0, 0);
-        ok  = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) != 0;
+        ok          = ok && drained == accepted;
+        sig         = sys_object_wait(ends[0], 0, 0);
+        ok          = ok && (sig & abi::syscall::SOCKET_SIGNAL_WRITABLE) != 0;
 
         // Hangup: buffered bytes outlive the writer; only then is the stream gone for good.
         size_t last = sys_stage(DATA_AT, "last words");
@@ -460,16 +507,16 @@ extern "C" int main() {
         abi_message_header req{ABI_COORD_OP_CONNECT, 0, TXID};
         sys_copy_out(MSG_AT, &req, sizeof(req));
         size_t name_len = sys_stage(MSG_AT + sizeof(req), "echo");
-        bool sent = !sys_is_error(sys_channel_send(abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, sizeof(req) + name_len,
-                                                   0, 0));
+        bool sent =
+            !sys_is_error(sys_channel_send(abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, sizeof(req) + name_len, 0, 0));
 
         // Await the matching reply; unrelated mail (there should be none) is skipped, not fatal.
         uint64_t peer = 0;
         bool ok       = sent;
         bool replied  = false;
         while (ok && !replied) {
-            uint64_t sig = sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, abi::syscall::CHANNEL_SIGNAL_READABLE,
-                                           WAIT_NS);
+            uint64_t sig =
+                sys_object_wait(abi::syscall::BOOTSTRAP_HANDLE, abi::syscall::CHANNEL_SIGNAL_READABLE, WAIT_NS);
             if ((sig & abi::syscall::CHANNEL_SIGNAL_READABLE) == 0) { break; }
             uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, 256, ARRIVE_AT, 1);
             if (sys_is_error(got)) { break; }

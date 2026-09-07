@@ -4,12 +4,19 @@ Archipelago tasks are kernel objects that bind a handle table, a set of threads,
 ## Lifecycle
 A task begins in `NEW`, enters `RUNNING` when its first thread is queued, and becomes `TERMINATED` after the reaper removes its last thread. Task zero is created directly in `RUNNING`, owns no userspace address space, and never terminates.
 
-The creation path takes an ELF image as a byte span and loads it through the kernel's ELF loader: each loadable segment becomes an anonymous VMO mapped at its own address with its own protection, the entry point comes from the image, and a demand-paged `USER|READ|WRITE` stack is mapped at a fixed address the kernel chooses. It then wires the bootstrap channel, queues the bootstrap message, and queues the first thread. Where the image came from is the caller's business -- today the boot protocol's `init` module, later a filesystem.
+The kernel starts an already prepared address space: it wires the bootstrap channel, queues the bootstrap message, and queues the first thread at the supplied entry and stack addresses. A separate boot-only path creates init from its fixed-layout non-ELF image, once.
 
-## Loading a binary
-The loader accepts static `ET_EXEC` images for the running architecture and nothing else. It is split so that the part doing arithmetic over untrusted header fields is separable from the part that touches memory: parsing validates the header and collects loadable segments without allocating, touching global state, or knowing about the VMM, and mapping turns that result into VMOs and bindings.
+## Constructing a task
+A TaskFactory capability authorizes a loading thread to create one dormant address-space container. MAP copies page-aligned source VMO ranges into private backing with R, RW, or RX permissions. Neither the loader nor a sibling task can retain a writable alias to executable backing. START checks entry and stack mappings, consumes the container, and returns task and parent-bootstrap handles. ABORT discards the container.
 
-Rejections are named rather than generic, because the parser cannot log and a refused binary is otherwise indistinguishable from a broken one. Dynamically linked images are refused outright rather than loaded without their interpreter, segments that are both writable and executable are refused, and segments must begin on a page boundary. Memory beyond a segment's file contents needs no special handling: anonymous VMOs zero-fill, which covers both `.bss` and the tail of a partially filled page.
+The container belongs to the calling thread; other threads cannot access it. The reaper releases unfinished construction before removing a dead thread from its task, even if a handle retains the Thread object. Successful start makes the child's lifetime independent of the loading thread. General region delegation is not yet exposed.
+
+## Loading an executable
+The `lib/elf` userspace library accepts static `ET_EXEC` images for the running architecture. Its pure parser validates bounds, architecture, permissions, and entry coverage. It rejects dynamic executables, unreadable or RWX segments, unaligned addresses, oversized memory extents, and truncated input. The loader prepares zero-filled VMOs for segment tails and `.bss`, supplies a writable non-executable stack, and invokes the construction syscalls.
+
+Init uses the library only to bootstrap `sys/elf_loader`, then transfers construction authority to that service. Each request runs in a fresh worker thread with its own IPC buffer. The loader returns task and parent-bootstrap handles to init, and applications receive no construction capability. Routine loading failures are returned to init; an unexpected worker fault terminates the service to reclaim task-owned temporary resources.
+
+Bootstrap handles are ordered: self task, initial thread, task-bound ThreadFactory, and (for boot init only) TaskFactory.
 
 ## Scheduling and address spaces
 Every thread has an immutable, non-null reference to its parent task. Boot and idle threads belong to task zero; a thread cannot be added to another task's thread list. Spawned threads also record their kernel stack top. On a context switch, the scheduler activates the incoming task's address space, or the kernel address space for task zero, when it differs from the active space.
@@ -21,7 +28,9 @@ User FP/SIMD state is carried per thread and switched eagerly, but only for user
 ## Syscalls
 The initial syscall surface is deliberately small:
 
-- `exit` (`0`) terminates the calling thread and does not return.
+- `exit` (`0`) records task exit status and terminates the calling thread.
+- `thread_start` (`29`) requires a ThreadFactory capability with WRITE, bound to the caller's task. Every application receives one at bootstrap and can create its own threads without TaskFactory authority.
+- `thread_exit` (`30`) terminates only the calling thread without recording a task exit status.
 - `yield` (`1`) cooperatively rotates the scheduler run queue.
 - `sleep` (`2`) blocks the calling thread for at least `arg0` kernel ticks.
 - `write` (`3`) emits a range of the calling thread's IPC buffer, given as an offset and a length. It returns the byte count written, or a negative error code.
@@ -38,7 +47,7 @@ The dispatcher pins the calling thread once and passes it to handlers that need 
 
 A handle crossing the boundary is a uint64: table slot index in the low 32 bits, generation in the high 32. A closed slot's generation moves, so a stale handle fails the lookup rather than reaching whatever now occupies the slot.
 
-The initial thread's table is created with exactly one entry, promised by the ABI as first-generation slot 0: one end of its bootstrap channel. The other end belongs to the task's creator -- the kernel today, held as the task's mailbox for the task's whole life. The first message queued on the channel, before the thread can run, is the bootstrap message: an empty payload carrying a handle to the task itself (read and write rights), a handle to its initial thread (read and wait), and any further handles the creator endowed the task with. Everything after that first message is ordinary parent-to-task mail. Neither self-handle carries the duplicate right, which makes the rights-rejection path reachable from the first program.
+The initial thread's table is created with exactly one entry, promised by the ABI as first-generation slot 0: one end of its bootstrap channel. The other end belongs to the task's creator -- the kernel for init, and ultimately init for loaded applications. Only the kernel-parented endpoint is held as Task::mailbox. The first message queued on the channel, before the thread can run, is the bootstrap message: an empty payload carrying a handle to the task itself (read and write rights), a handle to its initial thread (read and wait), and any further handles the creator endowed the task with. Everything after that first message is ordinary parent-to-task mail. Neither self-handle carries the duplicate right, which makes the rights-rejection path reachable from the first program.
 
 x86_64 enters through SYSCALL/SYSRET. riscv64 enters through `ecall` and returns through `sret`. Both call the shared dispatcher with interrupts disabled on the calling thread's kernel stack. Six argument registers are carried -- as many as either architecture's calling convention provides, so the entry assembly never needs widening again -- though current operations read at most five.
 
@@ -54,10 +63,10 @@ A thread learns where its buffer is from two registers set at entry, rather than
 ## Teardown
 The reaper performs user-task teardown after removing the last dead thread:
 
-1. Mark the task `TERMINATED`.
-2. Clear its handle table and drop its mailbox, destroying the bootstrap channel and closing any handles still escrowed on it -- including the task's own bootstrap self-reference.
+1. Release the dead thread's unfinished construction, IPC buffer, and kernel stack.
+2. Clear the final task's handle table and drop its mailbox, releasing queued bootstrap escrow.
 3. Switch to the kernel address space if necessary, then destroy the user address space.
-4. Remove the task from the global registry.
-5. Close task zero's owner handle.
+4. Remove the task from the global registry and close task zero's owner handle.
+5. Publish `TERMINATED` and its completion signal.
 
-Task zero is exempt from this path. Unresolved user faults still enter the kernel crash path; task-local fault termination requires the future kill machinery.
+Task zero is exempt from task teardown. Task kill closes further thread creation before taking its thread snapshot, preventing a newly added worker from escaping the kill. Unresolved user faults terminate the faulting user thread and record the task's fault status; they do not enter the kernel crash path.

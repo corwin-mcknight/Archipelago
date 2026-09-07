@@ -5,7 +5,8 @@
 
 .PHONY: pkg_get_source pkg_configure pkg_build pkg_install
 
-KSRC   := $(LIVE_SOURCES)
+KSRC   := $(LIVE_SOURCES)/sys/kernel
+ELFSRC := $(LIVE_SOURCES)/lib/elf
 OBJDIR := $(BUILD_DIR)/obj/test/kernel-fuzz
 FUZZ_DEMANGLE := $(OBJDIR)/fuzz-demangle
 FUZZ_FMT      := $(OBJDIR)/fuzz-fmt
@@ -14,7 +15,7 @@ FUZZ_ELF      := $(OBJDIR)/fuzz-elf
 FUZZ_RBTREE   := $(OBJDIR)/fuzz-rbtree
 FUZZ_ELF_LOADER := $(OBJDIR)/fuzz-elf-loader
 
-INC_KERNEL := -I $(KSRC)/includes/std -I $(KSRC)/includes
+INC_KERNEL := -I $(ELFSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
 
 # Same amplifier dialect as the host runner, plus libFuzzer (brings coverage instrumentation and its
 # own main()) and ASan/UBSan. The host is logic-authoritative, not the target ABI -- bare-metal codegen
@@ -55,9 +56,9 @@ pkg_build:
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/crash/symbols.cpp -o $(OBJDIR)/symbols.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
 	# The loader's parse half is its own translation unit precisely so it links without the VMM.
-	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_loader_fuzz.cpp"
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_loader_fuzz.cpp -o $(OBJDIR)/elf_loader_fuzz.o
-	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/elf/elf_parse.cpp -o $(OBJDIR)/elf_parse.o
+	@echo "  CXX (fuzz) $(ELFSRC)/tests/elf_loader_fuzz.cpp"
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(ELFSRC)/tests/elf_loader_fuzz.cpp -o $(OBJDIR)/elf_loader_fuzz.o
+	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(ELFSRC)/parse.cpp -o $(OBJDIR)/elf_parse.o
 	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_loader_fuzz.o $(OBJDIR)/elf_parse.o -o $(FUZZ_ELF_LOADER)
 	# rb_tree is header-only (intrusive, no allocation), so the fuzzer is self-contained.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp"

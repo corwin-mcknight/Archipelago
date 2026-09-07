@@ -6,37 +6,27 @@
 #include <ktl/ref>
 #include <ktl/result>
 
-namespace kernel::mm { class vmo; }
+namespace kernel::mm {
+class vmo;
+class vm_aspace;
+}  // namespace kernel::mm
 
 namespace kernel::sched {
 
-// Create and queue a user task running the ELF image in [elf, elf + elf_size). The image is a plain
-// byte span rather than something this layer looks up itself, so where it came from -- a boot
-// module today, a filesystem later -- stays the caller's business.
-//
-// The bootstrap channel's parent end goes to exactly one owner, decided before the child can run:
-// null parent_end_out leaves it in Task::mailbox (the kernel-as-parent arrangement), non-null
-// receives it instead -- the spawn path, where the calling task is the parent and the kernel
-// keeps only its owner-of-last-resort task handle.
-ktl::result<ktl::ref<Task>> create_user_task(const char* name, const void* elf, size_t elf_size,
-                                             ktl::ref<kernel::obj::Channel>* parent_end_out = nullptr);
+class TaskFactory;
+
+// Internal launch mechanism: takes ownership of an already prepared address space, including on
+// failure. No executable bytes or format metadata cross this interface. Callers validate the
+// entry and stack and install all mappings before handing ownership over.
+ktl::result<ktl::ref<Task>> start_prepared_user_task(const char* name, kernel::mm::vm_aspace* aspace, uintptr_t entry,
+                                                     uintptr_t stack_pointer,
+                                                     ktl::ref<kernel::obj::Channel>* parent_end_out = nullptr,
+                                                     ktl::ref<TaskFactory> factory                  = {});
+ktl::result<kernel::obj::HandleId> start_user_thread(ktl::ref<Task> task, uintptr_t entry, uintptr_t stack);
+
 // Reaper-only teardown after the task's final thread has been removed.
 void teardown_user_task(ktl::ref<Task> task);
-// What SYS_TASK_SPAWN hands the caller: both handles live in the caller's table. The caller is
-// the child's parent -- it holds the task handle (kill, status, TERMINATED) and the parent end of
-// the child's bootstrap channel (all further endowment and mail).
-struct spawn_handles {
-    kernel::obj::HandleId task;
-    kernel::obj::HandleId mailbox;
-};
-
-// Spawn a task from an executable image VMO into `caller`'s handle table; the syscall layer's
-// buffer-free core, so kernel-context tests can drive it directly. The image must be physically
-// contiguous (every kernel-minted image VMO is); its debug name names the task. A failure after
-// the child is already running kills it rather than leaking it.
-ktl::result<spawn_handles> task_spawn(Task& caller, ktl::ref<kernel::mm::vmo> image);
-
-// Launch the coordinator: the boot module named "init", kernel-parented, endowed with every boot
+// Boot-only, one-shot launch of the fixed-layout non-ELF "init" module, endowed with every boot
 // module as IMAGE mail. The one task the kernel starts on a normal boot; the shell's `boot
 // continue` and the integration tests drive the same function. A failed endowment is logged but
 // does not unlaunch the coordinator -- it serves whatever images it received.

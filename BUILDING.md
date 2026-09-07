@@ -6,7 +6,7 @@ Archipelago uses **Plume**, a Python-based package manager that orchestrates the
 
 The development container provides everything needed. For host builds, you need:
 
-- LLVM 17+ (`clang`, `clang++`, `ld.lld`)
+- LLVM 17+ (`clang`, `clang++`, `ld.lld`, `llvm-ar`, `llvm-objcopy`)
 - NASM (x86_64 only)
 - QEMU (`qemu-system-x86_64`; `qemu-system-riscv64` for the riscv64 target)
 - xorriso

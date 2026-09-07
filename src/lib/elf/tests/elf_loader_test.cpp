@@ -1,9 +1,9 @@
-#include <kernel/elf_loader.h>
+#include <elf/loader.h>
 #include <kernel/testing/testing.h>
 
-using namespace kernel::elf;
+using namespace elf;
 
-KTEST_MODULE("kernel/elf_loader");
+KTEST_MODULE("userspace/elf_loader");
 
 namespace {
 
@@ -53,7 +53,7 @@ struct Image {
         p.p_align  = 0x1000;
     }
 
-    ktl::result<image, elf_error> parse() { return parse_image(bytes, size); }
+    ParseResult parse() { return parse_image(bytes, size); }
 };
 
 // Asserts the specific reason, not merely that parsing failed: a case that starts failing for a
@@ -202,4 +202,64 @@ KTEST_CASE(elf_loader_caps_segment_count) {
     for (size_t i = 1; i < MAX_SEGMENTS + 1; i++) { img.set_load(i, 0x400000 + i * 0x1000); }
 
     KTEST_EXPECT_TRUE(rejects_with(img, elf_error::too_many_segments));
+}
+
+KTEST_CASE(elf_loader_validates_program_header_alignment_and_stride) {
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::truncated, [](Image& i) { i.header().e_phoff++; }));
+    // The first header is aligned; the declared stride would misalign the second one.
+    KTEST_EXPECT_TRUE(rejects_with(elf_error::truncated, [](Image& i) { i.header().e_phentsize++; }, 2));
+
+    Image padded(2);
+    const Elf64_Phdr second = padded.phdr(1);
+    padded.phdr(1)          = {};
+    padded.header().e_phentsize += alignof(Elf64_Phdr);
+    auto* next  = reinterpret_cast<Elf64_Phdr*>(padded.bytes + Image::PHOFF + padded.header().e_phentsize);
+    *next       = second;
+    auto parsed = padded.parse();
+    KTEST_REQUIRE_TRUE(parsed.is_ok());
+    KTEST_REQUIRE_EQUAL(parsed.unwrap().count, 2u);
+    KTEST_EXPECT_EQUAL(parsed.unwrap().segments[1].vaddr, second.p_vaddr);
+}
+
+KTEST_CASE(elf_loader_requires_executable_entry) {
+    constexpr uint32_t nonexec[] = {PF_R, PF_R | PF_W};
+    for (uint32_t flags : nonexec) {
+        Image img(2);
+        img.phdr(0).p_flags = flags;
+        KTEST_EXPECT_TRUE(rejects_with(img, elf_error::bad_entry));
+        img.header().e_entry = img.phdr(1).p_vaddr;
+        KTEST_EXPECT_TRUE(img.parse().is_ok());
+    }
+    Image img;
+    img.phdr(0).p_memsz = 0x80;
+    img.header().e_entry += 0x7f;
+    KTEST_EXPECT_TRUE(img.parse().is_ok());
+    img.header().e_entry++;
+    KTEST_EXPECT_TRUE(rejects_with(img, elf_error::bad_entry));
+}
+
+KTEST_CASE(elf_loader_validates_empty_load_segments) {
+    Image img(2);
+    img.phdr(1).p_memsz = 0;
+    KTEST_EXPECT_TRUE(rejects_with(img, elf_error::bad_segment));
+    img.phdr(1).p_filesz = 0;
+    img.phdr(1).p_flags  = 0;
+    auto parsed          = img.parse();
+    KTEST_REQUIRE_TRUE(parsed.is_ok());
+    KTEST_EXPECT_EQUAL(parsed.unwrap().count, 1u);
+}
+
+KTEST_CASE(elf_loader_requires_representable_permissions) {
+    constexpr uint32_t unreadable[] = {0u, PF_W, PF_X};
+    for (uint32_t flags : unreadable) {
+        Image img;
+        img.phdr(0).p_flags = flags;
+        KTEST_EXPECT_TRUE(rejects_with(img, elf_error::unsupported_permissions));
+    }
+    constexpr uint32_t readable[] = {PF_R, PF_R | PF_W, PF_R | PF_X};
+    for (uint32_t flags : readable) {
+        Image img(2);
+        img.phdr(1).p_flags = flags;
+        KTEST_EXPECT_TRUE(img.parse().is_ok());
+    }
 }

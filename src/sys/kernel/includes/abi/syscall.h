@@ -99,7 +99,8 @@
 #define ABI_ERR_TRUNCATED (-12ll)   /* recv: the front message exceeded a capacity and was discarded */
 #define ABI_ERR_WOULD_BLOCK (-13ll) /* nothing to take right now; wait on READABLE and retry */
 #define ABI_ERR_PEER_CLOSED (-14ll) /* the opposite endpoint is gone and nothing is left to take */
-#define ABI_ERR_TIMED_OUT (-15ll)   /* a bounded wait lapsed */
+#define ABI_ERR_INVALID_OPERATION (-3ll)
+#define ABI_ERR_TIMED_OUT (-15ll) /* a bounded wait lapsed */
 
 // arg0 = handle (needs the wait right), arg1 = signal mask, arg2 = timeout in nanoseconds. A
 // nonzero mask blocks the calling thread until any bit in it is asserted on the object and returns
@@ -208,20 +209,32 @@
     20ull /* arg0 = any address inside a mapping. Removes the \
              whole mapping containing it. Returns 0. */
 
-// Spawn a task from an executable image. Holding the image VMO is the whole authority -- there is
-// no ambient spawn privilege and no kernel-side list of programs; images arrive as IMAGE messages
-// (<abi/message.h>) or wherever else a VMO handle travels. The kernel parses the image (static
-// ELF today; the loader is destined for userspace, see docs/Design/Service Coordination.md),
-// builds the task, and queues its first thread. The caller becomes the parent: it receives the
-// new task's handle and the parent end of its bootstrap channel, and everything the child ever
-// learns beyond its self-handles arrives through that channel. Closing the channel end is how the
-// child observes parent death (PEER_CLOSED). The image must be physically contiguous, which every
-// kernel-minted image VMO is.
-#define ABI_SYS_TASK_SPAWN                                        \
-    17ull /* arg0 = image VMO handle (needs the read right),      \
-             arg1 = IPC-buffer offset where the kernel writes the \
-             new task handle then the bootstrap channel handle,   \
-             two uint64s. Returns 0. */
+// Syscall 17 was the removed in-kernel executable loader; it is permanently reserved.
+
+// Thread-owned task construction. Every operation requires a TaskFactory handle with WRITE.
+// One dormant address space per calling thread; thread exit discards unfinished construction.
+// Children receive self-handles, a bootstrap endpoint, and a task-bound ThreadFactory.
+// TaskFactory authority is never implicitly inherited.
+#define ABI_SYS_TASK_BUILD_CREATE 25ull /* factory, name IPC offset, name bytes (1..63); returns 0 */
+#define ABI_SYS_TASK_BUILD_MAP 26ull    /* factory, source VMO (READ), mapping descriptor IPC offset */
+#define ABI_SYS_TASK_BUILD_START 27ull  /* factory, entry, stack top, output IPC offset (task, mailbox) */
+#define ABI_SYS_TASK_BUILD_ABORT 28ull  /* factory; discards this thread's pending construction */
+
+// Threads share their task's handles and mappings but receive distinct IPC buffers.
+// THREAD_START requires a ThreadFactory with WRITE bound to the calling task; entry receives IPC base/size as at task
+// entry.
+#define ABI_SYS_THREAD_START 29ull /* factory, entry, aligned stack top; returns READ|WAIT thread handle */
+#define ABI_SYS_THREAD_EXIT 30ull  /* exits only the calling thread; no task exit status */
+#define ABI_THREAD_SIGNAL_TERMINATED 1ull
+
+// Page-aligned ranges; private snapshot of the source VMO, never an executable-format record.
+// prot must be R, RW, or RX. Successfully mapped bytes are independent of subsequent source writes.
+typedef struct abi_task_build_mapping {
+    uint64_t address;
+    uint64_t size;
+    uint64_t offset;
+    uint64_t prot;
+} abi_task_build_mapping;
 
 // Signal bits, as returned and waited on through SYS_OBJECT_WAIT. Meanings are per object type;
 // the channel bits are the first installed as ABI. The kernel manages all three: READABLE while
@@ -241,8 +254,8 @@
 // The initial thread's handle table is created with exactly one entry: a channel endpoint,
 // first-generation in slot 0, so its packed value is 0. The peer end belongs to whoever created
 // the task. The first message on it is the bootstrap message: an empty byte payload carrying, in
-// this order, a handle to the task itself, a handle to its initial thread, and then any further
-// handles the creator chose to endow it with. Everything after that first message is ordinary
+// this order, a handle to the task itself, its initial thread, its task-bound ThreadFactory,
+// and (for boot init only) TaskFactory authority. Everything after that first message is ordinary
 // parent-to-task mail, and the endpoint stays open for the task's life.
 #define ABI_BOOTSTRAP_HANDLE 0ull
 
@@ -274,7 +287,6 @@ constexpr uint64_t SYS_PORT_UNBIND             = ABI_SYS_PORT_UNBIND;
 constexpr uint64_t SYS_PORT_WAIT               = ABI_SYS_PORT_WAIT;
 constexpr uint64_t SYS_TASK_KILL               = ABI_SYS_TASK_KILL;
 constexpr uint64_t SYS_TASK_STATUS             = ABI_SYS_TASK_STATUS;
-constexpr uint64_t SYS_TASK_SPAWN              = ABI_SYS_TASK_SPAWN;
 constexpr uint64_t TASK_EXIT_EXITED            = ABI_TASK_EXIT_EXITED;
 constexpr uint64_t TASK_EXIT_KILLED            = ABI_TASK_EXIT_KILLED;
 constexpr uint64_t TASK_EXIT_FAULTED           = ABI_TASK_EXIT_FAULTED;
@@ -282,6 +294,13 @@ constexpr uint64_t VM_PAGE_SIZE                = ABI_VM_PAGE_SIZE;
 constexpr uint64_t VM_PROT_READ                = ABI_VM_PROT_READ;
 constexpr uint64_t VM_PROT_WRITE               = ABI_VM_PROT_WRITE;
 constexpr uint64_t VM_PROT_EXEC                = ABI_VM_PROT_EXEC;
+constexpr uint64_t SYS_TASK_BUILD_CREATE       = ABI_SYS_TASK_BUILD_CREATE;
+constexpr uint64_t SYS_TASK_BUILD_MAP          = ABI_SYS_TASK_BUILD_MAP;
+constexpr uint64_t SYS_TASK_BUILD_START        = ABI_SYS_TASK_BUILD_START;
+constexpr uint64_t SYS_TASK_BUILD_ABORT        = ABI_SYS_TASK_BUILD_ABORT;
+constexpr uint64_t SYS_THREAD_START            = ABI_SYS_THREAD_START;
+constexpr uint64_t SYS_THREAD_EXIT             = ABI_SYS_THREAD_EXIT;
+constexpr uint64_t THREAD_SIGNAL_TERMINATED    = ABI_THREAD_SIGNAL_TERMINATED;
 constexpr uint64_t SYS_VMO_CREATE              = ABI_SYS_VMO_CREATE;
 constexpr uint64_t SYS_VMO_MAP                 = ABI_SYS_VMO_MAP;
 constexpr uint64_t SYS_VMO_UNMAP               = ABI_SYS_VMO_UNMAP;
@@ -323,7 +342,7 @@ constexpr syscall_descriptor SYSCALL_DESCRIPTORS[] = {
     {SYS_PORT_WAIT, 3},
     {SYS_TASK_KILL, 1},
     {SYS_TASK_STATUS, 1},
-    {SYS_TASK_SPAWN, 2},
+    {17, 0},  // reserved, dispatch rejects this number
     {SYS_VMO_CREATE, 1},
     {SYS_VMO_MAP, 5},
     {SYS_VMO_UNMAP, 1},
@@ -331,6 +350,12 @@ constexpr syscall_descriptor SYSCALL_DESCRIPTORS[] = {
     {SYS_SOCKET_WRITE, 3},
     {SYS_SOCKET_READ, 3},
     {SYS_HANDLE_RESTRICT, 3},
+    {ABI_SYS_TASK_BUILD_CREATE, 3},
+    {ABI_SYS_TASK_BUILD_MAP, 3},
+    {ABI_SYS_TASK_BUILD_START, 4},
+    {ABI_SYS_TASK_BUILD_ABORT, 1},
+    {ABI_SYS_THREAD_START, 3},
+    {ABI_SYS_THREAD_EXIT, 0},
 };
 
 consteval bool syscall_descriptors_are_valid() {

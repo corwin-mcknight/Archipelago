@@ -18,7 +18,7 @@ Subsystems like filesystems and networking are userspace servers, which register
 Teaching happens by attaching kernel-validated [transaction programs](docs/Design/Object%20Transaction%20Programs.md) to optimize common operations on user-defined objects. This can skip IPC entirely in some cases.
 
 ## Where it is now
-Today, the kernel boots on x86_64 and riscv64, schedules kernel threads across SMP cores, and runs userspace ELF programs with task-owned address spaces, capability handles, and syscalls. Boot can launch userspace directly or provide an interactive kernel shell.
+Today, the kernel boots on x86_64 and riscv64, schedules kernel threads across SMP cores, and runs userspace ELF programs with task-owned address spaces, capability handles, and syscalls. Boot can launch userspace directly or provide an interactive kernel shell. The kernel loads only a minimal non-ELF init image; a capability-endowed userspace ELF loader constructs subsequent tasks.
 
 User-mode hello world is implemented on both architectures. The [roadmap](MILESTONES.md) describes the next milestones, including an interactive userspace shell and file services.
 

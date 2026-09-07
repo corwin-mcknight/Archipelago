@@ -30,6 +30,7 @@ void reap(ktl::ref<Thread> zombie) {
     // before touching its stack or its task's address space.
     while (zombie->on_cpu()) {}
     if (lifecycle_log_enabled()) { g_log.debug("sched: reap id={0}", zombie->id()); }
+    zombie->set_construction({});
     auto task = zombie->owner();
     task->remove_thread(zombie->id());
     // Return the thread's IPC buffer alongside its kernel stack: both are resources the task holds

@@ -12,11 +12,12 @@
 
 .PHONY: pkg_get_source pkg_configure pkg_build pkg_install
 
-KSRC    := $(LIVE_SOURCES)
+KSRC    := $(LIVE_SOURCES)/sys/kernel
+ELFSRC  := $(LIVE_SOURCES)/lib/elf
 OBJDIR  := $(BUILD_DIR)/obj/test/kernel-testrunner
 RUNNER  := $(OBJDIR)/host-test-runner
 
-INC_KERNEL := -I $(KSRC)/includes/std -I $(KSRC)/includes
+INC_KERNEL := -I $(ELFSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
 INC_HOST   := -I $(KSRC)/includes
 
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=all
@@ -45,7 +46,7 @@ FRAGMENT   := $(RUNNER_DIR)/ktests_brackets.ld
 # Every .cpp directly under tests/ is host-tier: the directory is the routing, so there is no list to
 # keep in sync with the kernel build. Tests that need the kernel environment live in tests/freestanding/
 # (compiled only by the kernel); the harness lives in tests/runner/ (compiled with host flags below).
-HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
+HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp) $(ELFSRC)/tests/elf_loader_test.cpp
 
 # Kernel logic the hosted tests link against, compiled with the amplifier. Pure data structures and
 # freestanding helpers only -- anything hardware-coupled must be a freestanding (QEMU-tier) test instead.
@@ -53,8 +54,8 @@ HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp)
 SUPPORT_SRCS := $(KSRC)/core/std/stdlib.cpp $(KSRC)/obj/object.cpp $(KSRC)/obj/handle_table.cpp \
 	$(KSRC)/obj/channel.cpp $(KSRC)/obj/socket.cpp $(KSRC)/obj/type_registry.cpp $(KSRC)/task/task.cpp \
 	$(KSRC)/task/sync/execution_context.cpp $(KSRC)/task/sync/lockdep.cpp \
-	$(KSRC)/task/sync/mutex.cpp $(KSRC)/elf/elf_parse.cpp $(KSRC)/syscalls/handle.cpp $(KSRC)/syscalls/common.cpp $(KSRC)/task/ipc_range.cpp \
-	$(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
+	$(KSRC)/task/sync/mutex.cpp $(ELFSRC)/parse.cpp $(KSRC)/syscalls/handle.cpp $(KSRC)/syscalls/common.cpp $(KSRC)/task/ipc_range.cpp \
+	$(KSRC)/crash/symbols.cpp $(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))

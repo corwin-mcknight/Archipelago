@@ -164,4 +164,22 @@ uint64_t sys_vmo_unmap(uint64_t vaddr) { return syscall1(ABI_SYS_VMO_UNMAP, vadd
 
 uint64_t sys_task_kill(uint64_t task) { return syscall1(ABI_SYS_TASK_KILL, task); }
 uint64_t sys_task_status(uint64_t task) { return syscall1(ABI_SYS_TASK_STATUS, task); }
-uint64_t sys_task_spawn(uint64_t image, uint64_t offset) { return syscall2(ABI_SYS_TASK_SPAWN, image, offset); }
+
+uint64_t sys_task_build_create(uint64_t factory, uint64_t name_offset, uint64_t name_size) {
+    return syscall3(ABI_SYS_TASK_BUILD_CREATE, factory, name_offset, name_size);
+}
+uint64_t sys_task_build_map(uint64_t factory, uint64_t vmo, uint64_t descriptor_offset) {
+    return syscall3(ABI_SYS_TASK_BUILD_MAP, factory, vmo, descriptor_offset);
+}
+uint64_t sys_task_build_start(uint64_t factory, uint64_t entry, uint64_t stack, uint64_t output_offset) {
+    return syscall6(ABI_SYS_TASK_BUILD_START, factory, entry, stack, output_offset, 0, 0);
+}
+uint64_t sys_task_build_abort(uint64_t factory) { return syscall1(ABI_SYS_TASK_BUILD_ABORT, factory); }
+
+uint64_t sys_thread_start(uint64_t factory, uint64_t entry, uint64_t stack) {
+    return syscall3(ABI_SYS_THREAD_START, factory, entry, stack);
+}
+void sys_thread_exit(void) {
+    (void)syscall1(ABI_SYS_THREAD_EXIT, 0);
+    __builtin_unreachable();
+}

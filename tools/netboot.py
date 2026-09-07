@@ -36,8 +36,10 @@ serial: yes
     kaslr: no
     path: boot():/kernel.elf
     cmdline: shell
-    module_path: boot():/init.elf
+    module_path: boot():/init.bin
     module_string: init
+    module_path: boot():/elf_loader.elf
+    module_string: elf_loader
     module_path: boot():/selftest.elf
     module_string: selftest
     module_path: boot():/echo.elf
@@ -48,7 +50,8 @@ serial: yes
 FILES = [
     ("limine-netboot.conf", "limine.conf"),
     ("boot/kernel.elf", "kernel.elf"),
-    ("boot/init.elf", "init.elf"),
+    ("boot/init.bin", "init.bin"),
+    ("boot/elf_loader.elf", "elf_loader.elf"),
     ("boot/selftest.elf", "selftest.elf"),
     ("boot/echo.elf", "echo.elf"),
     ("EFI/BOOT/BOOTRISCV64.EFI", "limine.efi"),

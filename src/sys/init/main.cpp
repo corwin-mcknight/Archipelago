@@ -1,5 +1,7 @@
 #include <abi/message.h>
 #include <abi/syscall.h>
+#include <elf/loader.h>
+#include <elf/protocol.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys.h>
@@ -17,13 +19,13 @@
 namespace {
 
 // IPC buffer layout. Staging for sends at 0; the rest stay clear of it and each other.
-constexpr size_t HANDLE_AT = 256;  // handle value given to send
-constexpr size_t PAIR_AT   = 320;  // channel_create's two minted ends
-constexpr size_t SPAWN_AT  = 384;  // task_spawn's task + mailbox handles
-constexpr size_t PACKET_AT = 640;  // port packets
-constexpr size_t ARRIVE_AT = 704;  // arrived handles from recv
-constexpr size_t MSG_AT    = 1024; // recv payload landing
-constexpr size_t MSG_CAP   = 2048;
+constexpr size_t HANDLE_AT         = 256;   // handle value given to send
+constexpr size_t PAIR_AT           = 320;   // channel_create's two minted ends
+constexpr size_t SPAWN_AT          = 384;   // task_spawn's task + mailbox handles
+constexpr size_t PACKET_AT         = 640;   // port packets
+constexpr size_t ARRIVE_AT         = 704;   // arrived handles from recv
+constexpr size_t MSG_AT            = 1024;  // recv payload landing
+constexpr size_t MSG_CAP           = 2048;
 
 constexpr uint64_t KEY_SELF        = 1;
 constexpr uint64_t KEY_CHILD_BASE  = 0x100;
@@ -57,6 +59,18 @@ child_slot g_children[MAX_CHILDREN];
 registration g_names[MAX_REGISTRATIONS];
 pending_connect g_pending[MAX_PENDING];
 uint64_t g_port;
+uint64_t g_factory;
+uint64_t g_loader_task    = UINT64_MAX;
+uint64_t g_loader_mailbox = UINT64_MAX;
+uint64_t g_load_txid      = 0;
+struct PendingImage {
+    uint64_t vmo;
+    uint64_t size;
+    size_t name_size;
+    char name[NAME_CAP];
+};
+PendingImage g_images[MAX_CHILDREN];
+size_t g_image_count = 0;
 
 bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
     if (a_len != b_len) { return false; }
@@ -99,16 +113,16 @@ void serve_connect(size_t requester, uint64_t txid, const char* name, size_t nam
     }
     sys_copy_in(ends, PAIR_AT, sizeof(ends));
 
-    if (sys_is_error(send_message(g_children[server].mailbox, ABI_COORD_OP_CONNECTION, 0, 0, name, name_len,
-                                  &ends[0]))) {
+    if (sys_is_error(
+            send_message(g_children[server].mailbox, ABI_COORD_OP_CONNECTION, 0, 0, name, name_len, &ends[0]))) {
         (void)sys_handle_close(ends[0]);
         (void)sys_handle_close(ends[1]);
         (void)send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, static_cast<uint32_t>(-1), txid,
                            nullptr, 0, nullptr);
         return;
     }
-    if (sys_is_error(send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, 0, txid, nullptr, 0,
-                                  &ends[1]))) {
+    if (sys_is_error(
+            send_message(g_children[requester].mailbox, ABI_COORD_OP_CONNECT, 0, txid, nullptr, 0, &ends[1]))) {
         (void)sys_handle_close(ends[1]);
     }
     log_name("coord: connected ", name, name_len);
@@ -117,18 +131,41 @@ void serve_connect(size_t requester, uint64_t txid, const char* name, size_t nam
 // A name just appeared: serve every parked connect that was waiting for it.
 void serve_pending(const char* name, size_t name_len, size_t server) {
     for (size_t i = 0; i < MAX_PENDING; i++) {
-        if (!g_pending[i].used || !name_equal(g_pending[i].name, g_pending[i].name_len, name, name_len)) {
-            continue;
-        }
+        if (!g_pending[i].used || !name_equal(g_pending[i].name, g_pending[i].name_len, name, name_len)) { continue; }
         g_pending[i].used = false;
         serve_connect(g_pending[i].child, g_pending[i].txid, name, name_len, server);
     }
 }
 
+// Transfer an image to the loader; the reply transfers ownership of the new child's task and
+// parent bootstrap endpoint back to init. Applications therefore keep init as their coordinator.
+uint64_t load_via_service(uint64_t vmo, uint64_t size, const char* name, size_t name_size) {
+    abi_message_header request{ELF_LOADER_LOAD, 0, ++g_load_txid};
+    abi_image_payload payload{size};
+    sys_copy_out(0, &request, sizeof(request));
+    sys_copy_out(sizeof(request), &payload, sizeof(payload));
+    sys_copy_out(sizeof(request) + sizeof(payload), name, name_size);
+    sys_copy_out(HANDLE_AT, &vmo, sizeof(vmo));
+    uint64_t sent = sys_channel_send(g_loader_mailbox, 0, sizeof(request) + sizeof(payload) + name_size, HANDLE_AT, 1);
+    // send may refuse before taking ownership. Closing the old generation is safe either way.
+    (void)sys_handle_close(vmo);
+    if (sys_is_error(sent)) { return sent; }
+    uint64_t reply = elf::receive(g_loader_mailbox, 0, sizeof(abi_message_header), SPAWN_AT, 2);
+    if (sys_is_error(reply)) { return reply; }
+    abi_message_header response;
+    sys_copy_in(&response, 0, sizeof(response));
+    if ((reply & 0xffffffff) != sizeof(response) || response.opcode != ELF_LOADER_LOAD ||
+        response.txid != request.txid || response.status != 0 || (reply >> 32) != 2) {
+        sys_close_arrived(reply, SPAWN_AT);
+        return static_cast<uint64_t>(ABI_ERR_INVALID_OPERATION);
+    }
+    return 0;
+}
+
 // An IMAGE message from the kernel: spawn every image except our own. The VMO handle is consumed
 // either way -- spawn only borrows it, and with no respawn story yet there is nothing to keep it
 // for.
-void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
+void handle_image(uint64_t vmo, uint64_t image_size, size_t name_at, size_t name_len) {
     char name[NAME_CAP];
     if (name_len > NAME_CAP) {
         // Refused rather than truncated: a child spawned under a shortened identity would then
@@ -144,6 +181,44 @@ void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
         return;
     }
 
+    if (name_equal(name, name_len, "elf_loader", 10)) {
+        if (g_loader_mailbox != UINT64_MAX ||
+            sys_is_error(elf::spawn(g_factory, vmo, image_size, name, name_len, SPAWN_AT))) {
+            (void)sys_handle_close(vmo);
+            sys_print("coord: LOADER BOOT FAILED\n");
+            return;
+        }
+        (void)sys_handle_close(vmo);
+        uint64_t handles[2];
+        sys_copy_in(handles, SPAWN_AT, sizeof(handles));
+        g_loader_task    = handles[0];
+        g_loader_mailbox = handles[1];
+        if (sys_is_error(send_message(g_loader_mailbox, ELF_LOADER_AUTHORITY, 0, 0, nullptr, 0, &g_factory))) {
+            (void)sys_task_kill(g_loader_task);
+            sys_print("coord: LOADER ENDOWMENT FAILED\n");
+            return;
+        }
+        g_factory = UINT64_MAX;  // authority moved to the loader, not retained by the coordinator
+        while (g_image_count) {
+            PendingImage pending = g_images[--g_image_count];
+            sys_copy_out(MSG_AT, pending.name, pending.name_size);
+            handle_image(pending.vmo, pending.size, MSG_AT, pending.name_size);
+        }
+        return;
+    }
+    if (g_loader_mailbox == UINT64_MAX) {
+        if (g_image_count == MAX_CHILDREN) {
+            (void)sys_handle_close(vmo);
+            return;
+        }
+        auto& pending     = g_images[g_image_count++];
+        pending.vmo       = vmo;
+        pending.size      = image_size;
+        pending.name_size = name_len;
+        for (size_t i = 0; i < name_len; ++i) { pending.name[i] = name[i]; }
+        return;
+    }
+
     size_t slot = MAX_CHILDREN;
     for (size_t i = 0; i < MAX_CHILDREN; i++) {
         if (!g_children[i].used) {
@@ -151,12 +226,14 @@ void handle_image(uint64_t vmo, size_t name_at, size_t name_len) {
             break;
         }
     }
-    if (slot == MAX_CHILDREN || sys_is_error(sys_task_spawn(vmo, SPAWN_AT))) {
-        log_name("coord: SPAWN FAILED ", name, name_len);
+    if (slot == MAX_CHILDREN) {
         (void)sys_handle_close(vmo);
         return;
     }
-    (void)sys_handle_close(vmo);
+    if (sys_is_error(load_via_service(vmo, image_size, name, name_len))) {
+        log_name("coord: SPAWN FAILED ", name, name_len);
+        return;
+    }
 
     uint64_t handles[2];
     sys_copy_in(handles, SPAWN_AT, sizeof(handles));
@@ -217,8 +294,8 @@ void handle_child_message(size_t slot, uint64_t recv_result) {
             }
         }
         if (entry == MAX_REGISTRATIONS || name_len == 0) {
-            (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-10),
-                               header.txid, nullptr, 0, nullptr);
+            (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-10), header.txid,
+                               nullptr, 0, nullptr);
             return;
         }
         g_names[entry].used     = true;
@@ -279,11 +356,12 @@ extern "C" int main() {
     // Bootstrap: the self-handles. Nothing here needs them, but draining the first message is
     // what moves the mailbox to protocol traffic.
     uint64_t got = sys_channel_recv(abi::syscall::BOOTSTRAP_HANDLE, 0, 64, ARRIVE_AT, 4);
-    if (sys_is_error(got) || (got >> 32) < 2) {
+    if (sys_is_error(got) || (got >> 32) != 4) {
         sys_print("coord: BOOTSTRAP BROKEN\n");
         return 1;
     }
 
+    sys_copy_in(&g_factory, ARRIVE_AT + 3 * sizeof(uint64_t), sizeof(g_factory));
     g_port = sys_port_create();
     if (sys_is_error(g_port) ||
         sys_is_error(sys_port_bind(g_port, abi::syscall::BOOTSTRAP_HANDLE, KEY_SELF,
@@ -320,18 +398,19 @@ extern "C" int main() {
                     uint64_t vmo;
                     sys_copy_in(&vmo, ARRIVE_AT, sizeof(vmo));
                     size_t fixed = sizeof(abi_message_header) + sizeof(abi_image_payload);
-                    handle_image(vmo, MSG_AT + fixed, size - fixed);
+                    abi_image_payload payload;
+                    sys_copy_in(&payload, MSG_AT + sizeof(abi_message_header), sizeof(payload));
+                    handle_image(vmo, payload.size_bytes, MSG_AT + fixed, size - fixed);
                 },
                 nullptr);
         } else if (key >= KEY_CHILD_BASE && key < KEY_CHILD_BASE + MAX_CHILDREN) {
             size_t slot = static_cast<size_t>(key - KEY_CHILD_BASE);
             if (!g_children[slot].used) { continue; }
-            bool gone = sys_channel_drain(
-                            g_children[slot].mailbox, MSG_AT, MSG_CAP, ARRIVE_AT, 4,
-                            [](void* ctx, uint64_t result) {
-                                handle_child_message(*static_cast<size_t*>(ctx), result);
-                            },
-                            &slot) != 0;
+            bool gone =
+                sys_channel_drain(
+                    g_children[slot].mailbox, MSG_AT, MSG_CAP, ARRIVE_AT, 4,
+                    [](void* ctx, uint64_t result) { handle_child_message(*static_cast<size_t*>(ctx), result); },
+                    &slot) != 0;
             if (gone) { child_gone(slot); }
         }
     }

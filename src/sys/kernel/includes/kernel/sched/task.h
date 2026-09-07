@@ -25,6 +25,15 @@ class Task : public kernel::obj::Object {
 
     Task() : Object(TYPE_ID) {}
 
+    void set_owned_name(const char* name) {
+        size_t i = 0;
+        if (name) {
+            for (; i + 1 < sizeof(m_owned_name) && name[i]; ++i) { m_owned_name[i] = name[i]; }
+        }
+        m_owned_name[i] = 0;
+        set_name(m_owned_name);
+    }
+
     kernel::obj::HandleTable& handles() { return m_handles; }
 
     ktl::result<void> add_thread(ktl::ref<Thread> thread);
@@ -44,7 +53,14 @@ class Task : public kernel::obj::Object {
     // FAULTED. First record wins -- a kill that loses the race to a normal exit terminated nothing.
     // Plain fields: recorded from thread context on the single scheduling core, read after
     // TERMINATED. exit_code() packs the SYS_TASK_STATUS return (<abi/syscall.h>).
+    void close_thread_creation() {
+        kernel::synchronization::lock_guard guard(m_lock);
+        m_accept_threads = false;
+    }
+
     void record_exit(uint32_t cause, uint32_t status) {
+        kernel::synchronization::lock_guard guard(m_lock);
+        m_accept_threads = false;
         if (m_exit_recorded) { return; }
         m_exit_recorded = true;
         m_exit_cause    = cause;
@@ -58,10 +74,9 @@ class Task : public kernel::obj::Object {
     kernel::obj::HandleId owner_handle() const { return m_owner_handle; }
     void set_owner_handle(kernel::obj::HandleId id) { m_owner_handle = id; }
 
-    // The parent's end of this task's bootstrap channel (<abi/syscall.h>). The kernel is every
-    // task's parent today, so the end lives here rather than in a handle table; writing to it
-    // queues mail on the task's slot-0 endpoint. Held for the task's life -- dropping it is what
-    // tells the task its parent is gone -- and released in teardown_user_task.
+    // The kernel-parented bootstrap endpoint, used for init. Userspace-created tasks instead
+    // hand this endpoint to their creator's handle table. Writing to it queues mail on the
+    // task's slot-0 endpoint; dropping it signals parent death. Teardown releases the kernel end.
     const ktl::ref<kernel::obj::Channel>& mailbox() const { return m_mailbox; }
     void set_mailbox(ktl::ref<kernel::obj::Channel> end) { m_mailbox = ktl::move(end); }
 
@@ -82,12 +97,14 @@ class Task : public kernel::obj::Object {
     }
 
    private:
+    char m_owned_name[64] = {};
     kernel::obj::HandleTable m_handles;
     ktl::vector<ktl::ref<Thread>> m_threads;
     kernel::synchronization::mutex m_lock;
     kernel::mm::vm_aspace* m_aspace      = nullptr;
     task_state m_state                   = task_state::NEW;
     kernel::obj::HandleId m_owner_handle = kernel::obj::HandleId::invalid();
+    bool m_accept_threads                = true;
     bool m_exit_recorded                 = false;
     uint32_t m_exit_cause                = 0;
     uint32_t m_exit_status               = 0;

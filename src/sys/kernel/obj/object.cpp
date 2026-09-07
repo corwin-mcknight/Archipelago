@@ -6,6 +6,7 @@
 #include <kernel/obj/type_registry.h>
 #include <kernel/panic.h>
 #include <kernel/sched/task.h>
+#include <kernel/sched/task_construction.h>
 #include <kernel/sched/thread.h>
 
 namespace kernel::obj {
@@ -19,6 +20,8 @@ void obj_init() {
     Port::register_type(g_type_registry).expect("obj_init: Port type registration failed");
     kernel::sched::Thread::register_type(g_type_registry).expect("obj_init: Thread type registration failed");
     kernel::sched::Task::register_type(g_type_registry).expect("obj_init: Task type registration failed");
+    kernel::sched::TaskFactory::register_type(g_type_registry).expect("obj_init: TaskFactory registration failed");
+    kernel::sched::ThreadFactory::register_type(g_type_registry).expect("obj_init: ThreadFactory registration failed");
     kernel::sched::kernel_task();  // task zero exists before anything can need a handle
 }
 

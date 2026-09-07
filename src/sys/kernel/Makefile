@@ -55,7 +55,6 @@ CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 TASK_SRCS := $(shell find $(SRC_DIRS)/task -name *.cpp -not -path '*/tests/*')
 OBJ_SRCS := $(shell find $(SRC_DIRS)/obj -name *.cpp -not -path '*/tests/*')
 CRASH_SRCS := $(shell find $(SRC_DIRS)/crash -name *.cpp -not -path '*/tests/*')
-ELF_SRCS := $(shell find $(SRC_DIRS)/elf -name *.cpp -not -path '*/tests/*')
 SYSCALL_SRCS := $(shell find $(SRC_DIRS)/syscalls -name *.cpp -not -path '*/tests/*')
 MM_SRCS := $(shell find $(SRC_DIRS)/mm -name *.cpp -not -path '*/tests/*')
 SHELL_SRCS := $(shell find $(SRC_DIRS)/shell -name *.cpp -not -path '*/tests/*')
@@ -66,7 +65,7 @@ SHELL_SRCS := $(shell find $(SRC_DIRS)/shell -name *.cpp -not -path '*/tests/*')
 TEST_SRCS := $(shell find $(SRC_DIRS) -type f -path '*/tests/freestanding/*.cpp') \
 	$(shell find $(SRC_DIRS) -type f -path '*/$(ARCH)/tests/*.cpp') \
 	$(shell find $(PLATFORM_DIR) -type f -path '*/tests/*.cpp')
-SRCS := $(CORE_SRCS) $(TASK_SRCS) $(OBJ_SRCS) $(CRASH_SRCS) $(ELF_SRCS) $(SYSCALL_SRCS) $(BOOT_SRCS) $(PLATFORM_SRCS) \
+SRCS := $(CORE_SRCS) $(TASK_SRCS) $(OBJ_SRCS) $(CRASH_SRCS) $(SYSCALL_SRCS) $(BOOT_SRCS) $(PLATFORM_SRCS) \
 	$(ARCH_SRCS) $(MM_SRCS) $(SHELL_SRCS) $(TEST_SRCS)
 
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)

@@ -1,8 +1,8 @@
 # Task Model
 
 > [!info] Partial Implementation
-> Task creation, ELF loading, ring-3/U-mode entry, scheduling, teardown, kill, exit status, the TERMINATED signal, and spawn-from-VMO are implemented on x86_64 and riscv64.
-> Region delegation, the userspace loader, and the broader syscall surface remain planned.
+> Boot-only init loading, userspace ELF loading, capability-gated task construction, worker threads, scheduling, teardown, kill, exit status, and the TERMINATED signal are implemented on x86_64 and riscv64.
+> General region delegation and the broader syscall surface remain planned.
 
 A task is the unit of isolation in Archipelago.
 It is deliberately not called a "process" -- there is no UNIX lineage here.
@@ -20,7 +20,7 @@ There is no address space handle.
 A task can only map [[Memory Subsystem#Virtual Memory Manager|VMOs]] into its own address space -- there is no ambient mechanism to map into another task's memory.
 If task A wants task B to access shared memory, it sends a VMO handle through a [[IPC Primitives#Channels|channel]] and task B maps it itself.
 The one planned exception is region delegation: a task may hand out a handle to a region of its own address space, granting the holder the right to map into that interval.
-That is deliberate delegation through a capability, not ambient authority; it is how a loader populates a new task's address space, and region handles arrive with the task and IPC milestone.
+That is deliberate delegation through a capability, not ambient authority; general region delegation remains planned. The current loader populates a thread-owned construction container through its separate TaskFactory capability.
 
 ## Tasks as Kernel Objects
 Tasks are [[Object Model|kernel objects]] like any other.
@@ -57,22 +57,14 @@ The handle table serves two practical purposes:
   A task's destruction is ordered by the kernel closing its handle after cleanup.
 
 ## Bootstrap
-The kernel follows the normal task creation path to launch the first userspace program.
-Because the kernel is task zero with full rights, it can do everything any parent task could do:
-create a new task object, populate its handle table, map memory, and start a thread.
+The kernel loads init exactly once, from a minimal non-ELF boot image. It installs the fixed regions, stack, bootstrap channel, self-handles, and the initial TaskFactory capability before making init runnable. No syscall exposes the boot loader.
 
-The kernel finds a userspace program called init -- the [[Service Coordination|coordinator]] -- and launches it.
-The coordinator then spawns every other task, so the kernel launches exactly one.
-There is no special bootstrap mode -- the same code path used for the first launch is used for every launch.
+Init uses a userspace ELF library to start the dedicated ELF loader service, then transfers construction authority to it. Subsequent program images are sent to that service. It returns the child's task handle and parent bootstrap endpoint to init, which remains the service coordinator for the child.
 
-### ELF Loading
-The kernel has one built-in binary format loader: ELF.
-It parses the ELF binary, creates VMOs for each loadable segment, maps them into the task's address space, and sets the thread's entry point.
+### Executable loading
+Executable-format parsing belongs entirely to userspace. A loader worker uses its TaskFactory capability to create a thread-owned dormant address-space container, populate private mappings, and start the initial thread at an entry address with a prepared stack. The kernel validates addresses and permissions; it never interprets executable bytes.
 
-The built-in loader is scaffolding for everything except the boot path.
-The end state is that the [[Service Coordination|coordinator]] builds executables in memory itself -- ELF, Mach-O, or any other format -- using builder primitives: create an empty task, map VMO ranges into it through region delegation, start a thread at an entry point.
-The kernel then parses ELF only to load the coordinator, and does not need to understand every executable format.
-See [[Service Coordination#The loader trajectory]].
+Aborting construction or exiting its owning worker releases the unfinished address space. Successful start consumes construction and gives the child an independent lifetime. Applications receive no TaskFactory capability by default. See [[Executable Loading]] for the boot contract, authority, W^X, and failure rules.
 
 ## Service Discovery
 The kernel provides no service naming.

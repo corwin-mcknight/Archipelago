@@ -19,23 +19,4 @@ uint64_t sys_task_status(obj::HandleTable& table, uint64_t handle) {
     return task->exit_code();
 }
 
-uint64_t sys_task_spawn(sched::Thread& self, uint64_t handle, uint64_t offset) {
-    using namespace kernel::obj;
-    const auto& buffer = self.ipc();
-    auto output        = buffer.range(offset, 2 * sizeof(uint64_t));
-    if (output.is_err()) { return errc_of(output.unwrap_err()); }
-
-    auto task  = self.owner();
-    auto found = task->handles().get<kernel::mm::vmo>(unpack_handle(handle), RIGHT_READ);
-    if (found.is_err()) { return errc_of(found.unwrap_err()); }
-    auto image   = found.unwrap();
-
-    auto spawned = kernel::sched::task_spawn(*task, ktl::move(image));
-    if (spawned.is_err()) { return errc_of(spawned.unwrap_err()); }
-
-    uint64_t handles[2] = {pack_handle(spawned.unwrap().task), pack_handle(spawned.unwrap().mailbox)};
-    output.unwrap().write(handles, sizeof(handles));
-    return 0;
-}
-
 }  // namespace kernel::syscalls

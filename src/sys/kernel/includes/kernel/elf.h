@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The ELF64 on-disk format, shared by every consumer that reads an ELF image: the kernel's own
-// symbol-table snapshot (<kernel/elf_symbols.h>) and the user-binary loader (<kernel/elf_loader.h>).
+// ELF64 layout for the kernel's own symbol-table snapshot (<kernel/elf_symbols.h>).
+// Userspace executable loading lives in lib/elf and is not linked into the kernel.
 // Structure layout only -- no policy about which images are acceptable, which is each consumer's own
 // business.
 

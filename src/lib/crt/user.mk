@@ -21,7 +21,7 @@ SYSROOT ?= $(BUILD_DIR)/sysroot
 include $(dir $(lastword $(MAKEFILE_LIST)))arch.mk
 
 SRCS := $(wildcard $(SRC_DIRS)/*.c) $(wildcard $(SRC_DIRS)/*.cpp)
-OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
+OBJS := $(SRCS:%=$(OBJ_DIR)/%.o) $(EXTRA_OBJS)
 DEPS := $(filter %.d,$(OBJS:.o=.d))
 
 COMMON_FLAGS := \
@@ -50,9 +50,9 @@ LDFLAGS := -nostdlib \
 	-z noexecstack \
 	-T $(SYSROOT)/usr/lib/user.ld
 
-$(OBJ_DIR)/$(TARGET_EXEC): $(OBJS)
+$(OBJ_DIR)/$(TARGET_EXEC): $(OBJS) $(USER_LIBS) $(SYSROOT)/usr/lib/libcrt.a $(SYSROOT)/usr/lib/user.ld
 	@echo "Linking $(TARGET_EXEC)..."
-	@$(LD) $(OBJS) $(SYSROOT)/usr/lib/libcrt.a $(LDFLAGS) -o $@
+	@$(LD) $(OBJS) $(USER_LIBS) $(SYSROOT)/usr/lib/libcrt.a $(LDFLAGS) -o $@
 
 $(OBJ_DIR)/%.c.o: %.c
 	@echo -n "+"

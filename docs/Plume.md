@@ -29,7 +29,9 @@ A package that compiles board facts in declares `varies_by: ["board"]` and build
 | `boot/limine-config` | Limine bootloader configuration           |
 | `sys/kernel`         | The Archipelago kernel                    |
 | `sys/kernel-headers` | Public kernel headers (user/kernel ABI)   |
-| `sys/init`           | The first user program                    |
+| `sys/init`           | The boot-only non-ELF coordinator image    |
+| `lib/elf`            | Userspace ELF parser and constructor       |
+| `sys/elf_loader`     | ELF loading service and worker threads     |
 
 ### Package Structure
 Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implementing four stages:

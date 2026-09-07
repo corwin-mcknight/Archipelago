@@ -46,6 +46,14 @@ lib/crt:
   dependencies:
     - "sys/kernel-headers"
 
+lib/elf:
+  description: "Userspace static ELF parser and task constructor"
+  supports_live_sources: true
+  live_source_path: "lib/elf"
+  dependencies:
+    - "sys/kernel-headers"
+    - "lib/crt"
+
 sys/init:
   description: "The first user program"
   supports_live_sources: true
@@ -53,6 +61,16 @@ sys/init:
   dependencies:
     - "sys/kernel-headers"
     - "lib/crt"
+    - "lib/elf"
+
+sys/elf_loader:
+  description: "Capability-endowed ELF loader with one worker thread per spawn"
+  supports_live_sources: true
+  live_source_path: "sys/elf_loader"
+  dependencies:
+    - "sys/kernel-headers"
+    - "lib/crt"
+    - "lib/elf"
 
 sys/selftest:
   description: "The user-mode self-check payload"
@@ -74,13 +92,13 @@ test/kernel-testrunner:
   description: "Host-tier kernel test runner"
   is_build_tool: true
   supports_live_sources: true
-  live_source_path: "sys/kernel"
+  live_source_path: "."
 
 test/kernel-fuzz:
   description: "Host fuzz lane (libFuzzer over the demangler)"
   is_build_tool: true
   supports_live_sources: true
-  live_source_path: "sys/kernel"
+  live_source_path: "."
 
 test/kernel-tsan:
   description: "Host TSan lane (real-thread stress over ktl::atomic)"
