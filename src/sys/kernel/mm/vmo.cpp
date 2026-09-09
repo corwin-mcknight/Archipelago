@@ -9,10 +9,20 @@
 
 namespace kernel::mm {
 
-vmo::vmo(size_t pages, ktl::ref<pager> pgr) : obj::Object(TYPE_ID), m_pages(pages), m_pager(ktl::move(pgr)) {
-    size_t chunk_count = (pages + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES;
-    for (size_t i = 0; i < chunk_count; ++i) { (void)m_chunks.push_back(nullptr); }
+ktl::ref<vmo> vmo::create(size_t pages, ktl::ref<pager> pgr) {
+    if (!pgr) { return {}; }
+    // Divide before rounding so even SIZE_MAX pages cannot wrap to an empty index.
+    size_t chunk_count = pages / CHUNK_ENTRIES + (pages % CHUNK_ENTRIES != 0);
+    ktl::vector<uint64_t*> chunks;
+    if (!chunks.reserve(chunk_count)) { return {}; }
+    for (size_t i = 0; i < chunk_count; ++i) {
+        if (!chunks.push_back(nullptr)) { return {}; }
+    }
+    return ktl::make_ref<vmo>(construction_key{}, pages, ktl::move(pgr), ktl::move(chunks));
 }
+
+vmo::vmo(construction_key, size_t pages, ktl::ref<pager> pgr, ktl::vector<uint64_t*> chunks)
+    : obj::Object(TYPE_ID), m_pages(pages), m_pager(ktl::move(pgr)), m_chunks(ktl::move(chunks)) {}
 
 vmo::~vmo() {
     // Bindings hold a ref, so a dying VMO has no mappings left to zap.
@@ -27,8 +37,7 @@ vmo::~vmo() {
                 desc->offset      = 0;
                 desc->share_count = 0;
             }
-            // Device windows keep their frames; only pager-owned frames
-            // return to the PMM.
+            // Device and wired windows do not own their backing frames.
             if (m_pager->owns_frames()) { g_page_frame_allocator.free(chunk[e]); }
         }
         g_page_frame_allocator.free(direct_map_physical(chunk).value());
@@ -109,6 +118,6 @@ void vmo::remove_mapping(region_child& binding) {
 // initializer runs from the global-ctor pass (no __cxa_guard in the kernel).
 namespace { [[clang::no_destroy]] ktl::ref<pager> g_anonymous_pager = ktl::make_ref<anonymous_pager>(); }  // namespace
 
-ktl::ref<vmo> create_anonymous_vmo(size_t pages) { return ktl::make_ref<vmo>(pages, g_anonymous_pager); }
+ktl::ref<vmo> create_anonymous_vmo(size_t pages) { return vmo::create(pages, g_anonymous_pager); }
 
 }  // namespace kernel::mm

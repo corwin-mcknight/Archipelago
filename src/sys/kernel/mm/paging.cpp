@@ -15,8 +15,8 @@ namespace {
 // The address space active on each core. The fault handler resolves against the calling core's.
 constinit vm_aspace* g_active_space[CONFIG_MAX_CORES]{};
 
-// Other cores on which `space` is live right now. A core that activates it afterwards loads the
-// tables fresh (activate() flushes), so a stale entry can only sit on a core that already had it.
+// Other cores currently recorded as running `space`, used to target the arch
+// shootdown hook. activate() reloads the tables on the calling core.
 uint64_t remote_cores_with(const vm_aspace* space) {
     size_t self   = kernel::arch::current_core_index();
     uint64_t mask = 0;
@@ -105,9 +105,8 @@ uint64_t* find_leaf_slot(vm_paddr_t root_phys, uintptr_t vaddr) {
     return &table[level_index(vaddr, arch::PT_LEVELS - 1)];
 }
 
-// Resolve vaddr to its terminal PTE, transparently handling the large pages
-// the bootloader installs in the kernel half at any level. Returns the entry
-// and the intra-page offset mask, or nothing if unmapped.
+// Resolve vaddr to its terminal PTE, including bootloader large-page mappings.
+// Returns the entry and intra-page offset mask, or nothing if unmapped.
 struct terminal_pte {
     uint64_t entry;
     uintptr_t offset_mask;
@@ -166,8 +165,8 @@ bool vm_aspace::arch_init() {
 
     // Clone the kernel half (upper 256 root entries) from the active space so
     // the kernel is mapped in every address space. The lower 256 (user half)
-    // stay empty. The intermediate tables are shared, not copied -- acceptable
-    // because kernel mappings are not created through map_page this milestone.
+    // stay empty. The intermediate tables are shared, not copied; map_page
+    // and unmap_page reject the kernel half before touching those tables.
     uint64_t* dst    = table_at(m_arch.root_phys);
     uint64_t* src    = table_at(arch::current_root());
     for (size_t i = 256; i < 512; ++i) { dst[i] = src[i]; }
@@ -200,9 +199,8 @@ bool vm_aspace::arch_init_kernel() {
 
 void vm_aspace::arch_destroy() {
     if (m_arch.root_phys == 0) { return; }
-    // Only free the user half. The kernel half was cloned from the boot tables
-    // and its subtrees are shared with every other space -- freeing them would
-    // corrupt the kernel mapping.
+    // Only free the user half. The kernel half shares the kernel address
+    // space's subtrees; freeing them would corrupt mappings in other spaces.
     uint64_t* root = table_at(m_arch.root_phys);
     for (size_t i = 0; i < 256; ++i) { free_subtree(root[i], arch::PT_LEVELS); }
     g_page_frame_allocator.free(m_arch.root_phys);
@@ -214,7 +212,10 @@ void vm_aspace::arch_destroy() {
 
 bool vm_aspace::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_cache_mode cache) {
     if (m_arch.root_phys == 0) { return false; }
-    if (!is_canonical(vaddr)) { return false; }
+    // Only the low half is owned by this space. Kernel-half tables are shared,
+    // so even walking them to widen intermediate permissions is a mutation of
+    // other spaces. Dynamic kernel mappings need a separate path.
+    if (vaddr >= low_limit()) { return false; }
     if ((vaddr & 0xFFF) != 0) { return false; }
     if ((paddr & 0xFFF) != 0) { return false; }
     // Uniform contract: every present page is readable. x86_64 cannot encode
@@ -226,8 +227,8 @@ bool vm_aspace::map_page(uintptr_t vaddr, vm_paddr_t paddr, vm_prot_t prot, vm_c
     uint64_t* leaf = ensure_leaf_slot(m_arch.root_phys, vaddr, flags);
     if (leaf == nullptr) { return false; }
 
-    // Present leaves are rejected rather than replaced, so map_page never
-    // changes an existing translation.
+    // Present leaves are not replaced. The caller must unmap before installing
+    // a different frame or protection at this address.
     if (arch::pte_present(*leaf)) { return false; }
 
     *leaf = arch::make_leaf(paddr, flags);
@@ -258,11 +259,10 @@ ktl::maybe<vm_translation> vm_aspace::walk_ext(uintptr_t vaddr) const {
 
 ktl::maybe<vm_paddr_t> vm_aspace::unmap_page(uintptr_t vaddr) {
     if (m_arch.root_phys == 0) { return ktl::nothing; }
-    if (!is_canonical(vaddr)) { return ktl::nothing; }
+    if (vaddr >= low_limit()) { return ktl::nothing; }
     if ((vaddr & 0xFFF) != 0) { return ktl::nothing; }
 
-    // 4K only: large mappings are bootloader-owned kernel mappings and are
-    // never torn down through this path.
+    // Only remove 4K leaves; find_leaf_slot will not descend through a large mapping.
     uint64_t* leaf = find_leaf_slot(m_arch.root_phys, vaddr);
     if (leaf == nullptr) { return ktl::nothing; }
     if (!arch::pte_present(*leaf)) { return ktl::nothing; }

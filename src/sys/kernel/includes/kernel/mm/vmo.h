@@ -23,10 +23,19 @@ struct region_child;
 // pages materialize through a pager. Residency truth lives here (chunked
 // frame index) and in the page descriptors -- never in PTE software bits.
 class vmo : public obj::Object {
+    class construction_key {
+        friend class vmo;
+        construction_key() = default;
+    };
+
    public:
     DECLARE_OBJECT_TYPE(vmo, obj::type_ids::VMO)
 
-    vmo(size_t pages, ktl::ref<pager> pgr);
+    // Returns empty for a null pager or allocation failure. The chunk-pointer
+    // vector covers all pages before construction; residency chunks stay lazy.
+    // The key keeps construction behind this factory while allowing make_ref.
+    static ktl::ref<vmo> create(size_t pages, ktl::ref<pager> pgr);
+    vmo(construction_key, size_t pages, ktl::ref<pager> pgr, ktl::vector<uint64_t*> chunks);
     ~vmo() override;
 
     size_t size_pages() const { return m_pages; }
@@ -44,12 +53,9 @@ class vmo : public obj::Object {
     // Eager population without faulting. Range is [page, page+count).
     ktl::result<void> commit(uint64_t page, size_t count);
 
-    // Mapping back-refs, maintained by Region::map/unmap under the VMM lock.
-    // They record every translation of a page so eviction and writeback can
-    // find them when those land; today only the destructor's no-mappings
-    // assert consumes them. A back-ref that failed to record is a translation
-    // those walks cannot see, so the caller must undo the binding rather than
-    // keep an untracked one.
+    // Region bindings register under the VMM lock so future eviction and
+    // writeback can locate all mappings. Failure to record a binding requires
+    // the caller to undo it; destruction asserts all bindings were removed.
     [[nodiscard]] bool add_mapping(vm_aspace& aspace, region_child& binding);
     void remove_mapping(region_child& binding);
     size_t mapping_count() const { return m_mappings.size(); }
@@ -85,12 +91,12 @@ class vmo : public obj::Object {
 ktl::ref<vmo> create_anonymous_vmo(size_t pages);
 
 // VMO wrapping a fixed physical window (MMIO or wired scratch) with the given
-// cache mode. Frames are never PMM-owned.
+// cache mode. Backing frames remain externally owned; destruction neither
+// frees them nor reverts their WIRED descriptor marks.
 ktl::ref<vmo> create_device_vmo(vm_paddr_t base, size_t pages, vm_cache_mode mode);
 
-// VMO wrapping already-wired cached RAM (boot module bytes today). Like a device
-// window but without the WIRED descriptor marking -- the range's existing
-// classification is what pins it.
+// VMO wrapping RAM already reserved by the caller (boot module bytes today).
+// Uses cached translation without changing descriptor states or freeing frames.
 ktl::ref<vmo> create_wired_vmo(vm_paddr_t base, size_t pages);
 
 }  // namespace kernel::mm

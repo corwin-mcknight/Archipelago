@@ -14,21 +14,21 @@ ktl::result<vm_paddr_t> device_pager::fill(uint64_t page) {
 ktl::ref<vmo> create_device_vmo(vm_paddr_t base, size_t pages, vm_cache_mode mode) {
     auto pgr = ktl::make_ref<device_pager>(base, mode);
     if (pgr.get() == nullptr) { return {}; }
-    // Device frames are pinned for the VMO's lifetime. RAM-backed windows in
-    // descriptor coverage get marked; true MMIO usually sits above coverage
-    // and lookup simply misses.
+    auto object = vmo::create(pages, ktl::move(pgr));
+    if (!object) { return {}; }
+    // Defer WIRED marking until construction succeeds so failure leaves the
+    // window unchanged. Uncovered frames are ignored; marks on covered frames
+    // currently survive VMO destruction; reservation ownership is unresolved.
     g_page_descriptors.mark_range(base, pages, page_state::WIRED);
-    return ktl::make_ref<vmo>(pages, pgr);
+    return object;
 }
 
 ktl::ref<vmo> create_wired_vmo(vm_paddr_t base, size_t pages) {
-    // Same translation-only pager as a device window, but over ordinary cached RAM the boot
-    // classification already wired (boot module bytes today). No descriptor marking: the frames'
-    // KERNEL state is what keeps them pinned, and marking here would be the un-unmarkable kind
-    // create_device_vmo is known for (todo.md).
+    // The caller has already reserved this RAM. Boot module frames, for example,
+    // arrive with WIRED descriptors; preserve that existing reservation.
     auto pgr = ktl::make_ref<device_pager>(base, vm_cache_mode::CACHED);
     if (pgr.get() == nullptr) { return {}; }
-    return ktl::make_ref<vmo>(pages, pgr);
+    return vmo::create(pages, ktl::move(pgr));
 }
 
 }  // namespace kernel::mm

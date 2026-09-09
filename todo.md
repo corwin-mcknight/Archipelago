@@ -10,9 +10,8 @@ These findings remain visible in the source; this is a source review, not a fres
 
 ### Memory ownership and allocation failures
 - Validate PMM frees for alignment and eligible frame state (`mm/pmm.cpp`). FREE/ZEROED double frees are already rejected when descriptors cover the frame; WIRED/MMIO and unaligned frees still need protection.
-- Reject kernel-half mutations through user address spaces in `mm/paging.cpp`. `map_page`/`unmap_page` currently permit canonical kernel addresses, whose intermediate tables are shared; define a separate kernel-mapping path before adding dynamic kernel mappings.
-- Make VMO construction report chunk-index allocation failure (`mm/vmo.cpp`); it currently discards `m_chunks.push_back` failure and can advertise more pages than the index covers.
-- Define device-VMO reservation ownership and rollback (`mm/pager_device.cpp`). `create_device_vmo` marks frames WIRED before VMO allocation succeeds and never restores the reservation on destruction; account for overlapping windows before simply unmarking them.
+- Define a separate kernel-mapping path before adding dynamic kernel mappings, including invalidation of shared tables. `map_page`/`unmap_page` in `mm/paging.cpp` now restrict mutations to the low address half.
+- Define device-VMO reservation ownership and rollback (`mm/pager_device.cpp`). `create_device_vmo` marks frames WIRED after VMO allocation succeeds but never restores the reservation on destruction; account for overlapping windows before simply unmarking them.
 - Audit fallible allocation callers, including `ktl::make_ref`, now that nothrow allocation can return null after `heap_activate()`. Ordinary `operator new` and the pre-PMM early heap still panic on exhaustion.
 - Handle task-list allocation failure in `task/task.cpp::register_task` instead of discarding it.
 - Protect the early-heap block list across CPUs, or prove/enforce that all remaining accesses are boot-core-only. Allocation switches to the slab before AP startup, but later frees of early pointers and statistics still enter `early_heap`; any lock must be constant-initialised for pre-constructor use.
