@@ -20,12 +20,12 @@ struct memory_range {
 };
 
 // A file the boot protocol loaded alongside the kernel. `role` is what the boot configuration
-// tagged it with, not its filename, so the kernel asks for what it needs ("init") rather than
+// tagged it with, not its filename, so the kernel asks for what it needs ("init" and "initrd") rather than
 // where it happens to live -- renaming or moving the file cannot break boot.
 //
 // Module bytes are classified memory_kind::KERNEL, so they stay wired and remain readable for the
 // life of the system. Nothing reclaims them yet; the address and length here are what a future
-// initrd path needs to hand the page-aligned interior back to the PMM once it is done with it.
+// reclamation path needs to hand the page-aligned interior back to the PMM once it is done with it.
 struct boot_module {
     const char* role;
     const void* data;

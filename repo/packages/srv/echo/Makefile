@@ -1,4 +1,4 @@
-# The echo server, loaded from the boot image like init. Built in C against the installed public
+# The echo server, loaded from the initrd. Built in C against the installed public
 # ABI headers and the lib/crt runtime, so it depends on both being in the sysroot first.
 #
 # No board facts are compiled in, so like init this builds once per architecture.
@@ -18,5 +18,5 @@ pkg_build:
 
 pkg_install:
 	@echo "[plume] Installing $(CATEGORY)/$(PN)"
-	mkdir -p $(D)/boot
-	cp $(OBJ_DIR)/$(PN).elf $(D)/boot/$(PN).elf
+	mkdir -p $(D)/usr/share/initrd/bootstrap
+	cp $(OBJ_DIR)/$(PN).elf $(D)/usr/share/initrd/bootstrap/$(PN).elf

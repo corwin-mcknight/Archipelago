@@ -1,5 +1,6 @@
 #include <abi/message.h>
 #include <kernel/boot.h>
+#include <kernel/elf.h>
 #include <kernel/log.h>
 #include <kernel/mm/physmap.h>
 #include <kernel/mm/vmo.h>
@@ -143,19 +144,22 @@ ktl::ref<Task> find_task_named(ktl::string_view name) {
 }  // namespace
 
 // The whole service layer, end to end, exactly as a normal boot runs it: the coordinator is
-// launched with every boot module endowed, spawns selftest and echo itself, echo registers its
+// launched with the opaque initrd endowed, spawns selftest and echo from it, echo registers its
 // name, selftest connects to it by name through the coordinator and proves the minted channel
 // round-trips -- selftest's exit status 0 (echo NOT skipped) is the proof the brokered path ran.
 // Killing the coordinator then orphans echo, whose event loop observes PEER_CLOSED and exits
 // cleanly: the parent-death contract, demonstrated on a task the test never held a handle to.
 KTEST_CASE(coordinator_boot) {
     namespace sys = kernel::syscall;
+    KTEST_REQUIRE_EQUAL(kernel::boot::collect().module_count, size_t{2});
+    KTEST_REQUIRE_TRUE(kernel::boot::find_module("init") != nullptr);
+    KTEST_REQUIRE_TRUE(kernel::boot::find_module("initrd") != nullptr);
     auto launched = launch_coordinator();
     KTEST_REQUIRE_TRUE(launched.is_ok());
     ktl::ref<Task> coordinator = launched.unwrap();
     KTEST_EXPECT_TRUE(launch_coordinator().is_err());
 
-    // The coordinator's children appear when it processes its IMAGE mail; find them by name.
+    // The coordinator's children appear after userspace discovers them in the archive.
     ktl::ref<Task> selftest;
     ktl::ref<Task> echo;
     for (int i = 0; i < 2000 && (!selftest || !echo); ++i) {
@@ -209,13 +213,37 @@ KTEST_CASE(coordinator_boot) {
     auto bad_image = kernel::mm::create_anonymous_vmo(1);
     KTEST_REQUIRE_TRUE(bad_image);
     KTEST_REQUIRE_TRUE(mail_image(bad_image, KERNEL_MINIMUM_PAGE_SIZE, "badimage", 8));
-    const auto* module = kernel::boot::find_module("selftest");
-    KTEST_REQUIRE_TRUE(module != nullptr);
-    auto retry_image =
-        kernel::mm::create_wired_vmo(kernel::mm::direct_map_physical(module->data).value(),
-                                     (module->size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE);
+    // A tiny test-only ELF wraps native instructions. Its interpretation stays in the userspace
+    // loader; this fixture needs neither a standalone boot module nor a kernel archive reader.
+    kernel::testing::UserProgram program;
+    program.syscall(ABI_SYS_SLEEP, 100);
+    program.syscall(ABI_SYS_EXIT, 0);
+    using namespace kernel::elf;
+    Elf64_Ehdr eh{};
+    __builtin_memcpy(eh.e_ident, ELF_MAGIC, sizeof(ELF_MAGIC));
+    eh.e_ident[EI_CLASS]     = ELFCLASS64;
+    eh.e_ident[EI_DATA]      = ELFDATA2LSB;
+    eh.e_ident[EI_VERSION]   = EV_CURRENT;
+    eh.e_type                = ET_EXEC;
+    eh.e_machine             = EM_NATIVE;
+    eh.e_version             = EV_CURRENT;
+    eh.e_entry               = 0x400000;
+    eh.e_phoff               = sizeof(eh);
+    eh.e_ehsize              = sizeof(eh);
+    eh.e_phentsize           = sizeof(Elf64_Phdr);
+    eh.e_phnum               = 1;
+    constexpr size_t CODE_AT = KERNEL_MINIMUM_PAGE_SIZE;
+    Elf64_Phdr ph{PT_LOAD, PF_R | PF_X, CODE_AT, eh.e_entry, 0, program.size(), CODE_AT, CODE_AT};
+    auto retry_image = kernel::mm::create_anonymous_vmo(2);
     KTEST_REQUIRE_TRUE(retry_image);
-    KTEST_REQUIRE_TRUE(mail_image(retry_image, module->size, "retrytest", 9));
+    KTEST_REQUIRE_TRUE(retry_image->commit(0, 2).is_ok());
+    auto header_frame = retry_image->resident_frame(0);
+    auto code_frame   = retry_image->resident_frame(1);
+    KTEST_REQUIRE_TRUE(header_frame && code_frame);
+    kernel::mm::copy_to_frame(*header_frame, 0, &eh, sizeof(eh));
+    kernel::mm::copy_to_frame(*header_frame, sizeof(eh), &ph, sizeof(ph));
+    kernel::mm::copy_to_frame(*code_frame, 0, program.data(), program.size());
+    KTEST_REQUIRE_TRUE(mail_image(retry_image, CODE_AT + program.size(), "retrytest", 9));
     ktl::ref<Task> retry;
     for (int i = 0; i < 4000 && !retry; ++i) {
         sleep_ticks(1);
@@ -239,6 +267,48 @@ KTEST_CASE(coordinator_boot) {
     KTEST_REQUIRE_TRUE(loader->state() == task_state::TERMINATED);
     KTEST_EXPECT_TRUE(coordinator->exit_code() >> 32 == sys::TASK_EXIT_KILLED);
     KTEST_EXPECT_ALL(echo->exit_code() >> 32 == sys::TASK_EXIT_EXITED, (echo->exit_code() & 0xFFFFFFFF) == 0);
+}
+
+// Corrupt opaque boot bytes without teaching the kernel their format. Init must reject the
+// archive before starting even a short-lived bootstrap task, then release its archive mapping.
+KTEST_CASE(coordinator_rejects_corrupt_initrd) {
+    namespace sys      = kernel::syscall;
+    const auto* module = kernel::boot::find_module("initrd");
+    KTEST_REQUIRE_TRUE(module != nullptr && module->data != nullptr && module->size != 0);
+    auto* bytes            = const_cast<uint8_t*>(static_cast<const uint8_t*>(module->data));
+    const uint8_t original = bytes[0];
+    const uint64_t before  = stats_snapshot().spawned;
+    bytes[0]               = static_cast<uint8_t>(original ^ 0x80);
+
+    auto launched          = launch_coordinator();
+    if (launched.is_err()) {
+        bytes[0] = original;
+        KTEST_REQUIRE_TRUE(launched.is_ok());
+    }
+    auto coordinator = launched.unwrap();
+    for (int i = 0; i < 2000 && coordinator->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
+    const bool exited         = coordinator->state() == task_state::TERMINATED;
+    ktl::ref<Task> children[] = {find_task_named("elf_loader"), find_task_named("echo"), find_task_named("selftest")};
+    if (!exited) {
+        (void)task_kill(coordinator);
+        for (int i = 0; i < 2000 && coordinator->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
+    }
+    for (auto& child : children) {
+        if (child) { (void)task_kill(child); }
+    }
+    if (coordinator->state() != task_state::TERMINATED) {
+        // Even timeout cleanup failed. Keep the damaged byte intact instead of racing a live
+        // archive reader; the failed test's isolated QEMU instance will be discarded.
+        KTEST_REQUIRE_TRUE(coordinator->state() == task_state::TERMINATED);
+    }
+    bytes[0] = original;
+
+    KTEST_REQUIRE_TRUE(exited);
+    KTEST_EXPECT_ALL(coordinator->exit_code() >> 32 == sys::TASK_EXIT_EXITED,
+                     (coordinator->exit_code() & 0xFFFFFFFF) == 1);
+    KTEST_EXPECT_TRUE(coordinator->aspace() == nullptr);
+    KTEST_EXPECT_EQUAL(stats_snapshot().spawned, before + 1);
+    for (const auto& child : children) { KTEST_EXPECT_FALSE(static_cast<bool>(child)); }
 }
 
 // Task kill against a genuinely blocked native victim: it creates an empty port and parks its
@@ -287,63 +357,44 @@ KTEST_CASE(user_task_kill_blocked) {
     KTEST_EXPECT_TRUE(syscall_dispatch(sys::SYS_HANDLE_CLOSE, keeper, 0, 0, 0, 0, 0) == 0);
 }
 
-// Boot-module endowment: every boot module arrives on the endowed task's mailbox as one IMAGE
-// message -- envelope, exact byte size, role name, and a read-only wired VMO over the module's
-// bytes. Driven against a bare task with a hand-built mailbox so the test owns the child end and
-// no user program races the reads.
+// The kernel delivers exactly one opaque read-only archive, independent of its member count.
+// A bare task lets the test own the child endpoint without a user program racing the reads.
 KTEST_CASE(boot_module_endowment) {
     using namespace kernel::obj;
-    const auto& info = kernel::boot::collect();
-    KTEST_REQUIRE_TRUE(info.module_count >= 2);  // the image ships at least init and echo
+    KTEST_REQUIRE_EQUAL(kernel::boot::collect().module_count, size_t{2});
+    const auto* module = kernel::boot::find_module("initrd");
+    KTEST_REQUIRE_TRUE(module != nullptr);
+    KTEST_REQUIRE_TRUE(kernel::boot::find_module("init") != nullptr);
 
     auto task = ktl::make_ref<Task>();
     KTEST_REQUIRE_TRUE(task);
     KTEST_UNWRAP(ends, Channel::create());
     task->set_mailbox(ends.first);
+    KTEST_REQUIRE_TRUE(endow_initrd(task).is_ok());
+    KTEST_UNWRAP(mail, ends.second->read(Channel::MAX_MESSAGE_BYTES, MessageBuffer::MAX_HANDLES));
+    KTEST_REQUIRE_EQUAL(mail.size(), sizeof(abi_message_header) + sizeof(abi_image_payload));
 
-    KTEST_REQUIRE_TRUE(endow_boot_modules(task).is_ok());
+    abi_message_header header;
+    abi_image_payload payload;
+    __builtin_memcpy(&header, mail.data(), sizeof(header));
+    __builtin_memcpy(&payload, mail.data() + sizeof(header), sizeof(payload));
+    KTEST_EXPECT_ALL(header.opcode == ::abi::message::COORD_OP_INITRD, header.status == 0, header.txid == 0);
+    KTEST_EXPECT_EQUAL(payload.size_bytes, module->size);
 
-    for (size_t i = 0; i < info.module_count; i++) {
-        const auto& module = info.modules[i];
-        size_t name_len    = strlen(module.role);
-
-        auto received      = ends.second->read(Channel::MAX_MESSAGE_BYTES, MessageBuffer::MAX_HANDLES);
-        KTEST_REQUIRE_TRUE(received.is_ok());
-        auto mail = received.unwrap();
-        KTEST_REQUIRE_EQUAL(mail.size(), sizeof(abi_message_header) + sizeof(abi_image_payload) + name_len);
-
-        abi_message_header header;
-        abi_image_payload payload;
-        __builtin_memcpy(&header, mail.data(), sizeof(header));
-        __builtin_memcpy(&payload, mail.data() + sizeof(header), sizeof(payload));
-        KTEST_EXPECT_ALL(header.opcode == ::abi::message::COORD_OP_IMAGE, header.status == 0, header.txid == 0);
-        KTEST_EXPECT_EQUAL(payload.size_bytes, module.size);
-        KTEST_EXPECT_TRUE(memcmp(mail.data() + sizeof(header) + sizeof(payload), module.role, name_len) == 0);
-
-        // The riding handle: a read-only VMO named after the module, sized to its pages, whose
-        // first frame is the module's own physical memory -- wrapped, not copied.
-        HandleId escrowed[MessageBuffer::MAX_HANDLES];
-        KTEST_REQUIRE_EQUAL(mail.detach_handles(escrowed), 1u);
-        auto taken = kernel::sched::kernel_task()->handles().take(escrowed[0]);
-        KTEST_REQUIRE_TRUE(taken.is_ok());
-        auto moved = taken.unwrap();
-        KTEST_EXPECT_ALL(moved.object->type_id() == type_ids::VMO, moved.rights == RIGHT_READ);
-        KTEST_EXPECT_TRUE(strlen(moved.object->name()) == name_len &&
-                          memcmp(moved.object->name(), module.role, name_len) == 0);
-
-        auto image   = ktl::static_ref_cast<kernel::mm::vmo>(moved.object);
-        size_t pages = (module.size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
-        KTEST_EXPECT_EQUAL(image->size_pages(), pages);
-        // Translation-only fill (device-window pager): safe to call without the VMM lock on a VMO
-        // nothing else references.
-        auto frame = image->get_or_fill_page(0);
-        KTEST_REQUIRE_TRUE(frame.is_ok());
-        KTEST_EXPECT_EQUAL(frame.unwrap(), kernel::mm::direct_map_physical(module.data).value());
-    }
-
-    // No stragglers: exactly one message per module.
+    HandleId escrowed[MessageBuffer::MAX_HANDLES];
+    KTEST_REQUIRE_EQUAL(mail.detach_handles(escrowed), 1u);
+    KTEST_UNWRAP(moved, kernel_task()->handles().take(escrowed[0]));
+    KTEST_EXPECT_ALL(moved.object->type_id() == type_ids::VMO, moved.rights == RIGHT_READ);
+    KTEST_EXPECT_TRUE(ktl::string_view(moved.object->name()) == "initrd");
+    auto image   = ktl::static_ref_cast<kernel::mm::vmo>(moved.object);
+    size_t pages = (module->size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
+    KTEST_EXPECT_EQUAL(image->size_pages(), pages);
+    // Translation-only fill: no mapping exists, and the frame must be the original module RAM.
+    KTEST_UNWRAP(frame, image->get_or_fill_page(0));
+    KTEST_EXPECT_EQUAL(frame, kernel::mm::direct_map_physical(module->data).value());
     KTEST_EXPECT_TRUE(ends.second->read(Channel::MAX_MESSAGE_BYTES, MessageBuffer::MAX_HANDLES).is_err());
     task->set_mailbox({});
+    KTEST_EXPECT_TRUE(endow_initrd(task).is_err());
 }
 
 // SYS_OBJECT_WAIT through the real dispatch path from kernel context, on a channel pair in task

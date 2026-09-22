@@ -27,7 +27,7 @@ The development container provides everything needed. For host builds, you need:
 ## Build Commands
 
 ```bash
-make build                     # Build all packages (kernel + limine)
+make build                     # Build all packages (kernel, userspace, bootloader)
 make install                   # Build + assemble bootable ISO
 make test                      # Build, assemble ISO, run full test suite
 make test TEST=<name>          # Run a single test by name
@@ -52,6 +52,7 @@ python3 -m plume test [test_name]    # Build + image + run tests
 python3 -m plume list                # List all packages
 python3 -m plume clean               # Remove build artifacts
 python3 -m plume clangd              # Regenerate compile_commands.json
+python3 -m plume.selfcheck           # Host checks for Plume and deterministic initrd packaging
 ```
 
 Every command accepts `--arch <arch>` to target an architecture for one invocation without touching the `default.yaml` selection, e.g. `python3 -m plume test --arch riscv64`.
@@ -69,6 +70,8 @@ Plume reads package definitions from `repo/packages.yml`. Each package has a Mak
 | `pkg_install` | Install outputs to a staging directory |
 
 After all stages succeed, the staging directories are composed into the target's sysroot at `build/<arch>/sysroot/` -- the sysroot is rebuilt as the union of the staging trees whenever any package changes, never patched in place. The ISO is then assembled from the sysroot.
+
+Userspace packages install runtime content under `usr/share/initrd/` in the sysroot. Image assembly packs it into a deterministic uncompressed ustar archive at `boot/initrd.tar`; Limine loads only `boot/init.bin` and that archive as userspace modules. Bootstrap servers live at `bootstrap/<service>.elf` inside the archive; ordinary executables and data can use other directories. Both ISO and SD images contain the boot artifacts, while headers, libraries, and the loose runtime tree remain in the host sysroot. See `docs/Plume.md` and `docs/Design/Initrd.md` for the packaging and naming contract.
 
 ### Packages
 

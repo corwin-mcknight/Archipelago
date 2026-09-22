@@ -65,6 +65,6 @@ The kernel communicates with Limine through request structures placed in the `__
 | Paging mode (riscv64) | Requires the Sv39 mode implemented by the RISC-V page-table code |
 
 ## First userspace task
-The kernel's boot-only loader starts `init.bin` once. Its fixed-layout `ARCHINIT` header describes text, constants, writable data, and zero-filled storage; it is not ELF. Init receives boot-module VMOs and the initial construction capability through its bootstrap channel.
+The kernel's boot-only loader starts `init.bin` once. Its fixed-layout `ARCHINIT` header describes text, constants, writable data, and zero-filled storage; it is not ELF. Limine supplies exactly two userspace modules, tagged `init` and `initrd`. Init receives one read-only VMO over the opaque initrd, its exact byte length, and the initial construction capability through its bootstrap channel. Failed archive delivery terminates init and reports a boot failure.
 
-Init bootstraps `elf_loader.elf` in userspace and transfers construction authority to that service. All subsequent ELF loading runs in loader worker threads. The kernel accepts prepared mappings and initial execution parameters, never an executable image. See [[Executable Loading]].
+Init validates the uncompressed ustar archive in userspace, finds `bootstrap/elf_loader.elf`, and transfers construction authority to that service after starting it. Other `bootstrap/<service>.elf` entries start through the loader; files elsewhere in the archive do not start automatically. All subsequent ELF loading runs in loader worker threads. The kernel accepts prepared mappings and initial execution parameters, never an executable image. See [[Executable Loading]].

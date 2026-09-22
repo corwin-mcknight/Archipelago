@@ -69,7 +69,7 @@ def build_log_path(config: Config, package: Package) -> str:
     return os.path.join(config.get("build_dir"), "logs", package.category, f"{package.name}.log")
 
 
-def build_package(config: Config, package: Package, verbose: bool = False, force: bool = False) -> tuple[bool, float]:
+def build_package(config: Config, package: Package, verbose: bool = False) -> tuple[bool, float]:
     """Build a single package by running its Makefile stages.
 
     This only builds into staging ($D) -- composing into the sysroot is the
@@ -77,7 +77,18 @@ def build_package(config: Config, package: Package, verbose: bool = False, force
     """
     env = get_build_env(config, package)
 
-    if force and os.path.isdir(env["D"]):
+    # The previous success no longer describes staging once rebuilding starts.
+    # Invalidate it first: a failed install followed by a source revert must
+    # rebuild, even when the failed stage left nonempty partial output behind.
+    try:
+        os.remove(_stamp_path(config, package))
+    except FileNotFoundError:
+        pass
+
+    # Reinstall into an empty staging tree even for incremental rebuilds.
+    # Otherwise renamed or removed outputs survive sysroot recomposition
+    # and, in particular, remain members of the userspace initrd.
+    if os.path.isdir(env["D"]):
         shutil.rmtree(env["D"])
 
     for d in [env["WORKDIR"], env["S"], env["D"]]:
@@ -264,7 +275,7 @@ def orchestrate(config: Config, ordered: list[Package], compose_set: list[Packag
             total = max(total, built)
             label = bold(cyan(f"[{built}/{total}] {pkg}"))
             print(label, flush=True) if verbose else open_line(label)
-            ok, elapsed = build_package(config, pkg, verbose=verbose, force=force)
+            ok, elapsed = build_package(config, pkg, verbose=verbose)
             if ok and commit(pkg):
                 text = f"{green('✓')}  {dim(fmt_duration(elapsed))}{fmt_reason(reason)}"
                 print(f"  {text}") if verbose else close_line(text)
@@ -295,7 +306,7 @@ def orchestrate(config: Config, ordered: list[Package], compose_set: list[Packag
                         commit(pkg)
                         sorter.done(pkg)
                     else:
-                        pending[executor.submit(build_package, config, pkg, verbose=False, force=force)] = (pkg, reason)
+                        pending[executor.submit(build_package, config, pkg, verbose=False)] = (pkg, reason)
                     pull()
                 if not pending:
                     continue

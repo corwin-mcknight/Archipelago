@@ -41,8 +41,9 @@ These findings remain visible in the source; this is a source review, not a fres
 Boot-only non-ELF init, thread-owned task construction, private W^X mappings, and the dedicated userspace ELF loader are implemented; see [Executable Loading](docs/Design/Executable%20Loading.md). General region delegation and loader restart remain separate work.
 
 ### Bootstrap and file services
-- Build an initrd containing the bootstrap servers, shell, programs, and data files. Supply init and the initrd as the two userspace Limine boot inputs.
-- Define the initrd format and bootstrap-server discovery convention. Give init a minimal reader so it can find and launch the initial servers before file access exists.
+Plume supplies init and a deterministic uncompressed ustar initrd as the two userspace Limine boot inputs. Init validates the archive and launches `bootstrap/<service>.elf`, with `elf_loader` first; echo and selftest are the current bootstrap payloads. See [Initrd](docs/Design/Initrd.md).
+
+- Add the file server, shell, demonstration programs, and data files to the initrd as those components become available.
 - Implement the userspace file server's file/directory protocol and namespace: writable anonymous storage at `/`, with the read-only initrd exposed at `/boot`. Anonymous storage is a feature of the file server and lasts for the current boot.
 - Define capability-based file access and executable-content delivery, including lifetimes and failure behaviour. The shell obtains program contents from the file server and asks init to execute them.
 
@@ -60,7 +61,6 @@ Implement [standard streams](docs/Design/Standard%20Streams.md) as part of the i
 4. Move ordinary program output to endowed streams. Device ownership follows the driver work below.
 
 ### Coordinator and lifecycle follow-ups
-- Handle boot-module delivery beyond `Channel::QUEUE_DEPTH` (8) with chunking, draining, or retry; `endow_boot_modules` currently logs failed IMAGE delivery but does not retry.
 - Replace or explicitly expose fixed coordinator limits as workloads grow: 8 children/registrations/parked connects, 31-byte service names, and echo's 4-client limit. Add negative replies or timeouts for connects to names that never register.
 - Implement exception propagation and user crash-reporting/unwinding metadata, per [Task Model](docs/Design/Task%20Model.md). Task kill, exit status, TERMINATED, and child-death observation already exist.
 - Define restart and capability-revocation policy for crashed servers. Retain/reload image VMOs for respawn; coordinator currently closes them after spawn. Include structured fault isolation reporting.

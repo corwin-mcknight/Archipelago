@@ -1,13 +1,32 @@
 """Boot image assembly: ISO (QEMU/EDK2) and SD (U-Boot EFI on real boards)."""
 
 import os
+from contextlib import contextmanager
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 
 from plume.config import Config
+from plume.initrd import assemble_initrd
 
 # Removable-media EFI executable name per architecture, as Limine ships them.
 EFI_APP = {"x86_64": "BOOTX64.EFI", "riscv64": "BOOTRISCV64.EFI"}
+
+
+@contextmanager
+def _boot_tree(config):
+    """Package boot artifacts alone; the SDK and loose runtime stay on host."""
+    sysroot = config.get("sysroot")
+    for required in ("boot/kernel.elf", "limine.conf"):
+        if not os.path.isfile(os.path.join(sysroot, required)):
+            raise ValueError(f"{sysroot}/{required} missing; run `plume build`")
+    assemble_initrd(sysroot)
+    with tempfile.TemporaryDirectory(prefix="plume-boot-") as root:
+        shutil.copytree(os.path.join(sysroot, "boot"), os.path.join(root, "boot"))
+        shutil.copy2(os.path.join(sysroot, "limine.conf"), root)
+        yield root
 
 
 def assemble_image(config: Config, verbose: bool = False):
@@ -40,6 +59,15 @@ def _run_steps(steps, env, verbose):
 
 
 def assemble_iso(config: Config, verbose: bool = False):
+    try:
+        with _boot_tree(config) as root:
+            return _assemble_iso(config, root, verbose)
+    except (OSError, ValueError, tarfile.TarError) as error:
+        print(f"error: cannot assemble boot image: {error}", file=sys.stderr)
+        return False
+
+
+def _assemble_iso(config: Config, root: str, verbose: bool):
     """Build a bootable ISO from the sysroot.
 
     The target config's `image:` stanza names the boot images (sysroot-relative
@@ -47,7 +75,6 @@ def assemble_iso(config: Config, verbose: bool = False):
     is present only on targets with BIOS boot, and its presence also triggers
     the limine bios-install step using the host tool from boot/limine-tools.
     """
-    sysroot = config.get("sysroot")
     tools_path = config.get("tools_path")
     image_output = config.get("image_output")
     image = config.get("image", {})
@@ -60,7 +87,7 @@ def assemble_iso(config: Config, verbose: bool = False):
 
     capture = {} if verbose else {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
 
-    # 1. Create ISO with xorriso (boot bins are already in sysroot/boot/).
+    # 1. Create ISO with xorriso from the boot artifacts and packed userspace.
     os.makedirs(os.path.dirname(image_output), exist_ok=True)
     xorriso_args = ["xorriso", "-as", "mkisofs"]
     if bios_boot:
@@ -72,7 +99,7 @@ def assemble_iso(config: Config, verbose: bool = False):
         "--efi-boot", efi_boot,
         "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label",
         "--quiet",
-        sysroot, "-o", image_output,
+        root, "-o", image_output,
     ]
     result = subprocess.run(xorriso_args, **capture)
     if result.returncode != 0:
@@ -95,16 +122,24 @@ def assemble_iso(config: Config, verbose: bool = False):
 
 
 def assemble_sd(config: Config, verbose: bool = False, output: str = None):
+    try:
+        with _boot_tree(config) as root:
+            return _assemble_sd(config, root, verbose, output)
+    except (OSError, ValueError, tarfile.TarError) as error:
+        print(f"error: cannot assemble boot image: {error}", file=sys.stderr)
+        return False
+
+
+def _assemble_sd(config: Config, root: str, verbose: bool, output: str = None):
     """Build an SD-card image from the sysroot: MBR with one FAT32 ESP.
 
     The layout is what firmware EFI loaders (U-Boot's included) scan for: the
-    sysroot copied in verbatim -- limine.conf at the root, the kernel and
+    boot tree -- limine.conf at the root, the kernel and
     modules under /boot -- plus Limine's EFI executable at /EFI/BOOT/. Built
     with mtools, so no loop devices or root privileges are needed. Written to
     the config's image_output unless `output` overrides it; dd the result to
     a card, or hand it to QEMU as a raw drive.
     """
-    sysroot = config.get("sysroot")
     image_output = output or config.get("image_output")
     efi_app = EFI_APP.get(config.get_arch())
     if efi_app is None:
@@ -115,7 +150,7 @@ def assemble_sd(config: Config, verbose: bool = False, output: str = None):
         print(f"error: {efi_app_path} missing; run `plume build`", file=sys.stderr)
         return False
 
-    # ponytail: fixed 64 MiB, several times the current sysroot; mcopy fails
+    # ponytail: fixed 64 MiB, several times the current boot tree; mcopy fails
     # loudly on overflow, so grow this constant when it does.
     size_mib = 64
 
@@ -130,12 +165,12 @@ def assemble_sd(config: Config, verbose: bool = False, output: str = None):
         f.write(f'drive c: file="{image_output}" partition=1\nmtools_skip_check=1\n')
     env = dict(os.environ, MTOOLSRC=mtoolsrc)
 
-    sysroot_entries = [os.path.join(sysroot, name) for name in sorted(os.listdir(sysroot))]
+    boot_entries = [os.path.join(root, name) for name in sorted(os.listdir(root))]
     steps = [
         ["mpartition", "-I", "c:"],                    # empty MBR partition table
         ["mpartition", "-c", "-a", "-T", "0xEF", "c:"],  # one whole-disk ESP-typed partition
         ["mformat", "-F", "c:"],                       # FAT32
-        ["mcopy", "-s", "-b", *sysroot_entries, "c:/"],
+        ["mcopy", "-s", "-b", *boot_entries, "c:/"],
         ["mmd", "c:/EFI", "c:/EFI/BOOT"],
         ["mcopy", "-b", efi_app_path, "c:/EFI/BOOT/"],
     ]

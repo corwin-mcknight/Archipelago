@@ -7,7 +7,7 @@ BUILD_DIR ?= ./
 OBJ_DIR   ?= $(BUILD_DIR)/obj/sys/init
 SYSROOT   ?= $(BUILD_DIR)/sysroot
 
-USER_LIBS := $(SYSROOT)/usr/lib/libelf.a
+USER_LIBS := $(SYSROOT)/usr/lib/libelf.a $(SYSROOT)/usr/lib/libinitrd.a
 include $(SYSROOT)/usr/lib/user.mk
 
 # The link intermediate is retained for debugging but never installed as a boot module.

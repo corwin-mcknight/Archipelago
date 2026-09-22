@@ -26,19 +26,14 @@ ktl::result<kernel::obj::HandleId> start_user_thread(ktl::ref<Task> task, uintpt
 
 // Reaper-only teardown after the task's final thread has been removed.
 void teardown_user_task(ktl::ref<Task> task);
-// Boot-only, one-shot launch of the fixed-layout non-ELF "init" module, endowed with every boot
-// module as IMAGE mail. The one task the kernel starts on a normal boot; the shell's `boot
-// continue` and the integration tests drive the same function. A failed endowment is logged but
-// does not unlaunch the coordinator -- it serves whatever images it received.
+// Boot-only, one-shot launch of the fixed-layout non-ELF "init" module, endowed with the opaque
+// "initrd" module. The shell's `boot continue` and integration tests drive the same function.
+// Missing boot inputs fail launch; failed endowment kills the newly started coordinator.
 ktl::result<ktl::ref<Task>> launch_coordinator();
 
-// Mail one IMAGE message (<abi/message.h>) per boot module to `task`'s mailbox: a read-only wired
-// VMO over the module's bytes rides each message, with the exact byte size and the module's role
-// name in the payload. This is how the creator hands a task the images it may spawn from -- boot
-// modules never reach the ABI, only VMOs and names do. Every module is attempted; each failure is
-// logged with its module's name, the first error is returned, and messages already mailed stay
-// delivered.
-ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task);
+// Mail one INITRD message (<abi/message.h>) with a read-only wired VMO and exact byte size.
+// Only the module tagged "initrd" is delivered; the kernel never interprets the archive.
+ktl::result<void> endow_initrd(const ktl::ref<Task>& task);
 // Kill every thread of `task`: mark each, wake the blocked ones, and let each exit at its next
 // kernel boundary. Asynchronous -- returns once every thread is marked and unblocked, not once the
 // task is torn down; wait for SIGNAL_TERMINATED for that. A no-op on an already-terminated task;

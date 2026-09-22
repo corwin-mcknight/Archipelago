@@ -39,8 +39,12 @@ ktl::result<ktl::ref<Task>> launch_coordinator() {
     // Consume the boot operation even when malformed input or resource exhaustion prevents
     // launch. Init is not restartable through the kernel's boot path.
     if (init_attempted.exchange(true)) { return ktl::err(ktl::errc::invalid_operation); }
-    const auto* module = boot::find_module("init");
-    if (module == nullptr) { return ktl::err(ktl::errc::invalid_operation); }
+    const auto* module  = boot::find_module("init");
+    const auto* archive = boot::find_module("initrd");
+    if (module == nullptr || archive == nullptr || archive->data == nullptr || archive->size == 0) {
+        g_log.warn("boot: init and initrd are required");
+        return ktl::err(ktl::errc::invalid_operation);
+    }
 #if defined(ARCH_X86_64)
     constexpr auto MACHINE = init_image::MACHINE_X86_64;
 #elif defined(ARCH_RISCV64)
@@ -81,8 +85,13 @@ ktl::result<ktl::ref<Task>> launch_coordinator() {
     auto created = start_prepared_user_task("init", space, header.entry, init_image::LIMIT + 4 * init_image::PAGE,
                                             nullptr, factory);
     if (created.is_err()) { return ktl::err(created.unwrap_err()); }
-    auto task = created.unwrap();
-    if (endow_boot_modules(task).is_err()) { g_log.warn("boot: coordinator endowment incomplete"); }
+    auto task    = created.unwrap();
+    auto endowed = endow_initrd(task);
+    if (endowed.is_err()) {
+        g_log.warn("boot: initrd endowment failed");
+        (void)task_kill(task);
+        return ktl::err(endowed.unwrap_err());
+    }
     return ktl::result<ktl::ref<Task>>::ok(ktl::move(task));
 }
 }  // namespace kernel::sched

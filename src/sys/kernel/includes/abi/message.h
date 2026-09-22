@@ -29,7 +29,7 @@ static_assert(offsetof(abi_message_header, txid) == 8, "txid is the envelope's s
 #endif
 
 // The coordinator protocol: messages on the bootstrap channel between a task and its parent.
-// The kernel speaks IMAGE; the rest are the userspace coordinator's. Replies echo the request's
+// The kernel speaks INITRD; the rest are the userspace coordinator's. Replies echo the request's
 // opcode and txid, with status 0 for success or a negative error. Names are flat lowercase
 // strings, never nul-terminated on the wire -- a name's length is whatever remains of the message
 // after the fixed part, at most ABI_COORD_NAME_MAX bytes. The coordinator refuses a longer name
@@ -39,6 +39,10 @@ static_assert(offsetof(abi_message_header, txid) == 8, "txid is the envelope's s
 // IMAGE (parent -> task, unsolicited): an executable image the receiver may spawn from. One VMO
 // handle rides the message; the payload after the envelope is abi_image_payload followed by the
 // image's name.
+//
+// INITRD (kernel -> init, unsolicited): the opaque boot archive. One read-only VMO handle
+// rides the message; abi_image_payload gives its exact byte size, with no trailing name. The
+// archive format and bootstrap paths belong entirely to userspace.
 //
 // REGISTER (task -> coordinator): claim a service name; the payload is the name. No handle -- a
 // name is a claim, not an endpoint. The reply carries no payload. A registration lives exactly as
@@ -55,6 +59,7 @@ static_assert(offsetof(abi_message_header, txid) == 8, "txid is the envelope's s
 #define ABI_COORD_OP_REGISTER 2u
 #define ABI_COORD_OP_CONNECT 3u
 #define ABI_COORD_OP_CONNECTION 4u
+#define ABI_COORD_OP_INITRD 5u
 
 // The bound on coordinator names, shared so every program sizes its buffers from one place.
 #define ABI_COORD_NAME_MAX 31u
@@ -74,6 +79,7 @@ constexpr uint32_t COORD_OP_IMAGE      = ABI_COORD_OP_IMAGE;
 constexpr uint32_t COORD_OP_REGISTER   = ABI_COORD_OP_REGISTER;
 constexpr uint32_t COORD_OP_CONNECT    = ABI_COORD_OP_CONNECT;
 constexpr uint32_t COORD_OP_CONNECTION = ABI_COORD_OP_CONNECTION;
+constexpr uint32_t COORD_OP_INITRD     = ABI_COORD_OP_INITRD;
 
 }  // namespace abi::message
 #endif

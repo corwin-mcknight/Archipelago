@@ -4,7 +4,7 @@ This architecture is implemented on x86_64 and riscv64.
 ## Goal
 Remove executable ELF loading entirely from the kernel on x86_64 and riscv64. The kernel loads init exactly once through a boot-only path. Init has a minimal non-ELF boot image; there is no syscall for loading this format or any other executable format.
 
-Init uses `lib/elf` once to bootstrap the `sys/elf_loader` service, then transfers its construction authority to that service. The ELF loader runs in userspace. It prepares memory mappings in a dormant task and asks the kernel to create its initial thread and start it. The kernel validates memory access and launch parameters, but does not interpret executable bytes. ELF metadata used to symbolize the kernel's own crashes is independent of executable loading.
+Init uses `lib/elf` to validate bootstrap executables and start the `sys/elf_loader` service from the initrd, then transfers its construction authority to that service. The ELF loader runs in userspace. It prepares memory mappings in a dormant task and asks the kernel to create its initial thread and start it. The kernel validates memory access and launch parameters, but does not interpret executable bytes. ELF metadata used to symbolize the kernel's own crashes is independent of executable loading.
 
 ## Authority
 Creating, populating, and starting dormant tasks requires an explicit construction capability. Ordinary task handles do not convey construction authority. Init receives the initial authority and can endow the ELF loader with it. The loader does not endow the programs it creates with that capability.
@@ -25,6 +25,8 @@ Routine parse, mapping, and start failures abort the unfinished construction and
 
 ## Boot image
 The installed `init.bin` starts with a 64-byte `ARCHINIT` header containing a version, machine tag, entry address, and the sizes of four fixed regions: RX text, R constants, RW data, and zero-filled RW storage. Region lengths are page-aligned, addresses are implicit from a fixed base, and the kernel supplies the boot stack. There are no segment tables, relocations, interpreters, or syscall-accessible loaders. The ELF link intermediate stays in the build directory for debugging.
+
+The other userspace boot input is `initrd.tar`, an uncompressed ustar archive handed to init as an opaque read-only VMO. Init validates the archive and bootstrap set before launching `bootstrap/elf_loader.elf`, then asks that service to start the remaining `bootstrap/<service>.elf` entries. It copies each executable into a separate VMO at offset zero, unmaps the writable staging view, and restricts the handle to read access before loading. Program and data entries outside `bootstrap/` remain available for future file-service access. The kernel does not parse the archive. See [[Initrd]] and [[Service Coordination]].
 
 ## Construction interface
 Bootstrap handles are ordered: self task, initial thread, task-bound ThreadFactory, and (for boot init only) TaskFactory.

@@ -1,4 +1,4 @@
-# The user-mode self-check payload, loaded from the boot image by the kernel's ELF loader. Built against the
+# The user-mode self-check payload, loaded from the initrd by the userspace ELF loader. Built against the
 # installed public ABI headers, so it depends on sys/kernel-headers being in the sysroot first.
 #
 # No board facts are compiled in, so unlike the kernel this builds once per architecture.
@@ -18,5 +18,5 @@ pkg_build:
 
 pkg_install:
 	@echo "[plume] Installing $(CATEGORY)/$(PN)"
-	mkdir -p $(D)/boot
-	cp $(OBJ_DIR)/$(PN).elf $(D)/boot/$(PN).elf
+	mkdir -p $(D)/usr/share/initrd/bootstrap
+	cp $(OBJ_DIR)/$(PN).elf $(D)/usr/share/initrd/bootstrap/$(PN).elf

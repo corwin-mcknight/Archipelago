@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 from plume.config import Config
+from plume.initrd_selfcheck import CHECKS as INITRD_CHECKS
 from plume.package import Package
 
 
@@ -247,7 +248,7 @@ CHECKS = [
     check_shared_paths_for_non_varying_package,
     check_content_hash_staleness,
     check_compose_conflict,
-]
+] + INITRD_CHECKS
 
 
 def main():

@@ -31,6 +31,7 @@ A package that compiles board facts in declares `varies_by: ["board"]` and build
 | `sys/kernel-headers` | Public kernel headers (user/kernel ABI)   |
 | `sys/init`           | The boot-only non-ELF coordinator image    |
 | `lib/elf`            | Userspace ELF parser and constructor       |
+| `lib/initrd`         | Bounded userspace ustar archive reader     |
 | `sys/elf_loader`     | ELF loading service and worker threads     |
 
 ### Package Structure
@@ -63,6 +64,8 @@ Each package installs into its own staging directory (`$D`). The sysroot is the 
 
 Two packages installing the same path is an error caught during composition; there is no ownership database to consult because the staging trees themselves are the ownership record. A sibling stamp (`<sysroot>.stamp`) records what the sysroot was derived from, so an unchanged system recomposes nothing.
 
+Every package rebuild starts with an empty install staging directory while preserving its object tree. Files removed or renamed by a package therefore disappear from the next sysroot and initrd without requiring a clean build.
+
 ### Build Environment
 Each package build receives environment variables:
 
@@ -81,12 +84,18 @@ Each package build receives environment variables:
 | `LIVE_SOURCES` | Source tree path (for live-source packages) |
 
 ### Image Assembly
-`plume image` assembles the boot image, driven by the config's `image:` stanza. `format` selects the layout; the default is `iso`:
+`plume image` first packs `sysroot/usr/share/initrd/` into `sysroot/boot/initrd.tar`. Packages own files in that runtime tree: `bootstrap/<service>.elf` names a bootstrap server, while other paths such as `bin/` and `share/` hold ordinary executables and data. Service names use `[a-z][a-z0-9_]*`, up to 31 characters; `init` is reserved. `bootstrap/elf_loader.elf` is required, alongside at most eight ordinary bootstrap servers. Nested directories and empty files under `bootstrap/` are errors.
 
-1. **xorriso** creates a bootable ISO from the sysroot; `bios_boot` and `efi_boot` name the boot images
+The archive uses uncompressed POSIX ustar with sorted canonical relative paths, regular files and directories only, and a 64 MiB limit. Paths use printable ASCII without backslashes, `.` or `..` components and fit within ustar's name/prefix fields (255 bytes combined). Owner IDs and timestamps are zero, owner names are empty, and modes are normalized to 0755 for directories and executable files or 0644 for other files. This makes repeated packing of the same installed runtime content byte-identical. Plume regenerates the archive on every image assembly and reports missing inputs or unsupported paths and file types before invoking image tools.
+
+Limine receives exactly two userspace modules, named `init` (`boot/init.bin`) and `initrd` (`boot/initrd.tar`). Init parses the archive and launches its bootstrap servers through the userspace ELF loader; ordinary archive files are not automatically launched. The boot image contains `/boot` and the root `limine.conf`; the development headers, libraries, and loose runtime tree remain in the host sysroot. See [Initrd](Design/Initrd.md) for the userspace archive contract.
+
+The config's `image:` stanza selects the image layout; the default is `iso`:
+
+1. **xorriso** creates a bootable ISO from the boot tree; `bios_boot` and `efi_boot` name the boot images
 2. **limine bios-install** writes boot code to the ISO's MBR (only when `bios_boot` is configured)
 
-`format: sd` instead builds an SD-card image for boards that boot through U-Boot's EFI loader: an MBR partition table with one FAT32 ESP holding the sysroot verbatim plus Limine's EFI executable at `/EFI/BOOT/`. It is built with mtools (no root privileges) and written to a card with `dd`.
+`format: sd` instead builds an SD-card image for boards that boot through U-Boot's EFI loader: an MBR partition table with one FAT32 ESP holding the same boot tree plus Limine's EFI executable at `/EFI/BOOT/`. It is built with mtools (no root privileges) and written to a card with `dd`. The U-Boot smoke lane uses this same assembly path. Netboot extracts these artifacts into a fresh staging tree and supplies the same init and initrd modules, replacing stale TFTP files only after every required input is present.
 
 The resulting image lands at the config's `image_output` path.
 
@@ -98,7 +107,11 @@ build/
   <arch>/                  Per-target tree (x86_64/, riscv64/)
     obj/                   Intermediate build artifacts
     sysroot/               Composed system root
-      boot/                kernel.elf, limine binaries, limine.conf
+      boot/                kernel.elf, init.bin, initrd.tar, limine binaries
+      limine.conf          Bootloader configuration
+      usr/share/initrd/    Package-owned userspace runtime tree
+      usr/include/         Development headers (not in the boot image)
+      usr/lib/             Development libraries (not in the boot image)
     sysroot.stamp          What the sysroot was composed from
     tmp/                   Per-package work directories
     image.iso              Bootable ISO
