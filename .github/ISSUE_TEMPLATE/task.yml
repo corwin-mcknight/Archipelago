@@ -1,0 +1,41 @@
+name: Task or feature
+description: Propose one reviewable improvement with a concrete outcome and validation plan.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub issues hold the implementation plan and progress. Link related issues and a milestone instead of maintaining a parallel checklist in the repository.
+        Split work that needs several independent PRs into a parent issue and focused sub-issues.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Problem and intended outcome
+      description: Who or what needs this, and what observable behavior will change?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and relevant code or design
+      description: Identify the intended slice, relevant files or design documents, and meaningful exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Describe specific conditions that establish completion; use checkboxes where useful.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Name relevant hosted, QEMU, sanitizer, fuzz, coverage, build, or physical-board checks. Say when an investigation must determine the test first.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and milestone
+      description: Link blockers, related issues, and the intended milestone. Use issue relationships to track parent work and blockers when available.
