@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import codecs
+import io
 import json
 import os
 import queue
@@ -121,7 +123,7 @@ class KernelHarness:
         self._ready = False
         self._protocol_enabled = False
         self._exit_code: Optional[int] = None
-        self.console_lines: List[str] = []
+        self.console_chunks: List[str] = []
 
     # ------------------------------------------------------------------
     # Process lifecycle
@@ -143,12 +145,12 @@ class KernelHarness:
             args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True,
         )
-        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
-        self._reader_thread.start()
         self._ready = False
         self._protocol_enabled = False
         self._exit_code = None
-        self.console_lines = []
+        self.console_chunks = []
+        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader_thread.start()
         self.wait_for_prompt(self.boot_timeout)
 
     def stop(self) -> None:
@@ -174,10 +176,28 @@ class KernelHarness:
     def _reader_loop(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None and self._lines is not None
         lines = self._lines  # capture: stop() may null self._lines during teardown
-        for raw_line in self.proc.stdout:
-            lines.put(raw_line.rstrip("\n"))
-        if self.proc:
-            self._exit_code = self.proc.poll()
+        proc = self.proc
+        console = self.console_chunks
+        decoder = io.IncrementalNewlineDecoder(
+            codecs.getincrementaldecoder(proc.stdout.encoding)(errors="replace"), translate=True,
+        )
+        pending = ""
+        # Firmware prompts need not end in a newline. Capture pipe chunks as
+        # they arrive, while keeping complete lines for the harness protocol.
+        while True:
+            raw = proc.stdout.buffer.read1(4096)
+            chunk = decoder.decode(raw, final=not raw)
+            console.append(chunk)
+            pending += chunk
+            parts = pending.split("\n")
+            for line in parts[:-1]:
+                lines.put(line)
+            pending = parts[-1]
+            if not raw:
+                if pending:
+                    lines.put(pending)
+                break
+        self._exit_code = proc.poll()
         lines.put(None)
 
     def _next_line(self, deadline: Optional[float]) -> str:
@@ -191,9 +211,7 @@ class KernelHarness:
             raise HarnessError("timed out waiting for serial output")
         if item is None:
             raise HarnessProcessExit("kernel process exited unexpectedly", self._exit_code)
-        line = item.rstrip("\r")
-        self.console_lines.append(line)
-        return line
+        return item.rstrip("\r")
 
     def _parse_line(self, line: str) -> Event:
         for prefix, kind in _EVENT_PREFIXES:
@@ -764,7 +782,9 @@ def machine_args(arch, iso, firmware=None, exit_device: bool = False) -> List[st
             raise HarnessError("riscv64 requires --firmware (EDK2 RISCV_VIRT_CODE.fd)")
         vars_fd = str(firmware).replace("_CODE.fd", "_VARS.fd")
         return [
-            "-M", "virt", "-smp", "4",
+            # Archipelago uses the device tree. QEMU 8.2's ACPI RHCT lacks
+            # MMU nodes required by Limine, despite its valid DT MMU metadata.
+            "-M", "virt,acpi=off", "-smp", "4",
             "-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={firmware}",
             "-drive", f"if=pflash,unit=1,format=raw,snapshot=on,file={vars_fd}",
             "-device", "virtio-scsi-pci,id=scsi0",
@@ -935,7 +955,7 @@ def _discover(args: argparse.Namespace) -> List[TestDescriptor]:
         if not args.no_artifacts:
             discovery = args.artifacts / "discovery"
             discovery.mkdir(parents=True, exist_ok=True)
-            (discovery / "console.log").write_text("\n".join(harness.console_lines) + "\n", encoding="utf-8")
+            (discovery / "console.log").write_text("".join(harness.console_chunks), encoding="utf-8")
         raise
     finally:
         harness.stop()

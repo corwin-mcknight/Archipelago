@@ -470,7 +470,7 @@ def check_discovery_failure_preserves_boot_console():
         image = root / "image.iso"
         image.touch()
         qemu = root / "fake-qemu"
-        qemu.write_text('#!/bin/sh\nprintf "firmware started\\nkernel boot failed\\n"\ncat >/dev/null\n')
+        qemu.write_text('#!/bin/sh\nprintf "firmware started\\nkernel boot failed"\ncat >/dev/null\n')
         qemu.chmod(0o755)
         artifacts = root / "artifacts"
         result = subprocess.run([os.sys.executable, str(ROOT / "tools/test-harness.py"),
