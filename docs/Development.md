@@ -1,6 +1,8 @@
 # Development
 Archipelago uses a **native local toolchain** on macOS, with Homebrew dependencies and a checkout-local Python environment. Linux command-line development is also supported. [BUILDING.md](../BUILDING.md) is authoritative for setup, target selection, build commands, and output paths.
 
+Planning and coordination live in [GitHub issues](https://github.com/corwin-mcknight/Archipelago/issues), [milestones](https://github.com/corwin-mcknight/Archipelago/milestones), and the [project](https://github.com/users/corwin-mcknight/projects/1). Follow [CONTRIBUTING.md](../CONTRIBUTING.md) for scope, dependencies, review, and validation evidence.
+
 ## Getting started
 From the checkout root, run `make setup`, `make doctor`, and `make selfcheck`, then build or test with the normal Make targets. Setup reads `Brewfile` on macOS and installs the pinned dependencies from `requirements.txt` into `.venv`. Python 3.10 or newer is required.
 

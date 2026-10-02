@@ -14,6 +14,9 @@ Today, Archipelago provides a small kernel with boot, memory-management, testing
 - [[Testing]]: Test framework and harness
 - [[JH7110 Board]]: Netboot loop, watchdog reset, display handoff, and cache flushing on the first real board
 ## Development
+- [GitHub planning](https://github.com/users/corwin-mcknight/projects/1): Work queue, with [issues](https://github.com/corwin-mcknight/Archipelago/issues) and [milestones](https://github.com/corwin-mcknight/Archipelago/milestones)
+- [Contributing](../CONTRIBUTING.md): Issue-to-PR workflow and validation evidence
+- [Accepted Constraints](Design/Accepted%20Constraints.md): Current policy boundaries
 - [[Development]]: Native toolchain setup, editors, debugging, code style
 - [[Plume]]: Package manager and build system
 ## Planned Architecture

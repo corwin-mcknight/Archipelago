@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a failure or a suspected correctness problem with supporting evidence.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Include enough evidence to investigate, and remove secrets or personal information from logs.
+        A source review finding is welcome; identify it as unconfirmed until it has been reproduced.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: What should happen, what happens instead, and how does it affect the system?
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence so far
+      options:
+        - Reproduced in hosted tests or tools
+        - Reproduced in QEMU
+        - Reproduced on physical hardware
+        - Source review finding; not yet reproduced
+        - Other or unknown
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Commit and local changes
+      description: Include the full commit SHA and describe any uncommitted changes; say unknown if unavailable.
+      placeholder: Output of git rev-parse HEAD, plus any relevant local changes
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Architecture, board, and environment
+      description: Include the target, QEMU or board model, host OS, and relevant toolchain or firmware versions.
+      placeholder: "For example: riscv64 / QEMU virt, macOS host, QEMU version; or host-only / Linux."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or source evidence
+      description: Give exact commands, input, and frequency. For an unconfirmed source finding, give files, functions, and the suspected failing path instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and artifacts
+      description: Paste relevant output or link the Actions run, serial log, crash dump, or reproducer. State when no runtime evidence is available.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Acceptance criteria and regression coverage
+      description: If known, describe the observable fixed behavior and the test that should prevent recurrence.

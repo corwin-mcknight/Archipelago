@@ -84,6 +84,7 @@ generated/
 
 # AI
 AGENTS.md 
+!/AGENTS.md
 CLAUDE.md
 .claude
 .codex

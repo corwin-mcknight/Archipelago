@@ -20,7 +20,7 @@ Teaching happens by attaching kernel-validated [transaction programs](docs/Desig
 ## Where it is now
 Today, the kernel boots on x86_64 and riscv64, schedules kernel threads across SMP cores, and runs userspace ELF programs with task-owned address spaces, capability handles, and syscalls. Boot can launch userspace directly or provide an interactive kernel shell. The kernel loads only a minimal non-ELF init image; a capability-endowed userspace ELF loader constructs subsequent tasks.
 
-User-mode hello world is implemented on both architectures. The [roadmap](MILESTONES.md) describes the next milestones, including an interactive userspace shell and file services.
+User-mode hello world is implemented on both architectures. The [GitHub milestones](https://github.com/corwin-mcknight/Archipelago/milestones) describe the next outcomes, including an interactive userspace shell and file services.
 
 ## Engineering practice
 The distinguishing feature of this project is not the kernel's size but how it is built.
@@ -45,7 +45,7 @@ Backtrace (4 frames):
   [3] 0xFFFFFFFF8000CFE5  _start at x86_64/main.cpp:237
 ```
 
-The design docs, [testing internals](docs/Kernel/Testing.md), and a maintained [todo](todo.md) live in the repository; the codebase is periodically audited against them.
+The design docs and [testing internals](docs/Kernel/Testing.md) live with the code. [GitHub issues](https://github.com/corwin-mcknight/Archipelago/issues) hold the backlog, evidence, and implementation plans; the [project](https://github.com/users/corwin-mcknight/projects/1) tracks the work queue. See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue-to-PR workflow.
 
 ## Quickstart
 On macOS, install Homebrew and Apple's Command Line Tools, then use the native workflow below. The checkout supplies its own Python environment and selects Homebrew LLVM, NASM, QEMU, and image tools. Any local editor or AI coding tool can work directly in the checkout; Linux command-line development is also supported.
@@ -66,5 +66,7 @@ See [BUILDING.md](BUILDING.md) for the full reference.
 ## Documentation
 - [docs/Design](docs/Design) -- the planned architecture: object model, handles, IPC, scheduling, task model, syscalls
 - [docs/Kernel](docs/Kernel) -- the current system: boot, memory, interrupts, shell, KTL, testing
-- [MILESTONES.md](MILESTONES.md) -- the roadmap, told as concrete milestones
+- [GitHub milestones](https://github.com/corwin-mcknight/Archipelago/milestones) -- system outcomes and completion criteria
+- [GitHub issues](https://github.com/corwin-mcknight/Archipelago/issues) and [project](https://github.com/users/corwin-mcknight/projects/1) -- planning, dependencies, and progress
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- contributions and validation expectations
 - [BUILDING.md](BUILDING.md) -- toolchain and build system reference

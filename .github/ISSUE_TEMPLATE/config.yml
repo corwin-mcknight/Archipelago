@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Roadmap and milestones
+    url: https://github.com/corwin-mcknight/Archipelago/milestones
+    about: Find the planned outcomes and their tracked work before proposing a new issue.

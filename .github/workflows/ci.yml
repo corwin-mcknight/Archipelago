@@ -31,18 +31,25 @@ jobs:
         os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-native
+        id: setup
       - name: Plume and environment regressions
+        id: selfcheck
         run: make selfcheck 2>&1 | tee build/ci/selfcheck.log
       - name: Hosted ASan and UBSan tests
+        id: host_tests
         run: make host-test 2>&1 | tee build/ci/host-test.log
       - name: Test registration and coverage failure regressions
+        id: regressions
         run: |
           tools/dev python3 tools/host-portability-check.py 2>&1 | tee build/ci/host-portability.log
           tools/dev python3 tools/host-coverage-check.py 2>&1 | tee build/ci/host-coverage-check.log
+          python3 tools/ci-summary-check.py 2>&1 | tee build/ci/ci-summary-check.log
       - name: Retain hosted results and logs
+        id: results_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -53,6 +60,15 @@ jobs:
             build/*/logs/
           retention-days: 14
           if-no-files-found: ignore
+      - name: Summarize hosted validation
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 tools/ci-summary.py --kind host
+          --title 'Hosted tests (${{ matrix.os }})'
+          --results build/host-test-artifacts/harness.json
 
   coverage:
     name: Hosted coverage
@@ -60,12 +76,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-native
+        id: setup
       - name: Coverage with an 85 percent line gate
+        id: coverage
         run: make host-coverage COV_MIN=85 2>&1 | tee build/ci/host-coverage.log
       - name: Retain coverage report and logs
+        id: results_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -76,6 +96,14 @@ jobs:
             build/*/logs/
           retention-days: 14
           if-no-files-found: ignore
+      - name: Summarize hosted coverage
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 tools/ci-summary.py --kind coverage --title 'Hosted coverage'
+          --coverage build/host-cov/coverage.json
 
   qemu:
     name: QEMU tests (${{ matrix.arch }})
@@ -98,17 +126,23 @@ jobs:
       QEMU_RETRIES: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-native
+        id: setup
       - name: Build image and run freestanding tests
+        id: qemu_tests
         run: make test "ARCH=$TARGET_ARCH" 2>&1 | tee build/ci/qemu.log
       - name: Generate selected-target editor database
+        id: editor_database
         run: make clangd "ARCH=$TARGET_ARCH" 2>&1 | tee build/ci/clangd.log
       - name: RISC-V U-Boot boot-chain smoke
+        id: uboot_smoke
         if: matrix.arch == 'riscv64'
         run: make uboot-test 2>&1 | tee build/ci/uboot.log
       - name: Retain kernel test results, symbols, and logs
+        id: results_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -122,6 +156,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
       - name: Retain boot image
+        id: image_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -129,6 +164,15 @@ jobs:
           path: build/${{ matrix.arch }}/image.iso
           retention-days: 14
           if-no-files-found: ignore
+      - name: Summarize QEMU validation
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 tools/ci-summary.py --kind qemu
+          --title 'QEMU tests (${{ matrix.arch }})'
+          --results "build/$TARGET_ARCH/test-artifacts/summary.json"
 
   board-image:
     name: JH7110 build and SD image
@@ -136,12 +180,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-native
+        id: setup
       - name: Build JH7110 SD image
+        id: build_image
         run: make install 'ARCH=riscv64^jh7110' 2>&1 | tee build/ci/jh7110.log
       - name: Retain build log and kernel symbols
+        id: results_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -153,6 +201,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
       - name: Retain SD image
+        id: image_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -160,6 +209,13 @@ jobs:
           path: build/riscv64/jh7110/sd.img
           retention-days: 14
           if-no-files-found: ignore
+      - name: Summarize JH7110 build
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 tools/ci-summary.py --kind board --title 'JH7110 build and SD image'
 
   additional-sanitizers:
     name: ThreadSanitizer and bounded fuzzing
@@ -169,17 +225,22 @@ jobs:
       TSAN_OPTIONS: halt_on_error=1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-native
+        id: setup
       - name: ThreadSanitizer stress tests
+        id: tsan
         run: make host-tsan 2>&1 | tee build/ci/host-tsan.log
       - name: Bounded parser and data-structure fuzzing
+        id: fuzz
         run: |
           for target in demangle fmt json elf elf-loader rbtree; do
             make host-fuzz "FUZZ=$target" FUZZ_TIME=5 2>&1 | tee "build/ci/fuzz-$target.log"
           done
       - name: Retain sanitizer logs, corpora, and crash reproducers
+        id: results_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -190,3 +251,11 @@ jobs:
             build/*/logs/
           retention-days: 14
           if-no-files-found: ignore
+      - name: Summarize sanitizer and fuzz validation
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 tools/ci-summary.py --kind sanitizers
+          --title 'ThreadSanitizer and bounded fuzzing'
