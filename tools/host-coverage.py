@@ -45,7 +45,7 @@ def find_tool(name):
         return p
     for cand in sorted(glob.glob(f"/usr/lib/llvm*/bin/{name}"), reverse=True):
         return cand
-    sys.exit(f"host-coverage: {name} not found (install the llvm package, e.g. apk add llvm21)")
+    sys.exit(f"host-coverage: {name} not found (install LLVM and add its bin directory to PATH)")
 
 
 def run(cmd, **kw):
@@ -83,7 +83,7 @@ def main(argv):
                    LLVM_PROFILE_FILE=os.path.join(RAWDIR, "%m.profraw"),
                    ASAN_OPTIONS="abort_on_error=1:detect_leaks=0")
     # The runner returns nonzero if any test fails; coverage still wants the data, so don't check=True.
-    subprocess.run([RUNNER] + names, cwd=ROOT, env=run_env)
+    test_result = subprocess.run([RUNNER] + names, cwd=ROOT, env=run_env)
 
     raws = glob.glob(os.path.join(RAWDIR, "*.profraw"))
     if not raws:
@@ -111,6 +111,9 @@ def main(argv):
             print(f"FAIL: below gate of {min_pct:.2f}%")
             return 1
         print(f"OK: meets gate of {min_pct:.2f}%")
+    if test_result.returncode != 0:
+        print(f"FAIL: host runner exited with status {test_result.returncode}")
+        return 1
     return 0
 
 

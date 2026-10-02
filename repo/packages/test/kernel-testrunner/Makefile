@@ -34,15 +34,22 @@ endif
 # The host tier is logic-authoritative, NOT the target ABI: we deliberately do not pretend to be
 # x86_64 here (this host may be aarch64). Both are LP64 little-endian, so the integer type model the
 # logic depends on is identical; ABI/codegen fidelity is the QEMU tier's job.
-AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
+AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -nostdinc++ -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden \
 	-fstrict-aliasing -Wstrict-aliasing=2 -Werror=unused-result -Werror=unused-value $(SAN) $(COV_FLAGS)
 
-HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN)
+HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN) $(if $(COV_FLAGS),-DKTEST_HOST_COVERAGE,)
 
 RUNNER_DIR := $(KSRC)/tests/runner
 HOSTED_DIR := $(KSRC)/tests
 FRAGMENT   := $(RUNNER_DIR)/ktests_brackets.ld
+
+# Mach-O provides section boundary symbols; ELF needs the registry linker fragment.
+ifeq ($(shell uname -s),Darwin)
+HOST_LINK_FLAGS :=
+else
+HOST_LINK_FLAGS := -fuse-ld=lld -Wl,-T,$(FRAGMENT)
+endif
 
 # Every .cpp directly under tests/ is host-tier: the directory is the routing, so there is no list to
 # keep in sync with the kernel build. Tests that need the kernel environment live in tests/freestanding/
@@ -77,7 +84,7 @@ pkg_build:
 		$(CXX) $(AMP_FLAGS) $(INC_KERNEL) -c $$src -o $$obj || exit 1; \
 	done
 	$(CXX) $(HARNESS_FLAGS) $(INC_HOST) -c $(RUNNER_DIR)/host_runner.cpp -o $(OBJDIR)/host_runner.o
-	$(CXX) $(SAN) $(COV_FLAGS) -fuse-ld=lld $(AMP_OBJS) $(OBJDIR)/host_runner.o -Wl,-T,$(FRAGMENT) -o $(RUNNER)
+	$(CXX) $(SAN) $(COV_FLAGS) $(HOST_LINK_FLAGS) $(AMP_OBJS) $(OBJDIR)/host_runner.o -o $(RUNNER)
 
 pkg_install:
 	@echo "[plume] Installing host test runner"

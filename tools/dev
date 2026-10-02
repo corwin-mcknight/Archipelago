@@ -1,0 +1,33 @@
+#!/bin/sh
+# Execute in this checkout's environment without changing the caller's cwd.
+set -eu
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+
+if [ "$#" -eq 0 ]; then
+    echo 'usage: tools/dev <command> [arguments...]' >&2
+    exit 2
+fi
+
+if [ "$(uname -s)" = Darwin ]; then
+    brew_command=$(command -v brew || true)
+    if [ -z "$brew_command" ]; then
+        for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+            if [ -x "$candidate" ]; then brew_command=$candidate; break; fi
+        done
+    fi
+    if [ -n "$brew_command" ]; then
+        brew_root=$("$brew_command" --prefix 2>/dev/null || true)
+        if [ -d "$brew_root/bin" ]; then PATH="$brew_root/bin:$PATH"; fi
+        for formula in python curl coreutils make lld llvm lldb; do
+            prefix=$("$brew_command" --prefix "$formula" 2>/dev/null || true)
+            if [ -d "$prefix/bin" ]; then PATH="$prefix/bin:$PATH"; fi
+            if [ -d "$prefix/libexec/bin" ]; then PATH="$prefix/libexec/bin:$PATH"; fi
+            if [ -d "$prefix/libexec/gnubin" ]; then PATH="$prefix/libexec/gnubin:$PATH"; fi
+        done
+    fi
+fi
+
+PATH="$project_root/.venv/bin:$PATH"
+PYTHONPATH="$project_root${PYTHONPATH:+:$PYTHONPATH}"
+export PATH PYTHONPATH
+exec "$@"

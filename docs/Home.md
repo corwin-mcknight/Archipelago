@@ -14,7 +14,7 @@ Today, Archipelago provides a small kernel with boot, memory-management, testing
 - [[Testing]]: Test framework and harness
 - [[JH7110 Board]]: Netboot loop, watchdog reset, display handoff, and cache flushing on the first real board
 ## Development
-- [[Development]]: Devcontainer setup, toolchain, IDE, code style
+- [[Development]]: Native toolchain setup, editors, debugging, code style
 - [[Plume]]: Package manager and build system
 ## Planned Architecture
 The following pages describe the long-term design for Archipelago. These features are not yet implemented.

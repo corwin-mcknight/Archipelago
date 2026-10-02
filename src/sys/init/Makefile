@@ -1,5 +1,6 @@
 # The coordinator. Everything but the names comes from the shared user-program fragment the
 # lib/crt package installs beside user.ld.
+OBJCOPY ?= llvm-objcopy
 TARGET_EXEC ?= init.link
 .DEFAULT_GOAL := boot-image
 
@@ -16,7 +17,7 @@ INIT_MACHINE := 2
 else
 INIT_MACHINE := 1
 endif
-LDFLAGS := $(filter-out -T $(SYSROOT)/usr/lib/user.ld,$(LDFLAGS)) -T init.ld --defsym=INIT_MACHINE=$(INIT_MACHINE)
+override LDFLAGS := $(filter-out -T $(SYSROOT)/usr/lib/user.ld,$(LDFLAGS)) -T init.ld --defsym=INIT_MACHINE=$(INIT_MACHINE)
 
 .PHONY: boot-image
 boot-image: $(OBJ_DIR)/init.bin
@@ -24,4 +25,4 @@ boot-image: $(OBJ_DIR)/init.bin
 $(OBJ_DIR)/$(TARGET_EXEC): init.ld
 
 $(OBJ_DIR)/init.bin: $(OBJ_DIR)/$(TARGET_EXEC)
-	llvm-objcopy -O binary $< $@
+	$(OBJCOPY) -O binary $< $@

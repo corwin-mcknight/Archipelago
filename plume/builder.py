@@ -22,7 +22,8 @@ from plume.config import Config
 from plume.output import bold, green, red, cyan, dim, fmt_duration, fmt_reason, open_line, close_line, break_line
 from plume.package import Package
 from plume.env import get_build_env
-from plume.stamp import STAMP_NAME, is_stale, update as update_stamp
+from plume.stamp import STAMP_NAME, is_stale, recorded_build_hash, update as update_stamp
+from plume.toolchain import build_identity
 from plume.universe import create_build_sorter
 
 
@@ -45,7 +46,12 @@ def _source_paths(config: Config, package: Package) -> list[str]:
 
 
 def _stamp_path(config: Config, package: Package) -> str:
-    return os.path.join(get_build_env(config, package)["WORKDIR"], STAMP_NAME)
+    env = get_build_env(config, package)
+    # The installed native binary and its stamp must have the same ownership:
+    # a per-target stamp cannot vouch for a shared build/tools executable.
+    if package.is_build_tool:
+        return os.path.join(env["TOOL_INSTALL"], package.name, STAMP_NAME)
+    return os.path.join(env["WORKDIR"], STAMP_NAME)
 
 
 def build_needed(config: Config, package: Package) -> str | None:
@@ -55,13 +61,13 @@ def build_needed(config: Config, package: Package) -> str | None:
 
     has_output = os.path.isdir(d) and bool(os.listdir(d))
     # Build tools install to TOOL_INSTALL, not $D
-    if not has_output and package.is_build_tool:
+    if package.is_build_tool:
         pkg_tool_dir = os.path.join(env.get("TOOL_INSTALL", ""), package.name)
-        has_output = os.path.isdir(pkg_tool_dir) and bool(os.listdir(pkg_tool_dir))
+        has_output = os.path.isdir(pkg_tool_dir) and any(name != STAMP_NAME for name in os.listdir(pkg_tool_dir))
     if not has_output:
         return "never built"
 
-    return is_stale(_stamp_path(config, package), config.build_hash, _source_paths(config, package))
+    return is_stale(_stamp_path(config, package), build_identity(config, package), _source_paths(config, package))
 
 
 def build_log_path(config: Config, package: Package) -> str:
@@ -76,6 +82,13 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
     orchestrator's job. Returns (success, elapsed_seconds).
     """
     env = get_build_env(config, package)
+    identity = build_identity(config, package)
+    if recorded_build_hash(_stamp_path(config, package)) != identity:
+        # Rerunning Make alone does not invalidate objects when command flags,
+        # tool binaries, or host ABI change. Purge only this package's object
+        # tree; content-only source changes retain normal .d incrementality.
+        if os.path.isdir(env["OBJ_DIR"]):
+            shutil.rmtree(env["OBJ_DIR"])
 
     # The previous success no longer describes staging once rebuilding starts.
     # Invalidate it first: a failed install followed by a source revert must
@@ -114,7 +127,7 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
                 return False, time.monotonic() - pkg_start
 
     # Record the inputs so a config or source change triggers a rebuild.
-    update_stamp(_stamp_path(config, package), config.build_hash, _source_paths(config, package))
+    update_stamp(_stamp_path(config, package), identity, _source_paths(config, package))
 
     return True, time.monotonic() - pkg_start
 

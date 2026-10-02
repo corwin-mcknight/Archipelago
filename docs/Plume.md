@@ -14,7 +14,7 @@ make clean              # Remove build artifacts
 make clangd             # Regenerate compile_commands.json
 ```
 
-These Make targets wrap `python3 -m plume` commands.
+These Make targets wrap `tools/dev python3 -m plume` commands, using the checkout's native toolchain and local Python environment. `make setup` prepares it, `make doctor` checks it, and `make selfcheck` runs Plume regression checks. Pass `ARCH=<target>` to select a target for one Make invocation.
 
 ## Packages
 
@@ -48,8 +48,8 @@ Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implem
 Packages can declare `supports_live_sources: true` with a `live_source_path` pointing into the source tree. The kernel and limine-config packages use this; editing a watched source marks the package stale.
 
 ### Staleness
-Every successful build writes a stamp recording a hash of the target config's build-affecting settings (architecture, toolchain, triple, flags) and a content hash of every input file -- the package's own files under `repo/packages/` for every package, plus the live source tree for live-source packages.
-A package is stale exactly when that record differs from the present: a config change, or a source file whose content changed, appeared, or vanished. Modification times are never consulted, so a branch switch that restores identical content rebuilds nothing, and deleting a source file is a change like any other. Paths and run-only settings (QEMU, memory, image layout) are excluded from the config hash.
+Every successful build writes a stamp recording build-affecting target settings (architecture, toolchain, triple, flags), native host/platform identity, resolved build-tool identities and versions, and a content hash of every input file -- the package's own files under `repo/packages/` for every package, plus the live source tree for live-source packages.
+A package is stale when that record differs from the present: a build-environment or coverage-mode change, or a source file whose content changed, appeared, or vanished. Environment changes clear incompatible package objects before rebuilding; source-only changes preserve Make's incremental object tree. Upgrading a compiler at the same path or moving from an older host environment therefore cannot silently reuse its objects or host executables. Modification times are never consulted, so a branch switch that restores identical content rebuilds nothing, and deleting a source file is a change like any other. Paths and run-only settings (QEMU, memory, image layout) are excluded from the config hash.
 
 When a package rebuilds, Plume prints why on the package's status line -- a config change, or the changed file. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead. Captured output from the most recent build of each package is kept at `build/<arch>/logs/<category>/<name>.log`, whether the build succeeded or failed.
 
@@ -57,7 +57,9 @@ When a package rebuilds, Plume prints why on the package's status line -- a conf
 ### Dependency Resolution
 Plume resolves dependencies via topological sort and builds dependencies first; independent packages can build in parallel with `-j`.
 
-`plume build` always operates on the whole system graph: every supported non-tool package, plus the build tools they depend on. Staleness checks make this cheap -- a fresh package costs one hash comparison. Naming packages on the command line scopes `--force` to them; naming only build tools (the host test lanes) builds just that closure and leaves the sysroot alone.
+`plume build` always operates on the whole system graph: every supported non-tool package, plus the build tools they depend on. Staleness checks make this cheap -- a fresh package costs one hash comparison. Naming packages on the command line scopes `--force` to them; naming only build tools builds just that closure and leaves the sysroot alone. Hosted test lanes are selected explicitly rather than built by ordinary system builds.
+
+Runtime tools are prepared by the commands that use them. `plume test` and attended `plume run` prepare the configured managed EDK2 package for RISC-V; `plume uboot-test` prepares U-Boot instead. Each preparation builds only the needed host-tool closure and leaves the system sysroot alone. Fresh checkouts/worktrees therefore need no manual runtime-package build before the corresponding Make test/run commands. Dry runs remain fetch-free, and externally configured firmware is user-supplied rather than replaced with managed EDK2.
 
 ### Sysroot
 Each package installs into its own staging directory (`$D`). The sysroot is the union of the system packages' staging trees, and it is composed, never patched: whenever any system package (re)builds or the composed set changes, Plume removes the sysroot and copies every staging tree back in, in dependency order. A package is copied in as soon as it is current, so a later package always compiles against its dependencies' installed files -- that is what lets `sys/init` build against the headers `sys/kernel-headers` installs to `/usr/include`, exactly as any other consumer of that ABI would.
@@ -80,7 +82,8 @@ Each package build receives environment variables:
 | `S` | Source directory (`$WORKDIR/src`) |
 | `D` | Staging install directory (`$WORKDIR/install`) |
 | `CC`, `CXX` | `clang`, `clang++` |
-| `LD`, `AS` | `ld.lld`, `nasm` |
+| `LD`, `AS` | Configured linker and assembler (`ld.lld`, `nasm`) |
+| `AR`, `OBJCOPY` | Configured LLVM archive and object-copy tools |
 | `LIVE_SOURCES` | Source tree path (for live-source packages) |
 
 ### Image Assembly
@@ -120,7 +123,7 @@ build/
 ```
 
 ## Commands
-All commands are invoked as `python3 -m plume <command>` or through the Makefile.
+All commands are invoked as `tools/dev python3 -m plume <command>` or through the Makefile.
 Every command accepts `--arch <target>` (or `--config <path>`) to select a target for one invocation without changing the `default.yaml` selection. A target is an arch (`riscv64`) or a board (`riscv64^jh7110`).
 `--arch all` fans the command out over every arch at its default board; `--arch all-boards` covers every board target as well. Either ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
 
@@ -133,7 +136,7 @@ Every command accepts `--arch <target>` (or `--config <path>`) to select a targe
 | `status` | Show build and sysroot state |
 | `clean` | Remove build artifacts |
 | `list` | List packages with optional dependency tree |
-| `clangd` | Rebuild kernel with compile_commands.json generation |
+| `clangd` | Generate selected-target kernel compilation commands using a Make dry run |
 | `set-config` | Select the active target config (symlinks `default.yaml`) |
 | `run` | Launch the built ISO interactively in QEMU |
 | `shell` | Open an interactive shell in a package's build environment |
@@ -141,6 +144,11 @@ Every command accepts `--arch <target>` (or `--config <path>`) to select a targe
 | `log` | Print a package's most recent build log |
 
 Package validation (names, dependency existence, cycles, board-config isolation) runs automatically at the start of every command.
+
+## Editor indexing and worktrees
+`make clangd` asks the kernel Makefile for the selected target's compile commands using a dry run. It does not compile or link the kernel, so indexing does not depend on a successful build. It writes `build/compile_commands.json` using the current checkout's paths and selected architecture/board; it does not merge other target trees into that database.
+
+The repository's `.clangd` points clangd at that database. Configure your editor to launch `tools/dev clangd`, or start the editor through `tools/dev` so its language server inherits the native environment. Regenerate after adding or renaming files, changing target selection, or creating a worktree. Each worktree keeps its own `.venv`, `default.yaml`, `build/`, and database; run setup and indexing from that worktree's root.
 
 ## Targets and Boards
 A target is an architecture, optionally narrowed to a board. `repo/config/riscv64.yaml` is an arch target; `repo/config/riscv64^jh7110.yaml` is a board target. Every arch config names its default board, so `--arch riscv64` already builds a board -- the qualifier is only spelled out when selecting a non-default one.

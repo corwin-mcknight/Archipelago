@@ -48,16 +48,19 @@ Backtrace (4 frames):
 The design docs, [testing internals](docs/Kernel/Testing.md), and a maintained [todo](todo.md) live in the repository; the codebase is periodically audited against them.
 
 ## Quickstart
-The repository ships a devcontainer with the full toolchain (LLVM, NASM, QEMU, xorriso); open it in VS Code or build `.devcontainer/Dockerfile` directly.
+On macOS, install Homebrew and Apple's Command Line Tools, then use the native workflow below. The checkout supplies its own Python environment and selects Homebrew LLVM, NASM, QEMU, and image tools. Any local editor or AI coding tool can work directly in the checkout; Linux command-line development is also supported.
 
 ```bash
+make setup     # install native prerequisites and pinned Python dependencies
+make doctor    # check the local environment
+make clangd    # generate the selected-target compilation database
 make install   # build all packages and assemble a bootable ISO
 make run       # boot it in QEMU, dropping into the kernel shell
 make test      # run the QEMU test suite
 make host-test # run the host-tier test suite
 ```
 
-Builds are orchestrated by [Plume](docs/Plume.md), a purpose-built Python package manager: each component builds in isolation and installs into a shared sysroot, from which the ISO is assembled.
+Builds are orchestrated by [Plume](docs/Plume.md), a purpose-built Python package manager: each component builds in isolation and installs into a per-target sysroot, from which the ISO is assembled.
 See [BUILDING.md](BUILDING.md) for the full reference.
 
 ## Documentation

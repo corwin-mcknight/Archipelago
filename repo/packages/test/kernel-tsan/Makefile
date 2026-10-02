@@ -20,6 +20,12 @@ SAN   := -fsanitize=thread -fno-sanitize-recover=all
 FLAGS := -std=c++20 -g -O1 -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden -fstrict-aliasing $(SAN)
 
+ifeq ($(shell uname -s),Darwin)
+HOST_LINK_FLAGS :=
+else
+HOST_LINK_FLAGS := -fuse-ld=lld
+endif
+
 pkg_get_source:
 	@true
 
@@ -30,9 +36,9 @@ pkg_build:
 	@echo "[plume] Building TSan stress harnesses (atomic, log_ring)"
 	mkdir -p $(OBJDIR)
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/tsan/atomic_tsan.cpp -o $(OBJDIR)/atomic_tsan.o
-	$(CXX) $(SAN) -fuse-ld=lld -lpthread $(OBJDIR)/atomic_tsan.o -o $(TSAN_ATOMIC)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) -lpthread $(OBJDIR)/atomic_tsan.o -o $(TSAN_ATOMIC)
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/tsan/log_ring_tsan.cpp -o $(OBJDIR)/log_ring_tsan.o
-	$(CXX) $(SAN) -fuse-ld=lld -lpthread $(OBJDIR)/log_ring_tsan.o -o $(TSAN_LOG_RING)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) -lpthread $(OBJDIR)/log_ring_tsan.o -o $(TSAN_LOG_RING)
 
 pkg_install:
 	@echo "[plume] Installing TSan stress harnesses"

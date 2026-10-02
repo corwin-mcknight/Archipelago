@@ -136,8 +136,9 @@ Dependencies run from device access through storage to policy and distribution.
 Work here can accompany every feature slice; fix protocol reliability before relying on unattended CI results.
 
 ### Test reliability and coverage
+[GitHub Actions](.github/workflows/ci.yml) now defines native hosted checks on macOS/Ubuntu, the Ubuntu x86_64/riscv64 QEMU matrix and RISC-V U-Boot smoke, an 85% hosted coverage gate, JH7110 image generation, and macOS fuzz/TSan checks. The first GitHub run remains to be verified after committing and pushing the workflow; physical-board validation stays separate.
+
 - Escape assertion/reason strings in harness JSON using `kernel::write_json_escaped`. Console line locking already protects `ShellOutput::print` and `event` against concurrent output; retain interleaving regression coverage as logging evolves.
-- Choose and wire one CI system to run host tests, the x86_64/riscv64 QEMU matrix (`plume test --arch all`), and the existing coverage gate. Keep real-board validation as a separate hardware lane; no CI config is currently checked in.
 - Extend IPC stress/fuzz coverage to concurrent port producers, channel/socket backpressure, transfer under allocation pressure, and teardown. Hosted object suites and dedicated freestanding syscall tests already exist.
 - Add memory-subsystem, scheduler/wait-queue/signal, and syscall fuzz targets; all of those subsystems exist now.
 - Strengthen ELF fuzz oracles for alignment, W^X, wrapping extents, and executable entry coverage; drive symbol ingestion/string handling beyond `locate_symbol_tables`.
@@ -148,11 +149,13 @@ Work here can accompany every feature slice; fix protocol reliability before rel
 - Add KTL self-move assignment cases (vector/ref/result), refcount-overflow failure coverage, and negative-compilation checks for deleted overloads such as `maybe<T&>` rvalue binding.
 
 ### Build and debugging tools
+The native Homebrew workflow, checkout-local Python environment, editor-independent clangd indexing, and concrete QEMU symbol/remote-attach recipes are documented in [BUILDING.md](BUILDING.md) and [Development](docs/Development.md). Debugger target compatibility must be checked separately from compiler and QEMU boot support.
+
 - Include dependency content in Plume package staleness: rebuilding a static library currently does not by itself schedule otherwise-unchanged executable consumers for relinking. Make-level library prerequisites only apply once the consumer package is scheduled.
 - Include board `*.s` files in the kernel Makefile's platform source discovery, alongside `*.cpp`/`*.S`.
 - Fix the Doxygen inputs to use existing sources and `docs/Kernel/`; its current `src/sys/kernel/docs/` inputs do not exist, and PROJECT_BRIEF still names only x86_64.
 - Decide whether Plume should validate composed sysroot contents before imaging. Its stamp detects package changes, not external deletion/tampering; deleting the sysroot or its adjacent `.stamp` forces recomposition today.
-- Document a concrete GDB/QEMU attach workflow (port, symbols, break-on-entry). Add ad-hoc tracing/log capture only where the test harness and existing serial-mux/board tools do not cover the need.
+- Add ad-hoc tracing/log capture only where the test harness and existing serial-mux/board tools do not cover the need. Keep debugger compatibility checks current when upgrading native toolchains.
 - Extend shell inspection with individual object/handle detail and memory/register/stack dump commands. `handle all` already dumps every task's handles; allocation and per-core scheduler metrics already exist. Add interrupt counts, timer diagnostics, latency percentiles, or richer scheduler views for specific debugging needs.
 - Update stale current-state descriptions in `docs/Design/Scheduling.md` (still says no userspace and parked APs) and audit related syscall/task docs after the source split and SMP work.
 

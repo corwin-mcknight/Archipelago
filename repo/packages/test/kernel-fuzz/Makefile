@@ -21,8 +21,14 @@ INC_KERNEL := -I $(ELFSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
 # own main()) and ASan/UBSan. The host is logic-authoritative, not the target ABI -- bare-metal codegen
 # flags are dropped, matching kernel-testrunner.
 SAN   := -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all
-FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
+FLAGS := -std=c++20 -g -O1 -ffreestanding -nostdinc++ -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden -fstrict-aliasing $(SAN)
+
+ifeq ($(shell uname -s),Darwin)
+HOST_LINK_FLAGS :=
+else
+HOST_LINK_FLAGS := -fuse-ld=lld
+endif
 
 DEMANGLE_SRCS := $(KSRC)/crash/demangle.cpp $(KSRC)/tests/fuzz/demangle_fuzz.cpp
 DEMANGLE_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(DEMANGLE_SRCS)))))
@@ -41,29 +47,29 @@ pkg_build:
 		echo "  CXX (fuzz) $$src"; \
 		$(CXX) $(FLAGS) $(INC_KERNEL) -c $$src -o $$obj || exit 1; \
 	done
-	$(CXX) $(SAN) -fuse-ld=lld $(DEMANGLE_OBJS) -o $(FUZZ_DEMANGLE)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(DEMANGLE_OBJS) -o $(FUZZ_DEMANGLE)
 	# stdlib.o supplies itoa for the formatter.
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/core/std/stdlib.cpp -o $(OBJDIR)/stdlib.o
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/fmt_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/fmt_fuzz.cpp -o $(OBJDIR)/fmt_fuzz.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/fmt_fuzz.o $(OBJDIR)/stdlib.o -o $(FUZZ_FMT)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(OBJDIR)/fmt_fuzz.o $(OBJDIR)/stdlib.o -o $(FUZZ_FMT)
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/json_escape_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/json_escape_fuzz.cpp -o $(OBJDIR)/json_escape_fuzz.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/json_escape_fuzz.o -o $(FUZZ_JSON)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(OBJDIR)/json_escape_fuzz.o -o $(FUZZ_JSON)
 	# ELF parser lives in symbols.cpp (pure logic, no hardware deps); link it in for the parser under test.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/elf_symbols_fuzz.cpp -o $(OBJDIR)/elf_symbols_fuzz.o
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/crash/symbols.cpp -o $(OBJDIR)/symbols.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(OBJDIR)/elf_symbols_fuzz.o $(OBJDIR)/symbols.o -o $(FUZZ_ELF)
 	# The loader's parse half is its own translation unit precisely so it links without the VMM.
 	@echo "  CXX (fuzz) $(ELFSRC)/tests/elf_loader_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(ELFSRC)/tests/elf_loader_fuzz.cpp -o $(OBJDIR)/elf_loader_fuzz.o
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(ELFSRC)/parse.cpp -o $(OBJDIR)/elf_parse.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/elf_loader_fuzz.o $(OBJDIR)/elf_parse.o -o $(FUZZ_ELF_LOADER)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(OBJDIR)/elf_loader_fuzz.o $(OBJDIR)/elf_parse.o -o $(FUZZ_ELF_LOADER)
 	# rb_tree is header-only (intrusive, no allocation), so the fuzzer is self-contained.
 	@echo "  CXX (fuzz) $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp"
 	$(CXX) $(FLAGS) $(INC_KERNEL) -c $(KSRC)/tests/fuzz/rb_tree_fuzz.cpp -o $(OBJDIR)/rb_tree_fuzz.o
-	$(CXX) $(SAN) -fuse-ld=lld $(OBJDIR)/rb_tree_fuzz.o -o $(FUZZ_RBTREE)
+	$(CXX) $(SAN) $(HOST_LINK_FLAGS) $(OBJDIR)/rb_tree_fuzz.o -o $(FUZZ_RBTREE)
 
 pkg_install:
 	@echo "[plume] Installing fuzzers"

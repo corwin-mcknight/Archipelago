@@ -1,7 +1,15 @@
-AS  := nasm
-CC  := clang
+ifneq ($(filter default undefined,$(origin AS)),)
+AS := nasm
+endif
+ifneq ($(filter default undefined,$(origin CC)),)
+CC := clang
+endif
+ifneq ($(filter default undefined,$(origin CXX)),)
 CXX := clang++
-LD  := ld.lld
+endif
+ifneq ($(filter default undefined,$(origin LD)),)
+LD := ld.lld
+endif
 
 TARGET_EXEC ?= kernel.elf
 
@@ -114,6 +122,7 @@ override CXXFLAGS += \
     -ffreestanding \
 	-fno-builtin \
 	-nostdlib \
+	-nostdinc++ \
 	-fno-omit-frame-pointer \
 	-fvisibility=hidden -fvisibility-inlines-hidden \
 	-fstrict-vtable-pointers \
@@ -133,7 +142,7 @@ override CXXFLAGS += \
 	-I $(CURDIR)/includes/std \
 	-I $(CURDIR)/includes
 
-LDFLAGS := -nostdlib \
+override LDFLAGS += -nostdlib \
     -static \
     -m $(LD_EMULATION) \
     -z max-page-size=0x1000 \

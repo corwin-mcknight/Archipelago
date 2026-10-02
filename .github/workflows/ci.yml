@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  hosted:
+    name: Hosted tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native
+      - name: Plume and environment regressions
+        run: make selfcheck 2>&1 | tee build/ci/selfcheck.log
+      - name: Hosted ASan and UBSan tests
+        run: make host-test 2>&1 | tee build/ci/host-test.log
+      - name: Test registration and coverage failure regressions
+        run: |
+          tools/dev python3 tools/host-portability-check.py 2>&1 | tee build/ci/host-portability.log
+          tools/dev python3 tools/host-coverage-check.py 2>&1 | tee build/ci/host-coverage-check.log
+      - name: Retain hosted results and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hosted-${{ matrix.os }}
+          path: |
+            build/ci/
+            build/host-test-artifacts/
+            build/*/logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  coverage:
+    name: Hosted coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native
+      - name: Coverage with an 85 percent line gate
+        run: make host-coverage COV_MIN=85 2>&1 | tee build/ci/host-coverage.log
+      - name: Retain coverage report and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hosted-coverage
+          path: |
+            build/ci/
+            build/host-cov/
+            build/*/logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  qemu:
+    name: QEMU tests (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            board: pc
+          - arch: riscv64
+            board: virt
+    env:
+      TARGET_ARCH: ${{ matrix.arch }}
+      QEMU_JOBS: "2"
+      QEMU_BOOT_TIMEOUT: "120"
+      QEMU_COMMAND_TIMEOUT: "15"
+      QEMU_TEST_TIMEOUT: "30"
+      QEMU_RETRIES: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native
+      - name: Build image and run freestanding tests
+        run: make test "ARCH=$TARGET_ARCH" 2>&1 | tee build/ci/qemu.log
+      - name: Generate selected-target editor database
+        run: make clangd "ARCH=$TARGET_ARCH" 2>&1 | tee build/ci/clangd.log
+      - name: RISC-V U-Boot boot-chain smoke
+        if: matrix.arch == 'riscv64'
+        run: make uboot-test 2>&1 | tee build/ci/uboot.log
+      - name: Retain kernel test results, symbols, and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qemu-${{ matrix.arch }}
+          path: |
+            build/ci/
+            build/${{ matrix.arch }}/test-artifacts/
+            build/${{ matrix.arch }}/logs/
+            build/${{ matrix.arch }}/obj/sys/kernel^${{ matrix.board }}/kernel.elf
+            build/compile_commands.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Retain boot image
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: boot-image-${{ matrix.arch }}
+          path: build/${{ matrix.arch }}/image.iso
+          retention-days: 14
+          if-no-files-found: ignore
+
+  board-image:
+    name: JH7110 build and SD image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native
+      - name: Build JH7110 SD image
+        run: make install 'ARCH=riscv64^jh7110' 2>&1 | tee build/ci/jh7110.log
+      - name: Retain build log and kernel symbols
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jh7110-build
+          path: |
+            build/ci/
+            build/riscv64/logs/
+            build/riscv64/obj/sys/kernel^jh7110/kernel.elf
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Retain SD image
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jh7110-sd-image
+          path: build/riscv64/jh7110/sd.img
+          retention-days: 14
+          if-no-files-found: ignore
+
+  additional-sanitizers:
+    name: ThreadSanitizer and bounded fuzzing
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      TSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native
+      - name: ThreadSanitizer stress tests
+        run: make host-tsan 2>&1 | tee build/ci/host-tsan.log
+      - name: Bounded parser and data-structure fuzzing
+        run: |
+          for target in demangle fmt json elf elf-loader rbtree; do
+            make host-fuzz "FUZZ=$target" FUZZ_TIME=5 2>&1 | tee "build/ci/fuzz-$target.log"
+          done
+      - name: Retain sanitizer logs, corpora, and crash reproducers
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: additional-sanitizers
+          path: |
+            build/ci/
+            build/host-fuzz/
+            build/*/logs/
+          retention-days: 14
+          if-no-files-found: ignore

@@ -137,7 +137,9 @@ def check_initrd_bootstrap_policy():
     with tempfile.TemporaryDirectory() as tmp:
         runtime = _runtime(Path(tmp) / "runtime")
         output = Path(tmp) / "initrd.tar"
-        for name in ("init.elf", "Echo.elf", "bad-name.elf", "data.txt", "a" * 32 + ".elf"):
+        # Avoid aliasing the fixture's existing echo.elf on case-insensitive
+        # host filesystems; this must create an actual uppercase archive name.
+        for name in ("init.elf", "Uppercase.elf", "bad-name.elf", "data.txt", "a" * 32 + ".elf"):
             bad = runtime / "bootstrap" / name
             bad.write_bytes(b"payload")
             _fails(lambda: write_archive(runtime, output))

@@ -9,7 +9,9 @@
 // The registry is walked as a packed array between __start__ktests/__stop__ktests, so the entries
 // must stay contiguous. no_sanitize("address") keeps AddressSanitizer (host tier) from inserting
 // redzones between them, which would break the iteration; it is a harmless no-op in the kernel build.
-#if defined(__GNUC__)
+#if defined(__APPLE__)
+#define KTEST_SEC __attribute__((section("__DATA,__ktests"), used, no_sanitize("address")))
+#elif defined(__GNUC__)
 #define KTEST_SEC __attribute__((section(".ktests"), used, no_sanitize("address")))
 #else
 #define KTEST_SEC
