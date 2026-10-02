@@ -464,6 +464,24 @@ def check_qemu_controls_reach_harness_without_changing_build_jobs():
             assert json.loads(report.read_text()) == expected, "harness lost controls or changed omitted defaults"
 
 
+def check_discovery_failure_preserves_boot_console():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        image = root / "image.iso"
+        image.touch()
+        qemu = root / "fake-qemu"
+        qemu.write_text('#!/bin/sh\nprintf "firmware started\\nkernel boot failed\\n"\ncat >/dev/null\n')
+        qemu.chmod(0o755)
+        artifacts = root / "artifacts"
+        result = subprocess.run([os.sys.executable, str(ROOT / "tools/test-harness.py"),
+                                 "--iso", str(image), "--qemu", str(qemu), "--boot-timeout", "0.2",
+                                 "--artifacts", str(artifacts)], capture_output=True, text=True)
+        assert result.returncode == 1, "fixture should fail before test discovery"
+        console = artifacts / "discovery/console.log"
+        assert console.is_file(), "discovery failure discarded the boot console"
+        assert "firmware started\nkernel boot failed" in console.read_text(), "boot diagnostic lost serial output"
+
+
 CHECKS = [check_same_path_compiler_upgrade_recompiles,
           check_flags_recompile_and_failed_rebuild_has_no_success,
           check_assembler_flags_trigger_actual_rebuild,
@@ -482,7 +500,8 @@ CHECKS = [check_same_path_compiler_upgrade_recompiles,
           check_riscv_run_dry_run_never_fetches_missing_firmware,
           check_missing_firmware_member_reinstalls_cached_runtime,
           check_external_firmware_does_not_build_repository_provider,
-          check_qemu_controls_reach_harness_without_changing_build_jobs]
+          check_qemu_controls_reach_harness_without_changing_build_jobs,
+          check_discovery_failure_preserves_boot_console]
 
 
 if __name__ == "__main__":

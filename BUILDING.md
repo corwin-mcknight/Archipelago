@@ -76,7 +76,7 @@ Hosted artifacts remain under `build/tools/`; reports and fuzz corpora remain un
 | **JH7110 build and SD image** | Ubuntu: board-target compilation and image assembly |
 | **ThreadSanitizer and bounded fuzzing** | macOS: both TSan harnesses and all six fuzz targets, with five seconds per target |
 
-The JH7110 job validates compilation and packaging; **physical-board testing remains separate**. The 85% coverage threshold is a configured policy; inspect the first Ubuntu run's measured coverage before treating it as a verified Linux baseline.
+The JH7110 job validates compilation and packaging; **physical-board testing remains separate**. The Ubuntu coverage job enforces the 85% threshold and retains its measured coverage report with each run.
 
 Reproduce hosted checks with the commands above and the focused scripts `tools/dev python3 tools/host-portability-check.py` and `tools/dev python3 tools/host-coverage-check.py`. The coverage gate is `make host-coverage COV_MIN=85`. CI passes explicit QEMU controls through Make and Plume:
 

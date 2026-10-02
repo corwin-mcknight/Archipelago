@@ -24,11 +24,9 @@ SAN   := -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all
 FLAGS := -std=c++20 -g -O1 -ffreestanding -nostdinc++ -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden -fstrict-aliasing $(SAN)
 
-ifeq ($(shell uname -s),Darwin)
-HOST_LINK_FLAGS :=
-else
+# Use LLVM's native linker on both hosts. Older Apple ld versions reject
+# LLVM's libFuzzer-instrumented Mach-O objects (invalid r_symbolnum).
 HOST_LINK_FLAGS := -fuse-ld=lld
-endif
 
 DEMANGLE_SRCS := $(KSRC)/crash/demangle.cpp $(KSRC)/tests/fuzz/demangle_fuzz.cpp
 DEMANGLE_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(DEMANGLE_SRCS)))))

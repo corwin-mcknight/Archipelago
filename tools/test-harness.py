@@ -121,6 +121,7 @@ class KernelHarness:
         self._ready = False
         self._protocol_enabled = False
         self._exit_code: Optional[int] = None
+        self.console_lines: List[str] = []
 
     # ------------------------------------------------------------------
     # Process lifecycle
@@ -147,6 +148,7 @@ class KernelHarness:
         self._ready = False
         self._protocol_enabled = False
         self._exit_code = None
+        self.console_lines = []
         self.wait_for_prompt(self.boot_timeout)
 
     def stop(self) -> None:
@@ -189,7 +191,9 @@ class KernelHarness:
             raise HarnessError("timed out waiting for serial output")
         if item is None:
             raise HarnessProcessExit("kernel process exited unexpectedly", self._exit_code)
-        return item.rstrip("\r")
+        line = item.rstrip("\r")
+        self.console_lines.append(line)
+        return line
 
     def _parse_line(self, line: str) -> Event:
         for prefix, kind in _EVENT_PREFIXES:
@@ -927,6 +931,12 @@ def _discover(args: argparse.Namespace) -> List[TestDescriptor]:
     try:
         harness.start()
         return harness.list_tests(args.command_timeout)
+    except (HarnessError, HarnessProcessExit):
+        if not args.no_artifacts:
+            discovery = args.artifacts / "discovery"
+            discovery.mkdir(parents=True, exist_ok=True)
+            (discovery / "console.log").write_text("\n".join(harness.console_lines) + "\n", encoding="utf-8")
+        raise
     finally:
         harness.stop()
 
