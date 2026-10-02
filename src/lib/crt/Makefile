@@ -1,5 +1,9 @@
+ifneq ($(filter default undefined,$(origin CC)),)
 CC := clang
+endif
+ifneq ($(filter default undefined,$(origin AR)),)
 AR := llvm-ar
+endif
 
 TARGET_LIB ?= libcrt.a
 

@@ -1,7 +1,7 @@
 # Service Coordination
 
 > [!info] Partial Implementation
-> The coordinator (`sys/init`), the task-construction syscalls and ELF loader service, the message envelope, IMAGE endowment, and the register/connect/CONNECTION protocol are implemented, with open logged policy. Manifest-based policy and connection timeouts remain planned.
+> The coordinator (`sys/init`), initrd bootstrap, the task-construction syscalls and ELF loader service, the message envelope, and the register/connect/CONNECTION protocol are implemented, with open logged policy. Manifest-based policy and connection timeouts remain planned.
 
 Service coordination is how a program reaches a service it was not endowed with at creation.
 The kernel provides no naming: names, registration, and connection policy live in one userspace task, the coordinator.
@@ -15,7 +15,7 @@ It is both process manager and service broker, and the two roles are one mechani
 There is no separate broker endowment and no discovery syscall.
 A task that can talk to anything at all can talk to the coordinator, because the bootstrap channel is the one channel every task is born holding.
 
-The coordinator never exits.
+After successful bootstrap, the coordinator serves for the lifetime of the system.
 Until task restart and supervision exist, it is a single point of failure; this is accepted, as it is for the kernel itself.
 A task observes coordinator death as `PEER_CLOSED` on its mailbox -- the existing orphan signal.
 
@@ -25,17 +25,18 @@ The VMO supplies content; the loader's separate TaskFactory capability supplies 
 
 Spawning is also where [[Standard Streams|stdio]] is wired: the coordinator mints the socket pairs behind a new task's input, output, and error streams, mails the task its ends, and routes the read ends of output and error to the console server.
 
-Boot modules never reach this interface.
-At boot the kernel wraps each module's bytes in a read-only wired VMO and mails the coordinator one IMAGE message per module on its bootstrap channel: the VMO handle rides the message, and the payload carries the exact byte size and the module's name.
-Per-module mail rather than one manifest message, because a message carries only a handful of handle slots and the set of programs will outgrow them.
-Modules are a stopgap for the missing initrd; when a filesystem or package server exists, it will mint VMOs the same way, and spawn does not change.
+Limine supplies two userspace boot inputs: `init.bin` and `initrd.tar`. The kernel loads init, wraps the opaque initrd bytes in a read-only wired VMO, and sends one INITRD message after init's bootstrap handles. Its payload carries the exact byte size; its single handle supplies the content. The kernel does not read archive entries or executable names.
+
+Init validates the complete uncompressed ustar archive, then discovers bootstrap executables at `bootstrap/<service>.elf`. Service names contain at most 31 lowercase letters, digits, or underscores and start with a letter. `init` is reserved. Every regular file in this namespace must follow the convention; the required `bootstrap/elf_loader.elf` starts first, followed by the other bootstrap entries in path order. The current limit is eight bootstrap children in addition to the loader. Ordinary files outside this namespace, including `bin/` programs and `data/` files, remain unlaunched. See [[Initrd]] for the archive profile.
+
+Archive structure, bootstrap identities, and every bootstrap ELF are validated before any service starts. A bootstrap failure stops any services already started and exits init. Init copies each selected executable into a temporary VMO, removes its write authority, and hands it to the loader. After bootstrap it unmaps the archive and retains its original read-only VMO for the future file server's `/boot` tree. IMAGE messages remain available for explicit executable delivery after bootstrap; they are not boot modules.
 
 ### Executable loading
-The kernel loads only init, once, from a fixed-layout non-ELF boot image. Init bootstraps the ELF loader service using `lib/elf`, then transfers its TaskFactory capability to the service.
+The kernel loads only init, once, from a fixed-layout non-ELF boot image. Init finds the ELF loader in the initrd and bootstraps it using `lib/elf`, then transfers its TaskFactory capability to the service.
 
 For each subsequent image, init sends the loader an image VMO, its exact byte size, and its name. The loader starts a worker thread that parses ELF, prepares private mappings in a dormant container, and starts the child through the construction syscalls. The reply returns the task handle and parent bootstrap endpoint to init. The child therefore reaches the coordinator through its original bootstrap endpoint, even though a loader worker performed construction.
 
-Images received before the loader image are held until the loader is available. Applications receive no construction authority. Routine loading errors return failure; an unexpected worker fault ends the loader service so its task-owned temporary resources are reclaimed. Restart remains part of future supervision policy. See [[Executable Loading]].
+The loader is available before other bootstrap images or subsequent IMAGE messages are processed. Applications receive no construction authority. Routine loading errors return failure; an unexpected worker fault ends the loader service so its task-owned temporary resources are reclaimed. Restart remains part of future supervision policy. See [[Executable Loading]].
 
 ## Message Envelope
 Every message on a coordinator channel -- and by convention, on any service channel -- begins with one fixed envelope, defined in the ABI headers alongside the syscall interface: an opcode, a status, and a transaction id, followed by a per-opcode packed struct.
@@ -46,7 +47,7 @@ Opcode spaces are per-protocol -- the coordinator protocol owns its own numbers,
 The transaction id is what makes one channel carry many conversations.
 A reply carries the request's txid, so replies can arrive arbitrarily late and interleave with unsolicited messages without ambiguity.
 The [[IPC Primitives#Messages|message header region]] of the full design maps onto this envelope when type registration arrives; until then the envelope is a convention between peers.
-The kernel never inspects envelopes in transit -- it speaks the convention only where it is itself a peer, as the coordinator's parent mailing IMAGE messages.
+The kernel never inspects envelopes in transit -- it speaks the convention only where it is itself a peer, as the coordinator's parent mailing its INITRD message.
 
 ## Names and Connections
 The coordinator protocol has two requests: register and connect.

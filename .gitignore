@@ -1,5 +1,6 @@
 /build
 /.cache
+/.venv
 
 # Active target-config selection (symlink managed by `plume set-config`)
 /default.yaml

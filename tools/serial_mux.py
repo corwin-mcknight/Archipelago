@@ -5,7 +5,7 @@ Holds the single TCP connection to the Mac's socat serial bridge and fans it
 out to any number of local clients, so automation and an interactive console
 can share the port without stealing bytes from each other.
 
-  upstream: host.docker.internal:5555 (socat <-> /dev/cu.usbserial-*)
+  upstream: 127.0.0.1:5555 (socat <-> /dev/cu.usbserial-*)
   clients:  connect to port 5556, e.g.  socat -,rawer,escape=0x1d TCP:localhost:5556
 
 Run it in the background and leave it running; it reconnects upstream as the
@@ -13,9 +13,10 @@ bridge comes and goes.
 """
 
 import asyncio
+import os
 import sys
 
-UPSTREAM = ("host.docker.internal", 5555)
+UPSTREAM = (os.environ.get("SERIAL_UPSTREAM_HOST", "127.0.0.1"), 5555)
 LISTEN_PORT = 5556
 
 clients: set[asyncio.StreamWriter] = set()
@@ -60,7 +61,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
 async def main() -> None:
-    server = await asyncio.start_server(handle_client, "0.0.0.0", LISTEN_PORT)
+    server = await asyncio.start_server(handle_client, "127.0.0.1", LISTEN_PORT)
     print(f"[mux] clients: port {LISTEN_PORT}", file=sys.stderr)
     async with server:
         await asyncio.gather(server.serve_forever(), upstream_loop())

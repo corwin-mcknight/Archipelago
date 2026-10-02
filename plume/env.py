@@ -4,6 +4,7 @@ import os
 
 from plume.config import Config
 from plume.package import Package
+from plume.toolchain import selected_tools, FLAG_KEYS
 
 
 def package_obj_dir(config: Config, package: Package) -> str:
@@ -22,6 +23,10 @@ def package_obj_dir(config: Config, package: Package) -> str:
 def get_build_env(config: Config, package: Package) -> dict:
     """Construct the environment dict passed to package Make invocations."""
     env = dict(os.environ)
+    # Outer Make command-line selections/jobserver flags must not override the
+    # explicit target/tool configuration in a package's independent submake.
+    for key in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "BOARD"):
+        env.pop(key, None)
 
     arch = config.get_arch()
     # Arch isolation comes from the per-arch build tree (tmp_path lives under
@@ -53,11 +58,10 @@ def get_build_env(config: Config, package: Package) -> dict:
     env["D"] = os.path.join(tmp_base, "install")
     env["PN"] = package.name
     env["CATEGORY"] = package.category
-    env["CC"] = config.get("cc", "clang")
-    env["CXX"] = config.get("cxx", "clang++")
-    env["LD"] = config.get("ld", "ld.lld")
-    env["AS"] = config.get("as", "nasm")
-    env["MAKE"] = config.get("make", "make")
+    env.update(selected_tools(config))
+    for key in FLAG_KEYS:
+        if config.get(key.lower()) is not None:
+            env[key] = str(config.get(key.lower()))
     env["MAKE_JOBS"] = str(os.cpu_count() or 1)
     env["TOOLS_PATH"] = config.get("tools_path")
 

@@ -1,0 +1,2 @@
+# Verified against https://pypi.org/project/PyYAML/ on 2026-10-01.
+PyYAML==6.0.3

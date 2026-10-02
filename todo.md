@@ -10,9 +10,8 @@ These findings remain visible in the source; this is a source review, not a fres
 
 ### Memory ownership and allocation failures
 - Validate PMM frees for alignment and eligible frame state (`mm/pmm.cpp`). FREE/ZEROED double frees are already rejected when descriptors cover the frame; WIRED/MMIO and unaligned frees still need protection.
-- Reject kernel-half mutations through user address spaces in `mm/paging.cpp`. `map_page`/`unmap_page` currently permit canonical kernel addresses, whose intermediate tables are shared; define a separate kernel-mapping path before adding dynamic kernel mappings.
-- Make VMO construction report chunk-index allocation failure (`mm/vmo.cpp`); it currently discards `m_chunks.push_back` failure and can advertise more pages than the index covers.
-- Define device-VMO reservation ownership and rollback (`mm/pager_device.cpp`). `create_device_vmo` marks frames WIRED before VMO allocation succeeds and never restores the reservation on destruction; account for overlapping windows before simply unmarking them.
+- Define a separate kernel-mapping path before adding dynamic kernel mappings, including invalidation of shared tables. `map_page`/`unmap_page` in `mm/paging.cpp` now restrict mutations to the low address half.
+- Define device-VMO reservation ownership and rollback (`mm/pager_device.cpp`). `create_device_vmo` marks frames WIRED after VMO allocation succeeds but never restores the reservation on destruction; account for overlapping windows before simply unmarking them.
 - Audit fallible allocation callers, including `ktl::make_ref`, now that nothrow allocation can return null after `heap_activate()`. Ordinary `operator new` and the pre-PMM early heap still panic on exhaustion.
 - Handle task-list allocation failure in `task/task.cpp::register_task` instead of discarding it.
 - Protect the early-heap block list across CPUs, or prove/enforce that all remaining accesses are boot-core-only. Allocation switches to the slab before AP startup, but later frees of early pointers and statistics still enter `early_heap`; any lock must be constant-initialised for pre-constructor use.
@@ -42,8 +41,9 @@ These findings remain visible in the source; this is a source review, not a fres
 Boot-only non-ELF init, thread-owned task construction, private W^X mappings, and the dedicated userspace ELF loader are implemented; see [Executable Loading](docs/Design/Executable%20Loading.md). General region delegation and loader restart remain separate work.
 
 ### Bootstrap and file services
-- Build an initrd containing the bootstrap servers, shell, programs, and data files. Supply init and the initrd as the two userspace Limine boot inputs.
-- Define the initrd format and bootstrap-server discovery convention. Give init a minimal reader so it can find and launch the initial servers before file access exists.
+Plume supplies init and a deterministic uncompressed ustar initrd as the two userspace Limine boot inputs. Init validates the archive and launches `bootstrap/<service>.elf`, with `elf_loader` first; echo and selftest are the current bootstrap payloads. See [Initrd](docs/Design/Initrd.md).
+
+- Add the file server, shell, demonstration programs, and data files to the initrd as those components become available.
 - Implement the userspace file server's file/directory protocol and namespace: writable anonymous storage at `/`, with the read-only initrd exposed at `/boot`. Anonymous storage is a feature of the file server and lasts for the current boot.
 - Define capability-based file access and executable-content delivery, including lifetimes and failure behaviour. The shell obtains program contents from the file server and asks init to execute them.
 
@@ -61,7 +61,6 @@ Implement [standard streams](docs/Design/Standard%20Streams.md) as part of the i
 4. Move ordinary program output to endowed streams. Device ownership follows the driver work below.
 
 ### Coordinator and lifecycle follow-ups
-- Handle boot-module delivery beyond `Channel::QUEUE_DEPTH` (8) with chunking, draining, or retry; `endow_boot_modules` currently logs failed IMAGE delivery but does not retry.
 - Replace or explicitly expose fixed coordinator limits as workloads grow: 8 children/registrations/parked connects, 31-byte service names, and echo's 4-client limit. Add negative replies or timeouts for connects to names that never register.
 - Implement exception propagation and user crash-reporting/unwinding metadata, per [Task Model](docs/Design/Task%20Model.md). Task kill, exit status, TERMINATED, and child-death observation already exist.
 - Define restart and capability-revocation policy for crashed servers. Retain/reload image VMOs for respawn; coordinator currently closes them after spawn. Include structured fault isolation reporting.
@@ -137,8 +136,9 @@ Dependencies run from device access through storage to policy and distribution.
 Work here can accompany every feature slice; fix protocol reliability before relying on unattended CI results.
 
 ### Test reliability and coverage
+[GitHub Actions](.github/workflows/ci.yml) now defines native hosted checks on macOS/Ubuntu, the Ubuntu x86_64/riscv64 QEMU matrix and RISC-V U-Boot smoke, an 85% hosted coverage gate, JH7110 image generation, and macOS fuzz/TSan checks. The first GitHub run remains to be verified after committing and pushing the workflow; physical-board validation stays separate.
+
 - Escape assertion/reason strings in harness JSON using `kernel::write_json_escaped`. Console line locking already protects `ShellOutput::print` and `event` against concurrent output; retain interleaving regression coverage as logging evolves.
-- Choose and wire one CI system to run host tests, the x86_64/riscv64 QEMU matrix (`plume test --arch all`), and the existing coverage gate. Keep real-board validation as a separate hardware lane; no CI config is currently checked in.
 - Extend IPC stress/fuzz coverage to concurrent port producers, channel/socket backpressure, transfer under allocation pressure, and teardown. Hosted object suites and dedicated freestanding syscall tests already exist.
 - Add memory-subsystem, scheduler/wait-queue/signal, and syscall fuzz targets; all of those subsystems exist now.
 - Strengthen ELF fuzz oracles for alignment, W^X, wrapping extents, and executable entry coverage; drive symbol ingestion/string handling beyond `locate_symbol_tables`.
@@ -149,11 +149,13 @@ Work here can accompany every feature slice; fix protocol reliability before rel
 - Add KTL self-move assignment cases (vector/ref/result), refcount-overflow failure coverage, and negative-compilation checks for deleted overloads such as `maybe<T&>` rvalue binding.
 
 ### Build and debugging tools
+The native Homebrew workflow, checkout-local Python environment, editor-independent clangd indexing, and concrete QEMU symbol/remote-attach recipes are documented in [BUILDING.md](BUILDING.md) and [Development](docs/Development.md). Debugger target compatibility must be checked separately from compiler and QEMU boot support.
+
 - Include dependency content in Plume package staleness: rebuilding a static library currently does not by itself schedule otherwise-unchanged executable consumers for relinking. Make-level library prerequisites only apply once the consumer package is scheduled.
 - Include board `*.s` files in the kernel Makefile's platform source discovery, alongside `*.cpp`/`*.S`.
 - Fix the Doxygen inputs to use existing sources and `docs/Kernel/`; its current `src/sys/kernel/docs/` inputs do not exist, and PROJECT_BRIEF still names only x86_64.
 - Decide whether Plume should validate composed sysroot contents before imaging. Its stamp detects package changes, not external deletion/tampering; deleting the sysroot or its adjacent `.stamp` forces recomposition today.
-- Document a concrete GDB/QEMU attach workflow (port, symbols, break-on-entry). Add ad-hoc tracing/log capture only where the test harness and existing serial-mux/board tools do not cover the need.
+- Add ad-hoc tracing/log capture only where the test harness and existing serial-mux/board tools do not cover the need. Keep debugger compatibility checks current when upgrading native toolchains.
 - Extend shell inspection with individual object/handle detail and memory/register/stack dump commands. `handle all` already dumps every task's handles; allocation and per-core scheduler metrics already exist. Add interrupt counts, timer diagnostics, latency percentiles, or richer scheduler views for specific debugging needs.
 - Update stale current-state descriptions in `docs/Design/Scheduling.md` (still says no userspace and parked APs) and audit related syscall/task docs after the source split and SMP work.
 

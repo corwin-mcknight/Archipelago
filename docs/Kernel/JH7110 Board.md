@@ -8,7 +8,7 @@ The board is never flashed during iteration. Its SPI U-Boot environment runs `ar
 - `make console` attaches an interactive serial session (Ctrl-] detaches).
 - `make board-test [TEST=name]` runs the QEMU test tiers on the board over serial (`tools/board_test.py`).
 
-Serial reaches the devcontainer through a TCP bridge, because container runtimes cannot pass the USB-UART adapter through: `socat` on the host exposes the adapter on a port, and `tools/serial_mux.py` fans that single connection out so automation and an interactive console can share it. Only one client may talk to the raw bridge at a time -- multiple clients race for received bytes.
+Serial uses a local TCP bridge: `socat` exposes the USB-UART adapter on `127.0.0.1:5555`, and `tools/serial_mux.py` fans that single connection out to local clients on port 5556 so automation and an interactive console can share it. `make console` starts the mux if needed and attaches through it. Only one client may talk to the raw bridge at a time -- multiple clients race for received bytes. Set `SERIAL_UPSTREAM_HOST` when the bridge runs on another host; the native default uses loopback.
 
 ## Reset and Watchdog
 SBI system reset does not work on this board: OpenSBI's reset path talks to the AXP15060 PMIC over I2C, and U-Boot gates those clocks off at EFI handoff, so the call fails. The kernel instead reboots by arming the hardware watchdog (an SP805-style block in `riscv64/platforms/jh7110/watchdog.cpp`) with an immediate timeout. The same watchdog runs all the time with a 60 s timeout and a feeder thread, so a hang or panic resets the board and netboots again without intervention. The power button is needed only after a true power cut; the PMIC's configuration is volatile and cannot be fixed in firmware.

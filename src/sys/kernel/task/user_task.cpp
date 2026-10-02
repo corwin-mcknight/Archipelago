@@ -169,66 +169,35 @@ ktl::result<kernel::obj::HandleId> start_user_thread(ktl::ref<Task> task, uintpt
     return ktl::result<HandleId>::ok(handle.unwrap());
 }
 
-ktl::result<void> endow_boot_modules(const ktl::ref<Task>& task) {
+ktl::result<void> endow_initrd(const ktl::ref<Task>& task) {
     using namespace kernel::obj;
-    const auto& info          = kernel::boot::collect();
-    ktl::result<void> outcome = ktl::result<void>::ok();
-    for (size_t i = 0; i < info.module_count; i++) {
-        const auto& module = info.modules[i];
-        uintptr_t phys     = kernel::mm::direct_map_physical(module.data).value();
-        if ((phys & (KERNEL_MINIMUM_PAGE_SIZE - 1)) != 0 || module.size == 0) {
-            g_log.warn("task: module '{0}' unaligned or empty; not endowed", module.role);
-            continue;
-        }
-        // Failures name their module and the loop keeps going, so every program that will not
-        // exist is visible rather than one aggregate warn line hiding the tail. The mailbox
-        // holds Channel::QUEUE_DEPTH messages and nothing drains it until the coordinator first
-        // runs, so module counts past that depth fail here; chunking against the queue depth
-        // waits until a target actually ships that many modules.
-        size_t pages = (module.size + KERNEL_MINIMUM_PAGE_SIZE - 1) / KERNEL_MINIMUM_PAGE_SIZE;
-        auto image   = kernel::mm::create_wired_vmo(phys, pages);
-        if (!image) {
-            g_log.warn("task: module '{0}' not endowed: out of memory", module.role);
-            if (outcome.is_ok()) { outcome = ktl::err(ktl::errc::oom); }
-            continue;
-        }
-        image->set_name(module.role);
-
-        size_t name_len = strlen(module.role);
-        auto created    = MessageBuffer::create(sizeof(abi_message_header) + sizeof(abi_image_payload) + name_len);
-        if (created.is_err()) {
-            g_log.warn("task: module '{0}' not endowed: no message page", module.role);
-            if (outcome.is_ok()) { outcome = ktl::err(created.unwrap_err()); }
-            continue;
-        }
-        auto mail = created.unwrap();
-
-        abi_message_header header{::abi::message::COORD_OP_IMAGE, 0, 0};
-        abi_image_payload payload{module.size};
-        __builtin_memcpy(mail.data(), &header, sizeof(header));
-        __builtin_memcpy(mail.data() + sizeof(header), &payload, sizeof(payload));
-        __builtin_memcpy(mail.data() + sizeof(header) + sizeof(payload), module.role, name_len);
-
-        if (!escrow_into(mail, image, RIGHT_READ)) {
-            g_log.warn("task: module '{0}' not endowed: escrow failed", module.role);
-            if (outcome.is_ok()) { outcome = ktl::err(ktl::errc::oom); }
-            continue;
-        }
-        // A fresh ref per message: the coordinator's thread is already enqueued and can die at
-        // any preemption, and teardown_user_task clears Task::mailbox -- writing through a
-        // cleared ref would be a null dereference in kernel context.
-        auto mailbox = task->mailbox();
-        if (!mailbox) {
-            g_log.warn("task: module '{0}' not endowed: coordinator gone", module.role);
-            return outcome.is_ok() ? ktl::err(ktl::errc::peer_closed) : ktl::err(outcome.unwrap_err());
-        }
-        auto sent = mailbox->write(ktl::move(mail));
-        if (sent.is_err()) {
-            g_log.warn("task: module '{0}' not endowed: mailbox full or closed", module.role);
-            if (outcome.is_ok()) { outcome = ktl::err(sent.unwrap_err()); }
-        }
+    const auto* module    = kernel::boot::find_module("initrd");
+    constexpr size_t PAGE = KERNEL_MINIMUM_PAGE_SIZE;
+    if (!task || module == nullptr || module->data == nullptr || module->size == 0 ||
+        module->size > SIZE_MAX - (PAGE - 1)) {
+        return ktl::err(ktl::errc::invalid_operation);
     }
-    return outcome.is_ok() ? ktl::result<void>::ok() : ktl::err(outcome.unwrap_err());
+    uintptr_t phys = kernel::mm::direct_map_physical(module->data).value();
+    size_t rounded = (module->size + PAGE - 1) & ~(PAGE - 1);
+    if ((phys & (PAGE - 1)) != 0 || phys > UINTPTR_MAX - rounded) { return ktl::err(ktl::errc::invalid_operation); }
+    auto image = kernel::mm::create_wired_vmo(phys, rounded / PAGE);
+    if (!image) { return ktl::err(ktl::errc::oom); }
+    image->set_name("initrd");
+
+    auto created = MessageBuffer::create(sizeof(abi_message_header) + sizeof(abi_image_payload));
+    if (created.is_err()) { return ktl::err(created.unwrap_err()); }
+    auto mail = created.unwrap();
+    abi_message_header header{::abi::message::COORD_OP_INITRD, 0, 0};
+    abi_image_payload payload{module->size};
+    __builtin_memcpy(mail.data(), &header, sizeof(header));
+    __builtin_memcpy(mail.data() + sizeof(header), &payload, sizeof(payload));
+    if (!escrow_into(mail, image, RIGHT_READ)) { return ktl::err(ktl::errc::oom); }
+
+    // Bootstrap self-handles plus this one blob fit independently of archive member count.
+    // Hold a local endpoint ref: the enqueued coordinator can die and clear Task::mailbox.
+    auto mailbox = task->mailbox();
+    if (!mailbox) { return ktl::err(ktl::errc::peer_closed); }
+    return mailbox->write(ktl::move(mail));
 }
 
 ktl::result<void> task_kill(const ktl::ref<Task>& task) {

@@ -4,5 +4,5 @@ pkg_get_source pkg_configure:
 pkg_build:
 	cd $(LIVE_SOURCES) && $(MAKE) -j$(MAKE_JOBS) BUILD_DIR=$(BUILD_DIR) OBJ_DIR=$(OBJ_DIR) SYSROOT=$(SYSROOT)
 pkg_install:
-	mkdir -p $(D)/boot
-	cp $(OBJ_DIR)/elf_loader.elf $(D)/boot/elf_loader.elf
+	mkdir -p $(D)/usr/share/initrd/bootstrap
+	cp $(OBJ_DIR)/elf_loader.elf $(D)/usr/share/initrd/bootstrap/elf_loader.elf

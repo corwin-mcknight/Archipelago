@@ -20,8 +20,13 @@
 #include <cstring>
 #include <ctime>
 
+#if defined(__APPLE__)
+extern "C" kernel::testing::ktest __start__ktests[] asm("section$start$__DATA$__ktests");
+extern "C" kernel::testing::ktest __stop__ktests[] asm("section$end$__DATA$__ktests");
+#else
 extern "C" kernel::testing::ktest __start__ktests[];
 extern "C" kernel::testing::ktest __stop__ktests[];
+#endif
 
 namespace {
 
@@ -251,8 +256,10 @@ size_t heap_pages_take_run(uintptr_t base) {
 
 // Defined by the LLVM coverage runtime only in coverage builds (-fprofile-instr-generate). The child
 // _exit()s, which skips the runtime's atexit writer, so we flush this child's counters explicitly.
-// Weak: in a normal (non-coverage) build the symbol is absent and the call is skipped.
-extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
+// Only coverage builds reference the runtime: Darwin's linker rejects an absent weak runtime hook.
+#if defined(KTEST_HOST_COVERAGE)
+extern "C" int __llvm_profile_write_file(void);
+#endif
 
 int main(int argc, char** argv) {
     int total = 0, passed = 0, failed = 0;
@@ -264,7 +271,9 @@ int main(int argc, char** argv) {
         if (pid == 0) {
             int rc = run_test_child(*t);
             fflush(stdout);
-            if (__llvm_profile_write_file) { __llvm_profile_write_file(); }
+#if defined(KTEST_HOST_COVERAGE)
+            __llvm_profile_write_file();
+#endif
             _exit(rc);
         }
         int status = 0;
@@ -289,9 +298,13 @@ int main(int argc, char** argv) {
             emit_test_end(t->name, "fail", "child did not exit normally", 0);
             ok = false;
         }
-        // ru_maxrss (Linux: KB) is this child's peak RSS. Each test is a fresh fork, so it includes a
+        // ru_maxrss is bytes on Darwin and KiB on Linux. Each test is a fresh fork, so it includes a
         // constant inherited baseline -- consistent across tests, so cross-test comparison is meaningful.
+#if defined(__APPLE__)
+        emit_test_meta_rss(t->name, ru.ru_maxrss / 1024);
+#else
         emit_test_meta_rss(t->name, ru.ru_maxrss);
+#endif
         if (ok) {
             ++passed;
         } else {

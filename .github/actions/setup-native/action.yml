@@ -1,0 +1,58 @@
+name: Set up native development
+description: Install native tools and prepare the checkout-local Python environment.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Ubuntu toolchain
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        mkdir -p build/ci
+        {
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang-18 llvm-18 llvm-18-tools \
+            lld-18 clangd-18 clang-format-18 libclang-rt-18-dev \
+            nasm qemu-system-x86 qemu-system-misc opensbi \
+            xorriso mtools coreutils curl xz-utils binutils tar \
+            python3 python3-venv python3-pip git
+        } 2>&1 | tee build/ci/setup-linux.log
+        echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+
+    - name: Prepare native environment
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        mkdir -p build/ci
+        make setup 2>&1 | tee build/ci/setup.log
+
+    - name: Select default CI target
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        mkdir -p build/ci
+        tools/dev python3 -m plume set-config x86_64 2>&1 | tee build/ci/set-config.log
+
+    - name: Check native prerequisites
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        mkdir -p build/ci
+        make doctor 2>&1 | tee build/ci/doctor.log
+
+    - name: Record executing tool versions
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        tools/dev python3 --version 2>&1 | tee build/ci/toolchain.log
+        tools/dev clang --version 2>&1 | tee -a build/ci/toolchain.log
+        tools/dev ld.lld --version 2>&1 | tee -a build/ci/toolchain.log
+        tools/dev qemu-system-x86_64 --version 2>&1 | tee -a build/ci/toolchain.log
+        tools/dev qemu-system-riscv64 --version 2>&1 | tee -a build/ci/toolchain.log

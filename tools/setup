@@ -1,0 +1,25 @@
+#!/bin/sh
+# Provision native tools and a separate Python environment for this checkout.
+set -eu
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+
+if [ "$(uname -s)" = Darwin ]; then
+    brew_command=$(command -v brew || true)
+    if [ -z "$brew_command" ]; then
+        for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+            if [ -x "$candidate" ]; then brew_command=$candidate; break; fi
+        done
+    fi
+    if [ -z "$brew_command" ]; then
+        echo 'setup: Homebrew is required on macOS; install it from https://brew.sh and rerun make setup.' >&2
+        exit 1
+    fi
+    HOMEBREW_NO_AUTO_UPDATE=1 "$brew_command" bundle install --file="$project_root/Brewfile" --no-upgrade
+fi
+
+# tools/dev selects the Homebrew Python on Darwin and the system Python on Linux.
+if [ ! -x "$project_root/.venv/bin/python3" ]; then
+    "$project_root/tools/dev" python3 -m venv "$project_root/.venv"
+fi
+"$project_root/.venv/bin/python3" -m pip install --disable-pip-version-check --no-cache-dir -r "$project_root/requirements.txt"
+"$project_root/tools/dev" python3 -B "$project_root/tools/doctor.py"

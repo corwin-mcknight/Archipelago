@@ -14,7 +14,7 @@ make clean              # Remove build artifacts
 make clangd             # Regenerate compile_commands.json
 ```
 
-These Make targets wrap `python3 -m plume` commands.
+These Make targets wrap `tools/dev python3 -m plume` commands, using the checkout's native toolchain and local Python environment. `make setup` prepares it, `make doctor` checks it, and `make selfcheck` runs Plume regression checks. Pass `ARCH=<target>` to select a target for one Make invocation.
 
 ## Packages
 
@@ -31,6 +31,7 @@ A package that compiles board facts in declares `varies_by: ["board"]` and build
 | `sys/kernel-headers` | Public kernel headers (user/kernel ABI)   |
 | `sys/init`           | The boot-only non-ELF coordinator image    |
 | `lib/elf`            | Userspace ELF parser and constructor       |
+| `lib/initrd`         | Bounded userspace ustar archive reader     |
 | `sys/elf_loader`     | ELF loading service and worker threads     |
 
 ### Package Structure
@@ -47,8 +48,8 @@ Each package has a Makefile at `repo/packages/<category>/<name>/Makefile` implem
 Packages can declare `supports_live_sources: true` with a `live_source_path` pointing into the source tree. The kernel and limine-config packages use this; editing a watched source marks the package stale.
 
 ### Staleness
-Every successful build writes a stamp recording a hash of the target config's build-affecting settings (architecture, toolchain, triple, flags) and a content hash of every input file -- the package's own files under `repo/packages/` for every package, plus the live source tree for live-source packages.
-A package is stale exactly when that record differs from the present: a config change, or a source file whose content changed, appeared, or vanished. Modification times are never consulted, so a branch switch that restores identical content rebuilds nothing, and deleting a source file is a change like any other. Paths and run-only settings (QEMU, memory, image layout) are excluded from the config hash.
+Every successful build writes a stamp recording build-affecting target settings (architecture, toolchain, triple, flags), native host/platform identity, resolved build-tool identities and versions, and a content hash of every input file -- the package's own files under `repo/packages/` for every package, plus the live source tree for live-source packages.
+A package is stale when that record differs from the present: a build-environment or coverage-mode change, or a source file whose content changed, appeared, or vanished. Environment changes clear incompatible package objects before rebuilding; source-only changes preserve Make's incremental object tree. Upgrading a compiler at the same path or moving from an older host environment therefore cannot silently reuse its objects or host executables. Modification times are never consulted, so a branch switch that restores identical content rebuilds nothing, and deleting a source file is a change like any other. Paths and run-only settings (QEMU, memory, image layout) are excluded from the config hash.
 
 When a package rebuilds, Plume prints why on the package's status line -- a config change, or the changed file. `plume status` shows the same reason next to stale packages. Builds print one line per package; pass `--verbose` (`-v`) to stream per-stage output instead. Captured output from the most recent build of each package is kept at `build/<arch>/logs/<category>/<name>.log`, whether the build succeeded or failed.
 
@@ -56,12 +57,16 @@ When a package rebuilds, Plume prints why on the package's status line -- a conf
 ### Dependency Resolution
 Plume resolves dependencies via topological sort and builds dependencies first; independent packages can build in parallel with `-j`.
 
-`plume build` always operates on the whole system graph: every supported non-tool package, plus the build tools they depend on. Staleness checks make this cheap -- a fresh package costs one hash comparison. Naming packages on the command line scopes `--force` to them; naming only build tools (the host test lanes) builds just that closure and leaves the sysroot alone.
+`plume build` always operates on the whole system graph: every supported non-tool package, plus the build tools they depend on. Staleness checks make this cheap -- a fresh package costs one hash comparison. Naming packages on the command line scopes `--force` to them; naming only build tools builds just that closure and leaves the sysroot alone. Hosted test lanes are selected explicitly rather than built by ordinary system builds.
+
+Runtime tools are prepared by the commands that use them. `plume test` and attended `plume run` prepare the configured managed EDK2 package for RISC-V; `plume uboot-test` prepares U-Boot instead. Each preparation builds only the needed host-tool closure and leaves the system sysroot alone. Fresh checkouts/worktrees therefore need no manual runtime-package build before the corresponding Make test/run commands. Dry runs remain fetch-free, and externally configured firmware is user-supplied rather than replaced with managed EDK2.
 
 ### Sysroot
 Each package installs into its own staging directory (`$D`). The sysroot is the union of the system packages' staging trees, and it is composed, never patched: whenever any system package (re)builds or the composed set changes, Plume removes the sysroot and copies every staging tree back in, in dependency order. A package is copied in as soon as it is current, so a later package always compiles against its dependencies' installed files -- that is what lets `sys/init` build against the headers `sys/kernel-headers` installs to `/usr/include`, exactly as any other consumer of that ABI would.
 
 Two packages installing the same path is an error caught during composition; there is no ownership database to consult because the staging trees themselves are the ownership record. A sibling stamp (`<sysroot>.stamp`) records what the sysroot was derived from, so an unchanged system recomposes nothing.
+
+Every package rebuild starts with an empty install staging directory while preserving its object tree. Files removed or renamed by a package therefore disappear from the next sysroot and initrd without requiring a clean build.
 
 ### Build Environment
 Each package build receives environment variables:
@@ -77,16 +82,23 @@ Each package build receives environment variables:
 | `S` | Source directory (`$WORKDIR/src`) |
 | `D` | Staging install directory (`$WORKDIR/install`) |
 | `CC`, `CXX` | `clang`, `clang++` |
-| `LD`, `AS` | `ld.lld`, `nasm` |
+| `LD`, `AS` | Configured linker and assembler (`ld.lld`, `nasm`) |
+| `AR`, `OBJCOPY` | Configured LLVM archive and object-copy tools |
 | `LIVE_SOURCES` | Source tree path (for live-source packages) |
 
 ### Image Assembly
-`plume image` assembles the boot image, driven by the config's `image:` stanza. `format` selects the layout; the default is `iso`:
+`plume image` first packs `sysroot/usr/share/initrd/` into `sysroot/boot/initrd.tar`. Packages own files in that runtime tree: `bootstrap/<service>.elf` names a bootstrap server, while other paths such as `bin/` and `share/` hold ordinary executables and data. Service names use `[a-z][a-z0-9_]*`, up to 31 characters; `init` is reserved. `bootstrap/elf_loader.elf` is required, alongside at most eight ordinary bootstrap servers. Nested directories and empty files under `bootstrap/` are errors.
 
-1. **xorriso** creates a bootable ISO from the sysroot; `bios_boot` and `efi_boot` name the boot images
+The archive uses uncompressed POSIX ustar with sorted canonical relative paths, regular files and directories only, and a 64 MiB limit. Paths use printable ASCII without backslashes, `.` or `..` components and fit within ustar's name/prefix fields (255 bytes combined). Owner IDs and timestamps are zero, owner names are empty, and modes are normalized to 0755 for directories and executable files or 0644 for other files. This makes repeated packing of the same installed runtime content byte-identical. Plume regenerates the archive on every image assembly and reports missing inputs or unsupported paths and file types before invoking image tools.
+
+Limine receives exactly two userspace modules, named `init` (`boot/init.bin`) and `initrd` (`boot/initrd.tar`). Init parses the archive and launches its bootstrap servers through the userspace ELF loader; ordinary archive files are not automatically launched. The boot image contains `/boot` and the root `limine.conf`; the development headers, libraries, and loose runtime tree remain in the host sysroot. See [Initrd](Design/Initrd.md) for the userspace archive contract.
+
+The config's `image:` stanza selects the image layout; the default is `iso`:
+
+1. **xorriso** creates a bootable ISO from the boot tree; `bios_boot` and `efi_boot` name the boot images
 2. **limine bios-install** writes boot code to the ISO's MBR (only when `bios_boot` is configured)
 
-`format: sd` instead builds an SD-card image for boards that boot through U-Boot's EFI loader: an MBR partition table with one FAT32 ESP holding the sysroot verbatim plus Limine's EFI executable at `/EFI/BOOT/`. It is built with mtools (no root privileges) and written to a card with `dd`.
+`format: sd` instead builds an SD-card image for boards that boot through U-Boot's EFI loader: an MBR partition table with one FAT32 ESP holding the same boot tree plus Limine's EFI executable at `/EFI/BOOT/`. It is built with mtools (no root privileges) and written to a card with `dd`. The U-Boot smoke lane uses this same assembly path. Netboot extracts these artifacts into a fresh staging tree and supplies the same init and initrd modules, replacing stale TFTP files only after every required input is present.
 
 The resulting image lands at the config's `image_output` path.
 
@@ -98,7 +110,11 @@ build/
   <arch>/                  Per-target tree (x86_64/, riscv64/)
     obj/                   Intermediate build artifacts
     sysroot/               Composed system root
-      boot/                kernel.elf, limine binaries, limine.conf
+      boot/                kernel.elf, init.bin, initrd.tar, limine binaries
+      limine.conf          Bootloader configuration
+      usr/share/initrd/    Package-owned userspace runtime tree
+      usr/include/         Development headers (not in the boot image)
+      usr/lib/             Development libraries (not in the boot image)
     sysroot.stamp          What the sysroot was composed from
     tmp/                   Per-package work directories
     image.iso              Bootable ISO
@@ -107,7 +123,7 @@ build/
 ```
 
 ## Commands
-All commands are invoked as `python3 -m plume <command>` or through the Makefile.
+All commands are invoked as `tools/dev python3 -m plume <command>` or through the Makefile.
 Every command accepts `--arch <target>` (or `--config <path>`) to select a target for one invocation without changing the `default.yaml` selection. A target is an arch (`riscv64`) or a board (`riscv64^jh7110`).
 `--arch all` fans the command out over every arch at its default board; `--arch all-boards` covers every board target as well. Either ends with a per-target pass/fail summary; the exit code is nonzero if any target fails.
 
@@ -120,7 +136,7 @@ Every command accepts `--arch <target>` (or `--config <path>`) to select a targe
 | `status` | Show build and sysroot state |
 | `clean` | Remove build artifacts |
 | `list` | List packages with optional dependency tree |
-| `clangd` | Rebuild kernel with compile_commands.json generation |
+| `clangd` | Generate selected-target kernel compilation commands using a Make dry run |
 | `set-config` | Select the active target config (symlinks `default.yaml`) |
 | `run` | Launch the built ISO interactively in QEMU |
 | `shell` | Open an interactive shell in a package's build environment |
@@ -128,6 +144,11 @@ Every command accepts `--arch <target>` (or `--config <path>`) to select a targe
 | `log` | Print a package's most recent build log |
 
 Package validation (names, dependency existence, cycles, board-config isolation) runs automatically at the start of every command.
+
+## Editor indexing and worktrees
+`make clangd` asks the kernel Makefile for the selected target's compile commands using a dry run. It does not compile or link the kernel, so indexing does not depend on a successful build. It writes `build/compile_commands.json` using the current checkout's paths and selected architecture/board; it does not merge other target trees into that database.
+
+The repository's `.clangd` points clangd at that database. Configure your editor to launch `tools/dev clangd`, or start the editor through `tools/dev` so its language server inherits the native environment. Regenerate after adding or renaming files, changing target selection, or creating a worktree. Each worktree keeps its own `.venv`, `default.yaml`, `build/`, and database; run setup and indexing from that worktree's root.
 
 ## Targets and Boards
 A target is an architecture, optionally narrowed to a board. `repo/config/riscv64.yaml` is an arch target; `repo/config/riscv64^jh7110.yaml` is a board target. Every arch config names its default board, so `--arch riscv64` already builds a board -- the qualifier is only spelled out when selecting a non-default one.

@@ -14,10 +14,11 @@
 
 KSRC    := $(LIVE_SOURCES)/sys/kernel
 ELFSRC  := $(LIVE_SOURCES)/lib/elf
+INITRDSRC := $(LIVE_SOURCES)/lib/initrd
 OBJDIR  := $(BUILD_DIR)/obj/test/kernel-testrunner
 RUNNER  := $(OBJDIR)/host-test-runner
 
-INC_KERNEL := -I $(ELFSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
+INC_KERNEL := -I $(ELFSRC)/include -I $(INITRDSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
 INC_HOST   := -I $(KSRC)/includes
 
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=all
@@ -33,20 +34,27 @@ endif
 # The host tier is logic-authoritative, NOT the target ABI: we deliberately do not pretend to be
 # x86_64 here (this host may be aarch64). Both are LP64 little-endian, so the integer type model the
 # logic depends on is identical; ABI/codegen fidelity is the QEMU tier's job.
-AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -fno-builtin -fno-exceptions -fno-rtti \
+AMP_FLAGS := -std=c++20 -g -O1 -ffreestanding -nostdinc++ -fno-builtin -fno-exceptions -fno-rtti \
 	-fno-omit-frame-pointer -fvisibility=hidden -fvisibility-inlines-hidden \
 	-fstrict-aliasing -Wstrict-aliasing=2 -Werror=unused-result -Werror=unused-value $(SAN) $(COV_FLAGS)
 
-HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN)
+HARNESS_FLAGS := -std=c++20 -g -O1 -fno-omit-frame-pointer $(SAN) $(if $(COV_FLAGS),-DKTEST_HOST_COVERAGE,)
 
 RUNNER_DIR := $(KSRC)/tests/runner
 HOSTED_DIR := $(KSRC)/tests
 FRAGMENT   := $(RUNNER_DIR)/ktests_brackets.ld
 
+# Mach-O provides section boundary symbols; ELF needs the registry linker fragment.
+ifeq ($(shell uname -s),Darwin)
+HOST_LINK_FLAGS :=
+else
+HOST_LINK_FLAGS := -fuse-ld=lld -Wl,-T,$(FRAGMENT)
+endif
+
 # Every .cpp directly under tests/ is host-tier: the directory is the routing, so there is no list to
 # keep in sync with the kernel build. Tests that need the kernel environment live in tests/freestanding/
 # (compiled only by the kernel); the harness lives in tests/runner/ (compiled with host flags below).
-HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp) $(ELFSRC)/tests/elf_loader_test.cpp
+HOSTED_SRCS := $(wildcard $(HOSTED_DIR)/*.cpp) $(ELFSRC)/tests/elf_loader_test.cpp $(INITRDSRC)/tests/initrd_test.cpp
 
 # Kernel logic the hosted tests link against, compiled with the amplifier. Pure data structures and
 # freestanding helpers only -- anything hardware-coupled must be a freestanding (QEMU-tier) test instead.
@@ -55,7 +63,8 @@ SUPPORT_SRCS := $(KSRC)/core/std/stdlib.cpp $(KSRC)/obj/object.cpp $(KSRC)/obj/h
 	$(KSRC)/obj/channel.cpp $(KSRC)/obj/socket.cpp $(KSRC)/obj/type_registry.cpp $(KSRC)/task/task.cpp \
 	$(KSRC)/task/sync/execution_context.cpp $(KSRC)/task/sync/lockdep.cpp \
 	$(KSRC)/task/sync/mutex.cpp $(ELFSRC)/parse.cpp $(KSRC)/syscalls/handle.cpp $(KSRC)/syscalls/common.cpp $(KSRC)/task/ipc_range.cpp \
-	$(KSRC)/crash/symbols.cpp $(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp
+	$(KSRC)/crash/symbols.cpp $(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp \
+	$(INITRDSRC)/reader.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))
@@ -75,7 +84,7 @@ pkg_build:
 		$(CXX) $(AMP_FLAGS) $(INC_KERNEL) -c $$src -o $$obj || exit 1; \
 	done
 	$(CXX) $(HARNESS_FLAGS) $(INC_HOST) -c $(RUNNER_DIR)/host_runner.cpp -o $(OBJDIR)/host_runner.o
-	$(CXX) $(SAN) $(COV_FLAGS) -fuse-ld=lld $(AMP_OBJS) $(OBJDIR)/host_runner.o -Wl,-T,$(FRAGMENT) -o $(RUNNER)
+	$(CXX) $(SAN) $(COV_FLAGS) $(HOST_LINK_FLAGS) $(AMP_OBJS) $(OBJDIR)/host_runner.o -o $(RUNNER)
 
 pkg_install:
 	@echo "[plume] Installing host test runner"

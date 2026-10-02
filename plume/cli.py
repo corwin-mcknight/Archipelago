@@ -1,10 +1,13 @@
 """Plume CLI -- the Archipelago build coordinator."""
 
 import argparse
+import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 from plume.config import Config, is_bare_config_name
@@ -201,6 +204,31 @@ def cmd_build(args):
     return _run_build(config, packages, args)
 
 
+def _ensure_runtime_tools(config, packages, *, uboot=False, verbose=False):
+    """Build only host prerequisites of this runtime, leaving the sysroot alone.
+
+    An external firmware path is user supplied; do not silently replace it
+    with the repository's EDK2 package. Image assembly does not require these
+    QEMU-side tools, so ordinary builds continue to exclude unused host lanes.
+    """
+    requested = []
+    outputs = []
+    if uboot:
+        requested.append("boot/u-boot-qemu")
+        outputs.append(os.path.join(config.get("tools_path"), "u-boot-qemu", "u-boot.bin"))
+    elif config.get_arch() == "riscv64" and config.get("firmware"):
+        managed = os.path.join(config.get("tools_path"), "edk2-riscv", "RISCV_VIRT_CODE.fd")
+        if os.path.abspath(config.get("firmware")) == os.path.abspath(managed):
+            requested.append("boot/edk2-riscv")
+            outputs.extend([managed, managed.replace("_CODE.fd", "_VARS.fd")])
+    if not requested:
+        return 0
+    # A multi-file tool install can retain a success stamp after one runtime
+    # member is removed. Reinstall the requested provider from its cached input.
+    return _run_build(config, packages, argparse.Namespace(packages=requested, verbose=verbose,
+                                                           force=any(not os.path.isfile(path) for path in outputs)))
+
+
 def cmd_image(args):
     config, _ = _load(args)
     print(bold("Assembling boot image"))
@@ -213,6 +241,8 @@ def cmd_image(args):
 def cmd_test(args):
     config, packages = _load(args)
     if _run_build(config, packages, args) != 0:
+        return 1
+    if _ensure_runtime_tools(config, packages, verbose=args.verbose) != 0:
         return 1
 
     print(bold("\nAssembling boot image"))
@@ -238,6 +268,10 @@ def cmd_test(args):
         harness_args.extend(["--firmware", config.get("firmware")])
     if args.verbose:
         harness_args.append("--verbose")
+    for name in ("jobs", "boot_timeout", "command_timeout", "test_timeout", "retries"):
+        value = getattr(args, "qemu_" + name, None)
+        if value is not None:
+            harness_args.extend(["--" + name.replace("_", "-"), str(value)])
     harness_args.extend(args.tests)
     return subprocess.run(harness_args, cwd=config.project_root).returncode
 
@@ -249,13 +283,15 @@ def cmd_uboot_test(args):
     EDK2 ISO path in `plume test` never touches."""
     import threading
 
-    config, _ = _load(args)
+    config, packages = _load(args)
     if config.get_arch() != "riscv64":
         print(f"{red('plume: error')}: uboot-test is riscv64-only", file=sys.stderr)
         return 1
+    if _ensure_runtime_tools(config, packages, uboot=True, verbose=args.verbose) != 0:
+        return 1
     uboot = os.path.join(config.get("tools_path"), "u-boot-qemu", "u-boot.bin")
     if not os.path.isfile(uboot):
-        print(f"{red('plume: error')}: no U-Boot at {uboot}; run `plume build`", file=sys.stderr)
+        print(f"{red('plume: error')}: no U-Boot at {uboot}; run `plume build boot/u-boot-qemu`", file=sys.stderr)
         return 1
 
     print(bold("Assembling SD image"))
@@ -375,24 +411,56 @@ def cmd_clangd(args):
     from plume.env import get_build_env, package_obj_dir
     env = get_build_env(config, kernel_pkgs[0])
     obj_dir = package_obj_dir(config, kernel_pkgs[0])
-    os.makedirs(obj_dir, exist_ok=True)
     result = subprocess.run(
-        [env["MAKE"], "-B", "-j", env["MAKE_JOBS"],
+        [env["MAKE"], "-n", "-B", "--no-print-directory",
          f"BUILD_DIR={config.get('build_dir')}", f"OBJ_DIR={obj_dir}"],
-        cwd=env["LIVE_SOURCES"], env=env,
+        cwd=env["LIVE_SOURCES"], env=env, capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"{red('plume: error')}: kernel rebuild failed", file=sys.stderr)
+        print(f"{red('plume: error')}: kernel command generation failed\n{result.stderr}", file=sys.stderr)
         return 1
 
-    # Editors expect compile_commands.json at the shared build root, not
-    # inside the per-arch tree (.vscode points at build/compile_commands.json).
-    return subprocess.run(
-        [sys.executable, "tools/merge-compile-commands.py",
-         config.get("build_dir"),
-         os.path.join(config.project_root, "build", "compile_commands.json")],
-        cwd=config.project_root,
-    ).returncode
+    # Use Make's current source/board selection, never a recursive merge of
+    # old -MJ fragments. No compilation, assembly, or linking is required.
+    entries = {}
+    for line in result.stdout.splitlines():
+        try:
+            arguments = shlex.split(line)
+        except ValueError:
+            continue
+        if "-c" not in arguments or "-o" not in arguments:
+            continue
+        source = arguments[arguments.index("-c") + 1]
+        if not source.endswith((".cpp", ".c", ".S")):
+            continue
+        output = os.path.abspath(os.path.join(env["LIVE_SOURCES"], arguments[arguments.index("-o") + 1]))
+        source = os.path.abspath(os.path.join(env["LIVE_SOURCES"], source))
+        # clangd does not need fragment generation, which is a compile side effect.
+        if "-MJ" in arguments:
+            index = arguments.index("-MJ")
+            del arguments[index:index + 2]
+        compiler = shutil.which(arguments[0], path=env["PATH"])
+        if compiler:
+            arguments[0] = compiler
+        entries[source] = {"directory": env["LIVE_SOURCES"], "file": source,
+                           "arguments": arguments, "output": output}
+    if not entries:
+        print(f"{red('plume: error')}: no compile commands found in kernel dry run", file=sys.stderr)
+        return 1
+    output = os.path.join(config.project_root, "build", "compile_commands.json")
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(output), delete=False, encoding="utf-8") as stream:
+            temporary = stream.name
+            json.dump([entries[key] for key in sorted(entries)], stream, indent=2)
+            stream.write("\n")
+        os.replace(temporary, output)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+    print(f"compile_commands.json: {len(entries)} entries for {config.target_name()} -> {output}")
+    return 0
 
 
 def cmd_set_config(args):
@@ -505,7 +573,7 @@ def cmd_log(args):
 
 def cmd_run(args):
     """Launch the built ISO interactively in QEMU on the active target."""
-    config, _ = _load(args)
+    config, packages = _load(args)
     arch = config.get_arch()
     qemu = config.get("qemu", f"qemu-system-{arch}")
     iso = config.get("image_output")
@@ -513,9 +581,15 @@ def cmd_run(args):
     if not os.path.exists(iso):
         print(f"{red('plume: error')}: no ISO at {iso}; run `plume image` first", file=sys.stderr)
         return 1
+    if not args.dry_run and _ensure_runtime_tools(config, packages) != 0:
+        return 1
     if firmware and not os.path.exists(firmware):
-        print(f"{red('plume: error')}: UEFI firmware missing at {firmware}; run `plume build`",
-              file=sys.stderr)
+        managed = os.path.join(config.get("tools_path"), "edk2-riscv", "RISCV_VIRT_CODE.fd")
+        if arch == "riscv64" and os.path.abspath(firmware) == os.path.abspath(managed):
+            remedy = f"run `plume build boot/edk2-riscv --config {shlex.quote(config.config_path)}`"
+        else:
+            remedy = "provide the configured firmware file"
+        print(f"{red('plume: error')}: UEFI firmware missing at {firmware}; {remedy}", file=sys.stderr)
         return 1
 
     # The machine stanza lives in the test harness (single source);
@@ -534,7 +608,7 @@ def cmd_run(args):
         # UEFI targets are serial-only; an empty QEMU window helps nobody.
         cmd += ["-display", "none"]
     if args.debug:
-        cmd += ["-s", "-S"]
+        cmd += ["-gdb", "tcp:127.0.0.1:1234", "-S"]
 
     print(dim(" ".join(cmd)))
     if args.dry_run:
@@ -578,6 +652,13 @@ def main(argv=None):
     test_p.add_argument("--verbose", action="store_true")
     test_p.add_argument("--force", "-f", action="store_true", help="Force rebuild even if already built")
     test_p.add_argument("--jobs", "-j", type=int, default=1, help="Number of parallel package builds (default: 1)")
+    test_p.add_argument("--qemu-jobs", type=int, default=None,
+                        help="Parallel QEMU workers (default: harness auto-selection; 0 = auto)")
+    for name in ("boot", "command", "test"):
+        test_p.add_argument(f"--qemu-{name}-timeout", type=float, default=None,
+                            help=f"QEMU {name} timeout in seconds (default: harness default)")
+    test_p.add_argument("--qemu-retries", type=int, default=None,
+                        help="Retries for QEMU infrastructure failures (default: harness default)")
 
     sub.add_parser("status", parents=[target], help="Show build and sysroot state")
     sub.add_parser("clean", parents=[target], help="Remove build artifacts")
@@ -601,7 +682,7 @@ def main(argv=None):
     setconf_p.add_argument("path", help="Config path or bare arch name, e.g. riscv64")
 
     run_p = sub.add_parser("run", parents=[target], help="Launch the built ISO in QEMU (interactive; use `plume test` for CI)")
-    run_p.add_argument("--debug", action="store_true", help="Start a GDB stub (-s -S) and wait for attach")
+    run_p.add_argument("--debug", action="store_true", help="Start a loopback GDB stub on port 1234 and wait for attach")
     run_p.add_argument("--no-display", action="store_true", help="Headless: serial console only")
     run_p.add_argument("--memory", type=int, default=None, help="Guest memory in MiB (default: from config)")
     run_p.add_argument("--dry-run", "-n", action="store_true", help="Print the QEMU command without launching")

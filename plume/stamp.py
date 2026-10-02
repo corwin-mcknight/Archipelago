@@ -20,6 +20,15 @@ import os
 STAMP_NAME = ".plume-stamp"
 
 
+def recorded_build_hash(stamp_path):
+    """Return the successful build identity, or None for missing/legacy damage."""
+    try:
+        with open(stamp_path, encoding="utf-8") as stream:
+            return json.load(stream).get("config")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 @functools.cache
 def _tree_hashes(source_path: str) -> dict[str, str]:
     """Content hash of every file under *source_path*, keyed by relative path.

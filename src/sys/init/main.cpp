@@ -2,13 +2,14 @@
 #include <abi/syscall.h>
 #include <elf/loader.h>
 #include <elf/protocol.h>
+#include <initrd/initrd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys.h>
 
 // The coordinator: the one task the kernel launches, and both process manager and service broker
-// for everything else (docs/Design/Service Coordination.md). The kernel mails it one IMAGE
-// message per boot module; it spawns each non-init image, becomes every child's parent, and
+// for everything else (docs/Design/Service Coordination.md). The kernel mails it one opaque
+// initrd; it finds the bootstrap executables, becomes every child's parent, and
 // serves the coordinator protocol on their mailboxes: REGISTER claims a name, CONNECT asks for
 // one and receives an end of a freshly minted channel pair, the registrant receiving the other
 // end as a CONNECTION message. Connects for absent names park until the name appears. Policy is
@@ -63,14 +64,10 @@ uint64_t g_factory;
 uint64_t g_loader_task    = UINT64_MAX;
 uint64_t g_loader_mailbox = UINT64_MAX;
 uint64_t g_load_txid      = 0;
-struct PendingImage {
-    uint64_t vmo;
-    uint64_t size;
-    size_t name_size;
-    char name[NAME_CAP];
-};
-PendingImage g_images[MAX_CHILDREN];
-size_t g_image_count = 0;
+// Retain the original read-only blob for eventual handoff to the file server. Extracted image
+// VMOs are temporary; they do not replace the archive's files and directories.
+uint64_t g_initrd_vmo     = UINT64_MAX;
+static_assert(initrd::BOOTSTRAP_NAME_MAX == NAME_CAP);
 
 bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
     if (a_len != b_len) { return false; }
@@ -162,61 +159,20 @@ uint64_t load_via_service(uint64_t vmo, uint64_t size, const char* name, size_t 
     return 0;
 }
 
-// An IMAGE message from the kernel: spawn every image except our own. The VMO handle is consumed
-// either way -- spawn only borrows it, and with no respawn story yet there is nothing to keep it
-// for.
-void handle_image(uint64_t vmo, uint64_t image_size, size_t name_at, size_t name_len) {
-    char name[NAME_CAP];
-    if (name_len > NAME_CAP) {
+// Start an ordinary image through the loader. Both initrd bootstrap and explicit IMAGE mail use
+// this path. It consumes the VMO on success and failure.
+bool spawn_image(uint64_t vmo, uint64_t image_size, const char* name, size_t name_len) {
+    if (name_len == 0 || name_len > NAME_CAP) {
         // Refused rather than truncated: a child spawned under a shortened identity would then
         // have its own full-name REGISTER refused, and two long module names could collide.
-        sys_print("coord: IMAGE NAME TOO LONG; not spawned\n");
+        sys_print("coord: INVALID IMAGE NAME; not spawned\n");
         (void)sys_handle_close(vmo);
-        return;
+        return false;
     }
-    sys_copy_in(name, name_at, name_len);
-
-    if (name_equal(name, name_len, "init", 4)) {
+    if (name_equal(name, name_len, "init", 4) || name_equal(name, name_len, "elf_loader", 10) ||
+        g_loader_mailbox == UINT64_MAX) {
         (void)sys_handle_close(vmo);
-        return;
-    }
-
-    if (name_equal(name, name_len, "elf_loader", 10)) {
-        if (g_loader_mailbox != UINT64_MAX ||
-            sys_is_error(elf::spawn(g_factory, vmo, image_size, name, name_len, SPAWN_AT))) {
-            (void)sys_handle_close(vmo);
-            sys_print("coord: LOADER BOOT FAILED\n");
-            return;
-        }
-        (void)sys_handle_close(vmo);
-        uint64_t handles[2];
-        sys_copy_in(handles, SPAWN_AT, sizeof(handles));
-        g_loader_task    = handles[0];
-        g_loader_mailbox = handles[1];
-        if (sys_is_error(send_message(g_loader_mailbox, ELF_LOADER_AUTHORITY, 0, 0, nullptr, 0, &g_factory))) {
-            (void)sys_task_kill(g_loader_task);
-            sys_print("coord: LOADER ENDOWMENT FAILED\n");
-            return;
-        }
-        g_factory = UINT64_MAX;  // authority moved to the loader, not retained by the coordinator
-        while (g_image_count) {
-            PendingImage pending = g_images[--g_image_count];
-            sys_copy_out(MSG_AT, pending.name, pending.name_size);
-            handle_image(pending.vmo, pending.size, MSG_AT, pending.name_size);
-        }
-        return;
-    }
-    if (g_loader_mailbox == UINT64_MAX) {
-        if (g_image_count == MAX_CHILDREN) {
-            (void)sys_handle_close(vmo);
-            return;
-        }
-        auto& pending     = g_images[g_image_count++];
-        pending.vmo       = vmo;
-        pending.size      = image_size;
-        pending.name_size = name_len;
-        for (size_t i = 0; i < name_len; ++i) { pending.name[i] = name[i]; }
-        return;
+        return false;
     }
 
     size_t slot = MAX_CHILDREN;
@@ -228,11 +184,11 @@ void handle_image(uint64_t vmo, uint64_t image_size, size_t name_at, size_t name
     }
     if (slot == MAX_CHILDREN) {
         (void)sys_handle_close(vmo);
-        return;
+        return false;
     }
     if (sys_is_error(load_via_service(vmo, image_size, name, name_len))) {
         log_name("coord: SPAWN FAILED ", name, name_len);
-        return;
+        return false;
     }
 
     uint64_t handles[2];
@@ -252,9 +208,176 @@ void handle_image(uint64_t vmo, uint64_t image_size, size_t name_at, size_t name
         (void)sys_handle_close(g_children[slot].task);
         (void)sys_handle_close(g_children[slot].mailbox);
         g_children[slot].used = false;
-        return;
+        return false;
     }
     log_name("coord: spawned ", name, name_len);
+    return true;
+}
+
+// The loader consumes images from VMO offset zero. Archive members need not start on a page,
+// so give each one private, zero-padded backing and drop write authority before delivery.
+uint64_t copy_image(const uint8_t* bytes, size_t size) {
+    if (size == 0 || size > elf::MAX_IMAGE_BYTES) { return static_cast<uint64_t>(ABI_ERR_INVALID_OPERATION); }
+    const uint64_t rounded = (size + ABI_VM_PAGE_SIZE - 1) & ~(ABI_VM_PAGE_SIZE - 1);
+    uint64_t vmo           = sys_vmo_create(rounded);
+    if (sys_is_error(vmo)) { return vmo; }
+    uint64_t mapping = sys_vmo_map(vmo, 0, 0, rounded, ABI_VM_PROT_READ | ABI_VM_PROT_WRITE);
+    if (sys_is_error(mapping)) {
+        (void)sys_handle_close(vmo);
+        return mapping;
+    }
+    auto* destination = reinterpret_cast<uint8_t*>(mapping);
+    for (size_t i = 0; i < size; ++i) { destination[i] = bytes[i]; }
+    uint64_t result = sys_vmo_unmap(mapping);
+    if (!sys_is_error(result)) { result = sys_handle_restrict(vmo, ABI_RIGHT_READ); }
+    if (sys_is_error(result)) {
+        (void)sys_handle_close(vmo);
+        return result;
+    }
+    return vmo;
+}
+
+bool start_loader(uint64_t vmo, size_t size) {
+    uint64_t result = elf::spawn(g_factory, vmo, size, "elf_loader", 10, SPAWN_AT);
+    (void)sys_handle_close(vmo);
+    if (sys_is_error(result)) {
+        sys_print("coord: LOADER BOOT FAILED\n");
+        return false;
+    }
+    uint64_t handles[2];
+    sys_copy_in(handles, SPAWN_AT, sizeof(handles));
+    g_loader_task    = handles[0];
+    g_loader_mailbox = handles[1];
+    if (sys_is_error(send_message(g_loader_mailbox, ELF_LOADER_AUTHORITY, 0, 0, nullptr, 0, &g_factory))) {
+        sys_print("coord: LOADER ENDOWMENT FAILED\n");
+        return false;
+    }
+    g_factory = UINT64_MAX;  // construction authority now belongs only to the loader
+    return true;
+}
+
+// A boot failure must not leave a partially started service environment behind. Init exits
+// after this, which also releases any remaining self-handles and temporary mappings.
+void stop_bootstrap() {
+    for (size_t i = 0; i < MAX_CHILDREN; ++i) {
+        if (!g_children[i].used) { continue; }
+        (void)sys_task_kill(g_children[i].task);
+        (void)sys_port_unbind(g_port, KEY_CHILD_BASE + i);
+        (void)sys_handle_close(g_children[i].task);
+        (void)sys_handle_close(g_children[i].mailbox);
+        g_children[i].used = false;
+    }
+    if (g_loader_task != UINT64_MAX) {
+        (void)sys_task_kill(g_loader_task);
+        (void)sys_handle_close(g_loader_task);
+        (void)sys_handle_close(g_loader_mailbox);
+        g_loader_task = g_loader_mailbox = UINT64_MAX;
+    }
+}
+
+bool bootstrap_archive(const void* bytes, size_t size) {
+    initrd::Reader reader(bytes, size);
+    struct BootstrapImage {
+        const uint8_t* data;
+        size_t size;
+        size_t name_size;
+        char name[NAME_CAP + 1];
+    };
+    BootstrapImage images[MAX_CHILDREN + 1]{};
+    size_t count  = 0;
+    size_t loader = MAX_CHILDREN + 1;
+    initrd::Entry entry;
+    // Finish validating and collecting the archive before starting any service.
+    for (;;) {
+        auto next = reader.next(entry);
+        if (next == initrd::Result::END) { break; }
+        if (next == initrd::Result::ERROR) {
+            sys_print("coord: INVALID INITRD\n");
+            return false;
+        }
+        // A regular file cannot occupy the root of the reserved bootstrap directory.
+        if (!entry.directory && name_equal(entry.path, sizeof("bootstrap"), "bootstrap", sizeof("bootstrap"))) {
+            sys_print("coord: INVALID INITRD BOOTSTRAP ROOT\n");
+            return false;
+        }
+        if (!initrd::is_bootstrap_path(entry)) { continue; }
+        char name[NAME_CAP + 1];
+        if (count == MAX_CHILDREN + 1 || !initrd::bootstrap_name(entry, name)) {
+            sys_print("coord: INVALID INITRD BOOTSTRAP SET\n");
+            return false;
+        }
+        size_t name_size = 0;
+        while (name[name_size] != '\0') { ++name_size; }
+        if (name_equal(name, name_size, "init", 4)) {
+            sys_print("coord: RESERVED INITRD BOOTSTRAP NAME\n");
+            return false;
+        }
+        // Validate every executable before starting any of them; malformed late entries must
+        // not leave earlier bootstrap services running in a half-initialized environment.
+        if (elf::parse_image(entry.data, entry.size).is_err()) {
+            log_name("coord: INVALID BOOTSTRAP ELF ", name, name_size);
+            return false;
+        }
+        auto& image     = images[count];
+        image.data      = entry.data;
+        image.size      = entry.size;
+        image.name_size = name_size;
+        for (size_t i = 0; i <= name_size; ++i) { image.name[i] = name[i]; }
+        if (name_equal(name, name_size, "elf_loader", 10)) { loader = count; }
+        ++count;
+    }
+    if (loader == MAX_CHILDREN + 1) {
+        sys_print("coord: INITRD LOADER MISSING\n");
+        return false;
+    }
+    uint64_t loader_image = copy_image(images[loader].data, images[loader].size);
+    if (sys_is_error(loader_image) || !start_loader(loader_image, images[loader].size)) { return false; }
+    for (size_t i = 0; i < count; ++i) {
+        if (i == loader) { continue; }
+        uint64_t image = copy_image(images[i].data, images[i].size);
+        if (sys_is_error(image) || !spawn_image(image, images[i].size, images[i].name, images[i].name_size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The second bootstrap message is exactly one opaque INITRD VMO. Archive parsing stays here,
+// in userspace; the kernel knows only its exact byte extent and read-only content authority.
+bool receive_initrd() {
+    uint64_t got = elf::receive(abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, MSG_CAP, ARRIVE_AT, 4);
+    if (sys_is_error(got)) { return false; }
+    constexpr size_t FIXED = sizeof(abi_message_header) + sizeof(abi_image_payload);
+    if ((got >> 32) != 1 || (got & 0xffffffff) != FIXED) {
+        sys_close_arrived(got, ARRIVE_AT);
+        return false;
+    }
+    abi_message_header header;
+    abi_image_payload payload;
+    uint64_t vmo;
+    sys_copy_in(&header, MSG_AT, sizeof(header));
+    sys_copy_in(&payload, MSG_AT + sizeof(header), sizeof(payload));
+    sys_copy_in(&vmo, ARRIVE_AT, sizeof(vmo));
+    if (header.opcode != ABI_COORD_OP_INITRD || header.status != 0 || header.txid != 0 || payload.size_bytes == 0 ||
+        payload.size_bytes > initrd::MAX_ARCHIVE_BYTES) {
+        (void)sys_handle_close(vmo);
+        return false;
+    }
+    const uint64_t rounded = (payload.size_bytes + ABI_VM_PAGE_SIZE - 1) & ~(ABI_VM_PAGE_SIZE - 1);
+    uint64_t mapping       = sys_vmo_map(vmo, 0, 0, rounded, ABI_VM_PROT_READ);
+    if (sys_is_error(mapping)) {
+        (void)sys_handle_close(vmo);
+        return false;
+    }
+    bool ready = bootstrap_archive(reinterpret_cast<const void*>(mapping), payload.size_bytes);
+    if (sys_is_error(sys_vmo_unmap(mapping))) { ready = false; }
+    if (!ready) {
+        (void)sys_handle_close(vmo);
+        return false;
+    }
+    g_initrd_vmo = vmo;
+    sys_print("coord: initrd ready\n");
+    return true;
 }
 
 void handle_child_message(size_t slot, uint64_t recv_result) {
@@ -369,6 +492,11 @@ extern "C" int main() {
         sys_print("coord: PORT SETUP BROKEN\n");
         return 1;
     }
+    if (!receive_initrd()) {
+        sys_print("coord: INITRD BOOT FAILED\n");
+        stop_bootstrap();
+        return 1;
+    }
     sys_print("coord: serving\n");
 
     for (;;) {
@@ -380,8 +508,8 @@ extern "C" int main() {
         sys_copy_in(&key, PACKET_AT, sizeof(key));
 
         if (key == KEY_SELF) {
-            // Our own mailbox: IMAGE messages from the kernel. A hangup here would mean the
-            // kernel dropped our parent end, which it never does; keep serving regardless.
+            // Explicit executable delivery after boot. The initrd was consumed once before
+            // entering this loop; a second archive cannot repeat bootstrap.
             (void)sys_channel_drain(
                 abi::syscall::BOOTSTRAP_HANDLE, MSG_AT, MSG_CAP, ARRIVE_AT, 4,
                 [](void*, uint64_t result) {
@@ -400,7 +528,14 @@ extern "C" int main() {
                     size_t fixed = sizeof(abi_message_header) + sizeof(abi_image_payload);
                     abi_image_payload payload;
                     sys_copy_in(&payload, MSG_AT + sizeof(abi_message_header), sizeof(payload));
-                    handle_image(vmo, payload.size_bytes, MSG_AT + fixed, size - fixed);
+                    size_t name_size = size - fixed;
+                    if (name_size == 0 || name_size > NAME_CAP) {
+                        (void)sys_handle_close(vmo);
+                        return;
+                    }
+                    char name[NAME_CAP];
+                    sys_copy_in(name, MSG_AT + fixed, name_size);
+                    (void)spawn_image(vmo, payload.size_bytes, name, name_size);
                 },
                 nullptr);
         } else if (key >= KEY_CHILD_BASE && key < KEY_CHILD_BASE + MAX_CHILDREN) {

@@ -11,6 +11,9 @@ namespace kernel::testing {
 // executable-format parsing is exercised in userspace and in the host parser tests.
 class UserProgram {
    public:
+    const uint8_t* data() const { return m_bytes; }
+    size_t size() const { return m_size; }
+
     void syscall(uint32_t number, uint32_t arg = 0) {
 #if defined(ARCH_X86_64)
         byte(0xb8);

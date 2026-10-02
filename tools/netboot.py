@@ -17,8 +17,10 @@ Usage: netboot.py [--server 10.0.0.26]
 import argparse
 import hashlib
 import pathlib
+import shutil
 import struct
 import subprocess
+import tempfile
 import time
 import zlib
 
@@ -38,12 +40,8 @@ serial: yes
     cmdline: shell
     module_path: boot():/init.bin
     module_string: init
-    module_path: boot():/elf_loader.elf
-    module_string: elf_loader
-    module_path: boot():/selftest.elf
-    module_string: selftest
-    module_path: boot():/echo.elf
-    module_string: echo
+    module_path: boot():/initrd.tar
+    module_string: initrd
 """
 
 # tftp name on the server -> file name staged on the SD FAT partition
@@ -51,9 +49,7 @@ FILES = [
     ("limine-netboot.conf", "limine.conf"),
     ("boot/kernel.elf", "kernel.elf"),
     ("boot/init.bin", "init.bin"),
-    ("boot/elf_loader.elf", "elf_loader.elf"),
-    ("boot/selftest.elf", "selftest.elf"),
-    ("boot/echo.elf", "echo.elf"),
+    ("boot/initrd.tar", "initrd.tar"),
     ("EFI/BOOT/BOOTRISCV64.EFI", "limine.efi"),
 ]
 
@@ -108,24 +104,36 @@ dhcp
 """
 
 
+def prepare_artifacts(root: pathlib.Path, server: str) -> None:
+    """Extract and validate a fresh image before replacing published files."""
+    sd = root / "sd.img"
+    with sd.open("rb") as image:
+        mbr = image.read(512)
+    lba = struct.unpack("<I", mbr[454:458])[0]  # first partition's start sector
+    with tempfile.TemporaryDirectory(prefix=".netboot-", dir=root) as temporary:
+        staging = pathlib.Path(temporary)
+        subprocess.run(
+            ["mcopy", "-s", "-i", f"{sd}@@{lba * 512}", "::/EFI", "::/boot", str(staging)],
+            check=True,
+        )
+        (staging / "limine-netboot.conf").write_text(LIMINE_CONF)
+        digest = hashlib.sha256()
+        for tftp_name, _ in FILES:
+            digest.update((staging / tftp_name).read_bytes())
+        (staging / "boot.scr").write_bytes(uimage_script(boot_script(server).encode()))
+        (staging / "netboot.stamp").write_text(digest.hexdigest() + "\n")
+        for name in ("boot", "EFI", "limine-netboot.conf", "boot.scr", "netboot.stamp"):
+            target = root / name
+            if target.is_dir():
+                shutil.rmtree(target)
+            (staging / name).replace(target)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", default="10.0.0.26", help="TFTP server IP baked into boot.scr")
     args = parser.parse_args()
-
-    sd = TFTP_ROOT / "sd.img"
-    mbr = sd.read_bytes()[:512]
-    lba = struct.unpack("<I", mbr[454:458])[0]  # first partition's start sector
-    subprocess.run(
-        ["mcopy", "-s", "-o", "-i", f"{sd}@@{lba * 512}", "::/EFI", "::/boot", str(TFTP_ROOT)],
-        check=True,
-    )
-    (TFTP_ROOT / "limine-netboot.conf").write_text(LIMINE_CONF)
-    (TFTP_ROOT / "boot.scr").write_bytes(uimage_script(boot_script(args.server).encode()))
-    digest = hashlib.sha256()
-    for tftp_name, _ in FILES:
-        digest.update((TFTP_ROOT / tftp_name).read_bytes())
-    (TFTP_ROOT / "netboot.stamp").write_text(digest.hexdigest() + "\n")
+    prepare_artifacts(TFTP_ROOT, args.server)
     print(f"netboot artifacts written to {TFTP_ROOT} (server {args.server})")
 
 

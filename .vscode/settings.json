@@ -49,5 +49,6 @@
         "fmt_types": "cpp",
         "maybe": "cpp"
     },
-    "clangd.path": "/usr/bin/clangd"
+    "clangd.path": "clangd",
+    "C_Cpp.intelliSenseEngine": "disabled"
 }

@@ -5,9 +5,15 @@
 # from the kernel source tree: every user program is built against the same contract.
 #
 # No board facts are compiled in, so unlike the kernel a user program builds once per architecture.
-CC  := clang
+ifneq ($(filter default undefined,$(origin CC)),)
+CC := clang
+endif
+ifneq ($(filter default undefined,$(origin CXX)),)
 CXX := clang++
-LD  := ld.lld
+endif
+ifneq ($(filter default undefined,$(origin LD)),)
+LD := ld.lld
+endif
 
 BUILD_DIR ?= ./
 SRC_DIRS  ?= ./
@@ -38,11 +44,11 @@ COMMON_FLAGS := \
 	-I $(SYSROOT)/usr/include
 
 override CFLAGS   += -std=c11 $(COMMON_FLAGS)
-override CXXFLAGS += -std=c++20 -fno-exceptions -fno-rtti $(COMMON_FLAGS)
+override CXXFLAGS += -nostdinc++ -std=c++20 -fno-exceptions -fno-rtti $(COMMON_FLAGS)
 
 override CWARNINGS += -Wall -Wextra -Wconversion -Wshadow -Wpointer-arith -Wunused
 
-LDFLAGS := -nostdlib \
+override LDFLAGS += -nostdlib \
 	-static \
 	-no-pie \
 	-m $(LD_EMULATION) \

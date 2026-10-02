@@ -19,7 +19,7 @@ pkg_configure:
 
 pkg_build:
 	@echo "[plume] Building $(CATEGORY)/$(PN)"
-	$(MAKE) -C $(S)
+	$(MAKE) -B -C $(S) CC="$(CC)" CFLAGS="-g -O2 -pipe $(CFLAGS)" CPPFLAGS="$(CPPFLAGS)" LDFLAGS="$(LDFLAGS)"
 
 pkg_install:
 	@echo "[plume] Installing $(CATEGORY)/$(PN)"

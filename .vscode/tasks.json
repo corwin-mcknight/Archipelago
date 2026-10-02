@@ -1,13 +1,52 @@
 {
+    "version": "2.0.0",
     "tasks": [
         {
-            "label": "Launch QEMU",
+            "label": "Build native",
             "type": "shell",
-            "windows": {
-                "command": "start -FilePath 'qemu-system-i386' -ArgumentList '-S -gdb tcp::1234 -boot d -cdrom bin/myos.iso -m 512'"
+            "command": "make",
+            "args": [
+                "build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
             },
-            "linux": {
-                "command": "make install && qemu-system-x86_64 -S -gdb tcp::1234 -boot d -cdrom build/image.iso -m 256"
+            "problemMatcher": []
+        },
+        {
+            "label": "Generate clangd database",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "clangd"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run hosted tests",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "host-test"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Debug x86_64 QEMU (interactive)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "debug",
+                "ARCH=x86_64"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
             },
             "problemMatcher": []
         }

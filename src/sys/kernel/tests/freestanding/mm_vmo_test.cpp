@@ -1,3 +1,4 @@
+#include <kernel/mm/slab_heap.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,11 +13,9 @@
 #include "kernel/mm/vmo.h"
 #include "kernel/testing/testing.h"
 
-// VMO tests drive the shared PMM and page descriptors. They are merged into
-// two integration stories -- residency lifecycle and mapping back-refs --
-// each against one fresh VM. Phases inside a story snapshot the PMM counters
-// they compare against at their own start, so they hold on a VM warmed by
-// earlier phases.
+// Each integration case shares global PMM, heap and descriptor state across
+// its phases. Counter checks use local baselines and warm the heap where
+// needed so earlier phases do not affect the expected deltas.
 
 KTEST_MODULE("mm/vmo");
 
@@ -27,6 +26,46 @@ constexpr size_t PAGES       = 8;
 constexpr uintptr_t MAP_BASE = 0x10000000;
 constexpr vm_prot_t RW       = vm_prot::READ | vm_prot::WRITE;
 }  // namespace
+
+// Chunk-pointer arrays for these page counts exceed the heap's run limit.
+// SIZE_MAX also covers overflow in additive chunk-count rounding. All three
+// convenience factories must propagate the allocation failure.
+KTEST_CASE(vmo_chunk_index_allocation_failure) {
+    KTEST_REQUIRE_TRUE(heap_slab_active());
+    auto window = g_page_frame_allocator.alloc();
+    KTEST_REQUIRE_TRUE(window.has_value());
+    auto* descriptor = g_page_descriptors.lookup(window.value());
+    KTEST_REQUIRE_TRUE(descriptor != nullptr);
+    KTEST_REQUIRE_TRUE(descriptor->state == page_state::ACTIVE);
+
+    auto before = g_slab_heap.stats();
+    {
+        auto large   = create_anonymous_vmo(SIZE_MAX / KERNEL_MINIMUM_PAGE_SIZE);
+        auto wrapped = create_anonymous_vmo(SIZE_MAX);
+        auto wired   = create_wired_vmo(window.value(), SIZE_MAX);
+        auto device  = create_device_vmo(window.value(), SIZE_MAX, vm_cache_mode::DEVICE);
+        KTEST_EXPECT_FALSE(large);
+        KTEST_EXPECT_FALSE(wrapped);
+        KTEST_EXPECT_FALSE(wired);
+        KTEST_EXPECT_FALSE(device);
+    }
+    auto after = g_slab_heap.stats();
+    // All four requests must reach the allocator and release temporary pagers
+    // and control blocks on failure.
+    KTEST_EXPECT_EQUAL(after.failures, before.failures + 4);
+    KTEST_EXPECT_EQUAL(after.large_allocs, before.large_allocs);
+    KTEST_EXPECT_EQUAL(after.large_pages, before.large_pages);
+    for (size_t i = 0; i < SLAB_HEAP_CLASS_COUNT; ++i) {
+        KTEST_EXPECT_EQUAL(after.classes[i].live_objects, before.classes[i].live_objects);
+    }
+    // Failed device construction must leave the frame's descriptor state unchanged.
+    KTEST_EXPECT_TRUE(descriptor->state == page_state::ACTIVE);
+    g_page_frame_allocator.free(window.value());
+
+    auto recovered = create_anonymous_vmo(1);
+    KTEST_REQUIRE_TRUE(recovered);
+    KTEST_EXPECT_TRUE(recovered->commit(0, 1).is_ok());
+}
 
 // Story: the residency lifecycle. Commit populates distinct zeroed owned
 // frames, and destroying a populated VMO is PMM-neutral.
@@ -89,6 +128,20 @@ KTEST_CASE(vmo_residency_lifecycle) {
         }
         // Frames and residency chunks all returned on destruction.
         KTEST_EXPECT_EQUAL(kernel::mm::g_page_frame_allocator.free_pages(), free_before);
+    }
+
+    // Phase 3: the final page is usable for exact and partial chunk sizes.
+    // The two-page commits straddle chunk boundaries for 513 and 1025 pages.
+    constexpr size_t SIZES[] = {512, 513, 1025};
+    for (size_t pages : SIZES) {
+        auto v = create_anonymous_vmo(pages);
+        KTEST_REQUIRE_TRUE(v);
+        KTEST_EXPECT_EQUAL(v->size_pages(), pages);
+        KTEST_EXPECT_FALSE(v->resident_frame(pages - 1).has_value());
+        KTEST_REQUIRE_TRUE(v->commit(pages - 2, 2).is_ok());
+        KTEST_EXPECT_EQUAL(v->resident_pages(), 2u);
+        KTEST_EXPECT_NOT_EQUAL(v->resident_frame(pages - 2).value(), v->resident_frame(pages - 1).value());
+        KTEST_EXPECT_ERR(v->commit(pages, 1), ktl::errc::out_of_range);
     }
 }
 

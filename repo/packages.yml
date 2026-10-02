@@ -54,6 +54,14 @@ lib/elf:
     - "sys/kernel-headers"
     - "lib/crt"
 
+lib/initrd:
+  description: "Userspace bounded ustar archive reader"
+  supports_live_sources: true
+  live_source_path: "lib/initrd"
+  dependencies:
+    - "sys/kernel-headers"
+    - "lib/crt"
+
 sys/init:
   description: "The first user program"
   supports_live_sources: true
@@ -62,6 +70,7 @@ sys/init:
     - "sys/kernel-headers"
     - "lib/crt"
     - "lib/elf"
+    - "lib/initrd"
 
 sys/elf_loader:
   description: "Capability-endowed ELF loader with one worker thread per spawn"
