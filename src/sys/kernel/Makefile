@@ -58,6 +58,7 @@ BOOT_SRCS := $(shell find $(SRC_DIRS)/boot/$(BOOT) -name *.cpp -not -path '*/tes
 # architecture's instructions directly.
 PLATFORM_DIR  := $(SRC_DIRS)/$(ARCH)/platforms/$(BOARD)
 PLATFORM_SRCS := $(shell find $(PLATFORM_DIR) -name *.cpp -not -path '*/tests/*') \
+	$(shell find $(PLATFORM_DIR) -name *.s -not -path '*/tests/*') \
 	$(shell find $(PLATFORM_DIR) -name *.S -not -path '*/tests/*')
 CORE_SRCS := $(shell find $(SRC_DIRS)/core -name *.cpp -not -path '*/tests/*')
 TASK_SRCS := $(shell find $(SRC_DIRS)/task -name *.cpp -not -path '*/tests/*')
