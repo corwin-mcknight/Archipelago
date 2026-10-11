@@ -3,11 +3,11 @@
 After a successful build, plume records the config's build hash and a
 per-file content hash of every input tree -- the package's own files under
 repo/packages/ for every package, plus the live source tree for live-source
-packages. A package is stale exactly when that record differs from the
-present: a build-affecting config change, or a source file whose content
-changed, appeared, or vanished. Mtimes are never consulted, so branch
-switches that restore identical content do not rebuild, and deleting a
-source file is a change like any other. Make handles file-level
+packages, plus the installed content of its declared dependencies. A package
+is stale when that record differs from the present: a build-affecting config
+change, changed source content, or changed dependency outputs. Mtimes are
+never consulted, so branch switches that restore identical content do not
+rebuild, and deleting a source file is a change like any other. Make handles file-level
 incrementality via .d deps.
 """
 
@@ -15,9 +15,40 @@ import functools
 import hashlib
 import json
 import os
+import stat
 
 
 STAMP_NAME = ".plume-stamp"
+DependencyIdentities = dict[str, dict[str, str] | None]
+
+
+def output_identity(path: str) -> dict[str, str] | None:
+    """Hash installed content without caching outputs that can change during this build."""
+    if not os.path.isdir(path):
+        return None
+    entries = {}
+    for root, dirs, files in os.walk(path):
+        for name in sorted(dirs + files):
+            member = os.path.join(root, name)
+            rel = os.path.relpath(member, path)
+            if rel == STAMP_NAME:
+                continue
+            mode = os.lstat(member).st_mode
+            if stat.S_ISLNK(mode):
+                content = os.readlink(member)
+            elif stat.S_ISREG(mode):
+                digest = hashlib.sha256()
+                with open(member, "rb") as stream:
+                    for chunk in iter(lambda: stream.read(65536), b""):
+                        digest.update(chunk)
+                content = digest.hexdigest()
+            elif stat.S_ISDIR(mode):
+                content = "directory"
+            else:
+                raise ValueError(f"unsupported dependency output: {member}")
+            entry = (stat.S_IFMT(mode), stat.S_IMODE(mode), content)
+            entries[rel] = hashlib.sha256(json.dumps(entry).encode()).hexdigest()[:16]
+    return entries or None
 
 
 def recorded_build_hash(stamp_path):
@@ -27,6 +58,15 @@ def recorded_build_hash(stamp_path):
             return json.load(stream).get("config")
     except (OSError, ValueError, AttributeError):
         return None
+
+
+def recorded_dependencies(stamp_path) -> DependencyIdentities:
+    try:
+        with open(stamp_path, encoding="utf-8") as stream:
+            dependencies = json.load(stream).get("dependencies", {})
+        return dependencies if isinstance(dependencies, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
 
 
 @functools.cache
@@ -61,7 +101,8 @@ def _current_files(source_paths) -> dict[str, str]:
     return files
 
 
-def is_stale(stamp_path: str, build_hash: str, source_paths: list[str] = ()) -> str | None:
+def is_stale(stamp_path: str, build_hash: str, source_paths: list[str] = (),
+             dependencies: DependencyIdentities | None = None) -> str | None:
     """Return why the package recorded at *stamp_path* needs a rebuild, or None if fresh."""
     if not os.path.exists(stamp_path):
         return "never built"
@@ -87,10 +128,20 @@ def is_stale(stamp_path: str, build_hash: str, source_paths: list[str] = ()) -> 
             return f"source added: {rel}"
         return f"source changed: {rel}"
 
+    current = dependencies or {}
+    previous = recorded.get("dependencies", {})
+    if not isinstance(previous, dict):
+        return "stamp unreadable"
+    for name in sorted(previous.keys() | current.keys()):
+        if name in current and current[name] is None:
+            return f"dependency unavailable: {name}"
+        if previous.get(name) != current.get(name):
+            return f"dependency changed: {name}"
     return None
 
 
-def update(stamp_path: str, build_hash: str, source_paths: list[str] = ()):
+def update(stamp_path: str, build_hash: str, source_paths: list[str] = (),
+           dependencies: DependencyIdentities | None = None):
     """Record a successful build, creating parent directories if needed.
 
     Input hashes come from the pre-build walk (the invocation cache), so a
@@ -99,5 +150,6 @@ def update(stamp_path: str, build_hash: str, source_paths: list[str] = ()):
     """
     os.makedirs(os.path.dirname(stamp_path), exist_ok=True)
     with open(stamp_path, "w", encoding="utf-8") as f:
-        json.dump({"config": build_hash, "files": _current_files(source_paths)}, f)
+        json.dump({"config": build_hash, "files": _current_files(source_paths),
+                   "dependencies": dependencies or {}}, f)
         f.write("\n")
