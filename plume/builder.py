@@ -15,16 +15,20 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import ExitStack
 
 from plume.config import Config
 from plume.output import bold, green, red, cyan, dim, fmt_duration, fmt_reason, open_line, close_line, break_line
 from plume.package import Package
 from plume.env import get_build_env
-from plume.stamp import STAMP_NAME, is_stale, recorded_build_hash, update as update_stamp
+from plume.repository import load_packages
+from plume.stamp import (DependencyIdentities, STAMP_NAME, is_stale, output_identity, recorded_build_hash,
+                         recorded_dependencies, update as update_stamp)
 from plume.toolchain import build_identity
-from plume.universe import create_build_sorter
+from plume.universe import create_build_sorter, expand_with_deps
 
 
 STAGES = [
@@ -54,6 +58,51 @@ def _stamp_path(config: Config, package: Package) -> str:
     return os.path.join(env["WORKDIR"], STAMP_NAME)
 
 
+def _dependency_packages(config: Config, package: Package) -> list[Package]:
+    if not package.dependencies:
+        return []
+    packages = load_packages(os.path.join(config.get("repo_path"), "packages.yml"),
+                             arch=config.get_arch(), board=config.get_board())
+    by_name = {pkg.full_name: pkg for pkg in packages}
+    return [by_name[name] for name in package.dependencies]
+
+
+def _dependency_key(dependency: Package) -> str:
+    return dependency.full_name if dependency.is_build_tool else dependency.qualified_name
+
+
+def _dependency_identities(config: Config, package: Package) -> DependencyIdentities:
+    identities = {}
+    for dependency in _dependency_packages(config, package):
+        env = get_build_env(config, dependency)
+        output = os.path.join(env["TOOL_INSTALL"], dependency.name) if dependency.is_build_tool else env["D"]
+        identity = output_identity(output) if recorded_build_hash(_stamp_path(config, dependency)) else None
+        identities[_dependency_key(dependency)] = identity
+    return identities
+
+
+def _changed_dependency_paths(config: Config, package: Package, current: DependencyIdentities) -> list[str]:
+    previous = recorded_dependencies(_stamp_path(config, package))
+    paths = set()
+    for dependency in _dependency_packages(config, package):
+        key = _dependency_key(dependency)
+        old = previous.get(key) or {}
+        if not isinstance(old, dict):
+            old = {}
+        env = get_build_env(config, dependency)
+        root = os.path.join(env["TOOL_INSTALL"], dependency.name) if dependency.is_build_tool else env["SYSROOT"]
+        for rel, identity in (current[key] or {}).items():
+            if identity != old.get(rel):
+                paths.add(os.path.join(root, rel))
+    return sorted(paths)
+
+
+def _make_path(path: str) -> str:
+    for source, escaped in (("\\", "\\\\"), ("$", "$$"), (" ", "\\ "), ("#", "\\#"), (":", "\\:")):
+        path = path.replace(source, escaped)
+    return path
+
+
 def build_needed(config: Config, package: Package) -> str | None:
     """Return why the package needs a (re)build, or None if its build is fresh."""
     env = get_build_env(config, package)
@@ -67,7 +116,8 @@ def build_needed(config: Config, package: Package) -> str | None:
     if not has_output:
         return "never built"
 
-    return is_stale(_stamp_path(config, package), build_identity(config, package), _source_paths(config, package))
+    return is_stale(_stamp_path(config, package), build_identity(config, package), _source_paths(config, package),
+                    _dependency_identities(config, package))
 
 
 def build_log_path(config: Config, package: Package) -> str:
@@ -83,6 +133,12 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
     """
     env = get_build_env(config, package)
     identity = build_identity(config, package)
+    dependencies = _dependency_identities(config, package)
+    if any(value is None for value in dependencies.values()):
+        break_line()
+        print(f"  {red('error')}: unavailable dependencies for {package}")
+        return False, 0.0
+    changed_paths = _changed_dependency_paths(config, package, dependencies)
     if recorded_build_hash(_stamp_path(config, package)) != identity:
         # Rerunning Make alone does not invalidate objects when command flags,
         # tool binaries, or host ABI change. Purge only this package's object
@@ -117,7 +173,14 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
 
     log_path = build_log_path(config, package)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as log:
+    with ExitStack() as inputs, open(log_path, "w", encoding="utf-8") as log:
+        if changed_paths:
+            # MAKEFILES reaches nested Make invocations; phony inputs defeat tied/preserved mtimes
+            # while existing prerequisites select only the objects or links affected by content changes.
+            makefile_inputs = inputs.enter_context(tempfile.NamedTemporaryFile(mode="w", suffix=".mk"))
+            makefile_inputs.write(".PHONY: " + " ".join(_make_path(path) for path in changed_paths) + "\n")
+            makefile_inputs.flush()
+            env["MAKEFILES"] = (env.get("MAKEFILES", "") + " " + makefile_inputs.name).strip()
         if verbose:
             log.write("(output streamed to console; rerun without --verbose to capture)\n")
         for stage, label in STAGES:
@@ -127,7 +190,7 @@ def build_package(config: Config, package: Package, verbose: bool = False) -> tu
                 return False, time.monotonic() - pkg_start
 
     # Record the inputs so a config or source change triggers a rebuild.
-    update_stamp(_stamp_path(config, package), identity, _source_paths(config, package))
+    update_stamp(_stamp_path(config, package), identity, _source_paths(config, package), dependencies)
 
     return True, time.monotonic() - pkg_start
 
@@ -239,7 +302,8 @@ def orchestrate(config: Config, ordered: list[Package], compose_set: list[Packag
     if compose_set:
         recompose = sysroot_needs_compose(config, compose_set)
         if recompose is None and any(
-            p.full_name in force_set or build_needed(config, p) is not None for p in compose_set
+            p.full_name in force_set or build_needed(config, p) is not None
+            for p in expand_with_deps(compose_set, ordered)
         ):
             recompose = "builds pending"
 
