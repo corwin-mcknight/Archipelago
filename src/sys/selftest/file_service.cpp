@@ -107,6 +107,17 @@ bool read(uint64_t handle, uint64_t offset, uint32_t limit, const char* expected
            bytes_equal(HEADER, expected, length);
 }
 
+bool print_hello(uint64_t boot) {
+    Endpoint hello;
+    constexpr char expected[] = "Hello, world!\n";
+    constexpr uint32_t length = sizeof(expected) - 1;
+    if (!open(boot, "hello.txt", &hello)) { return false; }
+    sys_print("selftest: reading /boot/hello.txt\n");
+    if (!read(hello.handle, 0, length + 1, expected, length)) { return false; }
+    // Print the received payload directly from the IPC buffer.
+    return sys_write(HEADER, length) == length;
+}
+
 bool backpressure(uint64_t directory, uint64_t other) {
     // The kernel queue has eight slots in each direction. With no reply reads, accepting
     // 17 requests proves the server has consumed at least nine, leaving a reply pending.
@@ -170,6 +181,10 @@ bool file_service_selftest() {
         return false;
     }
 
+    if (!print_hello(boot.handle)) {
+        sys_print("selftest: /boot/hello.txt read or output failed\n");
+        return false;
+    }
     boot.close();
     root.close();
     if (!backpressure(data.handle, file.handle)) {

@@ -11,4 +11,5 @@ pkg_install:
 	mkdir -p $(D)/usr/share/initrd/bootstrap $(D)/usr/share/initrd/data $(D)/usr/include/fileservice
 	cp $(OBJ_DIR)/files.elf $(D)/usr/share/initrd/bootstrap/
 	cp $(LIVE_SOURCES)/file_service.txt $(D)/usr/share/initrd/data/
+	cp $(LIVE_SOURCES)/hello.txt $(D)/usr/share/initrd/
 	cp $(LIVE_SOURCES)/include/fileservice/protocol.h $(D)/usr/include/fileservice/
