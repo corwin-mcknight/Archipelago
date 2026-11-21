@@ -20,6 +20,6 @@ Each CPU records nesting depths for preemption-disabled sections, IRQ-masked sec
 Yielding, sleeping, blocking, exiting, and direct scheduling require preemption to be enabled and no locks to be held.
 
 ## Debug Lock Dependency Checking
-Debug builds track up to 16 locks held by each CPU, 128 registered instrumented locks, and 512 learned dependency edges without allocating memory. Every nested acquisition learns edges from held locks to the new lock. An acquisition that closes a dependency cycle, recursive acquisition, non-owner or out-of-order release, and capacity exhaustion are fatal diagnostics.
+Debug builds track up to 16 locks held by each CPU, 512 registered instrumented locks, and 512 learned dependency edges without allocating memory. Every nested acquisition learns edges from held locks to the new lock. An acquisition that closes a dependency cycle, recursive acquisition, non-owner or out-of-order release, and capacity exhaustion are fatal diagnostics.
 
 Spinlocks and mutexes have stable monotonic lock identities. Generic lock-compatible types are still checked for balanced LIFO release and same-stack recursion by address, but do not participate in the persistent dependency graph. Lock ownership and graph metadata compile out when `NDEBUG` is defined.

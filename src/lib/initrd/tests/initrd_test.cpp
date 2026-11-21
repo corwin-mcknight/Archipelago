@@ -1,3 +1,6 @@
+#include "../../../srv/files/archive.h"
+
+#include <fileservice/protocol.h>
 #include <initrd/initrd.h>
 #include <kernel/testing/testing.h>
 
@@ -337,4 +340,46 @@ KTEST_CASE(initrd_bootstrap_names_match_coordinator_limits) {
     Entry nested = {};
     copy_text(reinterpret_cast<uint8_t*>(nested.path), "bootstrap/subdir/server.elf");
     KTEST_EXPECT_TRUE(initrd::is_bootstrap_path(nested));
+}
+
+KTEST_CASE(file_archive_index_confines_lookup_and_orders_siblings) {
+    Archive fixture;
+    fixture.add("a", "", '5');
+    fixture.add("a-", "sibling");
+    fixture.add("a/z", "child");
+    fixture.add("ab", "another sibling");
+    fileservice::Archive index;
+    KTEST_REQUIRE_TRUE(index.load(fixture.bytes, fixture.size));
+
+    fileservice::NodeId directory;
+    KTEST_REQUIRE_EQUAL(index.lookup(fileservice::ROOT, "boot/a", 6, directory), 0u);
+    fileservice::NodeId file;
+    KTEST_REQUIRE_EQUAL(index.lookup(directory, "z", 1, file), 0u);
+    KTEST_EXPECT_EQUAL(index.node(file).entry.size, 5u);
+    KTEST_EXPECT_EQUAL(index.lookup(directory, "../ab", 5, file), fileservice::INVALID_PATH);
+    KTEST_EXPECT_EQUAL(index.lookup(directory, "missing/..", 10, file), fileservice::INVALID_PATH);
+    KTEST_EXPECT_EQUAL(index.lookup(directory, "ab", 2, file), fileservice::NOT_FOUND);
+
+    const auto sibling = index.node(directory).next;
+    KTEST_REQUIRE_TRUE(index.contains(sibling));
+    KTEST_EXPECT_TRUE(equal_text(index.node(sibling).entry.path, "a-"));
+    const auto last = index.node(sibling).next;
+    KTEST_REQUIRE_TRUE(index.contains(last));
+    KTEST_EXPECT_TRUE(equal_text(index.node(last).entry.path, "ab"));
+    KTEST_EXPECT_EQUAL(index.node(last).next, 0u);
+}
+
+KTEST_CASE(file_archive_index_requires_directory_parents) {
+    Archive missing;
+    missing.add("a/b", "file");
+    KTEST_REQUIRE_TRUE(missing.valid());
+    fileservice::Archive missing_parent;
+    KTEST_EXPECT_FALSE(missing_parent.load(missing.bytes, missing.size));
+
+    Archive conflict;
+    conflict.add("a", "file");
+    conflict.add("a/b", "file");
+    KTEST_REQUIRE_TRUE(conflict.valid());
+    fileservice::Archive file_parent;
+    KTEST_EXPECT_FALSE(file_parent.load(conflict.bytes, conflict.size));
 }

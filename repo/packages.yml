@@ -71,6 +71,7 @@ sys/init:
     - "lib/crt"
     - "lib/elf"
     - "lib/initrd"
+    - "srv/files"
 
 sys/elf_loader:
   description: "Capability-endowed ELF loader with one worker thread per spawn"
@@ -88,6 +89,7 @@ sys/selftest:
   dependencies:
     - "sys/kernel-headers"
     - "lib/crt"
+    - "srv/files"
 
 srv/echo:
   description: "The echo server, first userspace service"
@@ -96,6 +98,15 @@ srv/echo:
   dependencies:
     - "sys/kernel-headers"
     - "lib/crt"
+
+srv/files:
+  description: "Read-only userspace initrd file service"
+  supports_live_sources: true
+  live_source_path: "srv/files"
+  dependencies:
+    - "sys/kernel-headers"
+    - "lib/crt"
+    - "lib/initrd"
 
 test/kernel-testrunner:
   description: "Host-tier kernel test runner"

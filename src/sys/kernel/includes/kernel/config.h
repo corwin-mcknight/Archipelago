@@ -30,7 +30,8 @@
 // Scheduler trace ring capacity in records (~32 bytes each; always-on flight recorder).
 #define CONFIG_SCHED_TRACE_EVENTS 512
 #define CONFIG_LOCKDEP_MAX_HELD 16
-#define CONFIG_LOCKDEP_MAX_LOCKS 128
+// Debug boots track the locks of several userspace tasks and their live IPC endpoints.
+#define CONFIG_LOCKDEP_MAX_LOCKS 512
 #define CONFIG_LOCKDEP_MAX_EDGES 512
 
 #ifdef __cplusplus

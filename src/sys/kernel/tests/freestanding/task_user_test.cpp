@@ -145,8 +145,8 @@ ktl::ref<Task> find_task_named(ktl::string_view name) {
 
 // The whole service layer, end to end, exactly as a normal boot runs it: the coordinator is
 // launched with the opaque initrd endowed, spawns selftest and echo from it, echo registers its
-// name, selftest connects to it by name through the coordinator and proves the minted channel
-// round-trips -- selftest's exit status 0 (echo NOT skipped) is the proof the brokered path ran.
+// name, and selftest connects through the coordinator to check echo and the read-only file service.
+// A zero selftest exit status proves both brokered paths ran.
 // Killing the coordinator then orphans echo, whose event loop observes PEER_CLOSED and exits
 // cleanly: the parent-death contract, demonstrated on a task the test never held a handle to.
 KTEST_CASE(coordinator_boot) {
@@ -184,7 +184,7 @@ KTEST_CASE(coordinator_boot) {
     KTEST_EXPECT_FALSE(has_factory(coordinator));
     KTEST_EXPECT_FALSE(has_factory(echo));
 
-    // selftest runs everything -- including connect("echo") and the roundtrip -- and exits.
+    // selftest runs the echo and file service checks and exits.
     for (int i = 0; i < 4000 && selftest->state() != task_state::TERMINATED; ++i) { sleep_ticks(1); }
     KTEST_REQUIRE_TRUE(selftest->state() == task_state::TERMINATED);
     KTEST_EXPECT_ALL(selftest->exit_code() >> 32 == sys::TASK_EXIT_EXITED, (selftest->exit_code() & 0xFFFFFFFF) == 0);
