@@ -19,9 +19,9 @@ Plume writes entries in canonical path order with timestamps and numeric owner I
 
 `bootstrap/elf_loader.elf` is required and always starts first, regardless of archive order. Init uses its userspace ELF library to construct that service and transfers its TaskFactory authority to it. Init then asks the loader to start the remaining bootstrap executables in archive order. The current coordinator supports at most eight ordinary bootstrap children in addition to the loader.
 
-The current archive contains `bootstrap/elf_loader.elf`, `bootstrap/echo.elf`, and `bootstrap/selftest.elf`. Echo and selftest preserve the existing service integration check; selftest is a temporary automatically started test program. Future programs under `bin/` and data elsewhere in the archive are carried without being launched. The file server, shell, and ordinary program launch path remain separate work.
+The system archive contains the ELF loader, file server, echo server, and selftest in `bootstrap/`. Selftest is an automatically started test program that exercises service discovery, echo, and read-only file access. Entries elsewhere in the archive can be read through `/boot`.
 
-Init maps the original archive read-only and copies each selected executable into its own anonymous VMO. The loader receives a read-only handle with the executable starting at offset zero, preserving the existing ELF loading protocol. Init retains the original archive for the boot lifetime; handing it to the future file server for a read-only `/boot` tree remains to be implemented.
+Init maps the original archive read-only and copies each selected executable into its own anonymous VMO. The loader receives a read-only handle with the executable starting at offset zero, preserving the existing ELF loading protocol. Init then unmaps the archive and moves the original read-only VMO and exact length to the [[File Service|file server]]. The server retains a read-only mapping for its lifetime.
 
 ## Package inputs
 Packages install archive members under `$D/usr/share/initrd/`. For example, installing `$D/usr/share/initrd/bootstrap/echo.elf` supplies `bootstrap/echo.elf` in the archive. This dedicated runtime tree keeps installed build headers and static libraries out of userspace boot storage.

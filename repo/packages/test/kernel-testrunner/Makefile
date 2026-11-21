@@ -15,10 +15,11 @@
 KSRC    := $(LIVE_SOURCES)/sys/kernel
 ELFSRC  := $(LIVE_SOURCES)/lib/elf
 INITRDSRC := $(LIVE_SOURCES)/lib/initrd
+FILESSRC := $(LIVE_SOURCES)/srv/files
 OBJDIR  := $(BUILD_DIR)/obj/test/kernel-testrunner
 RUNNER  := $(OBJDIR)/host-test-runner
 
-INC_KERNEL := -I $(ELFSRC)/include -I $(INITRDSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
+INC_KERNEL := -I $(ELFSRC)/include -I $(INITRDSRC)/include -I $(FILESSRC)/include -I $(KSRC)/includes/std -I $(KSRC)/includes
 INC_HOST   := -I $(KSRC)/includes
 
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=all
@@ -64,7 +65,7 @@ SUPPORT_SRCS := $(KSRC)/core/std/stdlib.cpp $(KSRC)/obj/object.cpp $(KSRC)/obj/h
 	$(KSRC)/task/sync/execution_context.cpp $(KSRC)/task/sync/lockdep.cpp \
 	$(KSRC)/task/sync/mutex.cpp $(ELFSRC)/parse.cpp $(KSRC)/syscalls/handle.cpp $(KSRC)/syscalls/common.cpp $(KSRC)/task/ipc_range.cpp \
 	$(KSRC)/crash/symbols.cpp $(KSRC)/obj/port.cpp $(KSRC)/mm/slab_heap.cpp $(KSRC)/mm/object_arena.cpp \
-	$(INITRDSRC)/reader.cpp
+	$(INITRDSRC)/reader.cpp $(FILESSRC)/archive.cpp
 
 AMP_SRCS := $(HOSTED_SRCS) $(SUPPORT_SRCS)
 AMP_OBJS := $(addprefix $(OBJDIR)/,$(addsuffix .o,$(basename $(notdir $(AMP_SRCS)))))

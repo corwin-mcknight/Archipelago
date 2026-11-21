@@ -15,7 +15,7 @@ Compile-time constants in `kernel/config.h` control kernel behavior and limits.
 | `KERNEL_ASSERT` | 1 | Enable assertions |
 | `CONFIG_KERNEL_TESTING` | 1 | Testing mode enabled |
 | `CONFIG_LOCKDEP_MAX_HELD` | 16 | Debug held-lock depth per CPU |
-| `CONFIG_LOCKDEP_MAX_LOCKS` | 128 | Debug registered-lock capacity |
+| `CONFIG_LOCKDEP_MAX_LOCKS` | 512 | Debug registered-lock capacity |
 | `CONFIG_LOCKDEP_MAX_EDGES` | 512 | Debug dependency-edge capacity |
 
 ## Build Profiles

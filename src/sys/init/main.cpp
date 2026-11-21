@@ -2,6 +2,7 @@
 #include <abi/syscall.h>
 #include <elf/loader.h>
 #include <elf/protocol.h>
+#include <fileservice/protocol.h>
 #include <initrd/initrd.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -64,9 +65,6 @@ uint64_t g_factory;
 uint64_t g_loader_task    = UINT64_MAX;
 uint64_t g_loader_mailbox = UINT64_MAX;
 uint64_t g_load_txid      = 0;
-// Retain the original read-only blob for eventual handoff to the file server. Extracted image
-// VMOs are temporary; they do not replace the archive's files and directories.
-uint64_t g_initrd_vmo     = UINT64_MAX;
 static_assert(initrd::BOOTSTRAP_NAME_MAX == NAME_CAP);
 
 bool name_equal(const char* a, size_t a_len, const char* b, size_t b_len) {
@@ -132,6 +130,39 @@ void serve_pending(const char* name, size_t name_len, size_t server) {
         g_pending[i].used = false;
         serve_connect(g_pending[i].child, g_pending[i].txid, name, name_len, server);
     }
+}
+
+bool register_service(size_t slot, uint64_t txid, const char* name, size_t name_len) {
+    for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+        if (g_names[i].used && name_equal(g_names[i].name, g_names[i].name_len, name, name_len)) {
+            log_name("coord: register refused (taken) ", name, name_len);
+            (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-7),
+                               txid, nullptr, 0, nullptr);
+            return false;
+        }
+    }
+    size_t entry = MAX_REGISTRATIONS;
+    for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
+        if (!g_names[i].used) {
+            entry = i;
+            break;
+        }
+    }
+    if (entry == MAX_REGISTRATIONS || name_len == 0) {
+        (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-10), txid,
+                           nullptr, 0, nullptr);
+        return false;
+    }
+    if (sys_is_error(send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, 0, txid, nullptr, 0, nullptr))) {
+        return false;
+    }
+    g_names[entry].used     = true;
+    g_names[entry].child    = slot;
+    g_names[entry].name_len = name_len;
+    for (size_t i = 0; i < name_len; i++) { g_names[entry].name[i] = name[i]; }
+    log_name("coord: registered ", name, name_len);
+    serve_pending(name, name_len, slot);
+    return true;
 }
 
 // Transfer an image to the loader; the reply transfers ownership of the new child's task and
@@ -342,6 +373,56 @@ bool bootstrap_archive(const void* bytes, size_t size) {
     return true;
 }
 
+// The original archive moves to the known bootstrap child after image extraction.
+bool endow_file_server(uint64_t vmo, uint64_t size) {
+    size_t slot = 0;
+    for (; slot < MAX_CHILDREN; ++slot) {
+        const auto& child = g_children[slot];
+        if (child.used && name_equal(child.name, child.name_len, fileservice::NAME, sizeof(fileservice::NAME) - 1)) {
+            break;
+        }
+    }
+    if (slot == MAX_CHILDREN) {
+        (void)sys_handle_close(vmo);
+        sys_print("coord: FILE SERVER MISSING\n");
+        return false;
+    }
+    const uint64_t mailbox = g_children[slot].mailbox;
+    const abi_message_header header{fileservice::ARCHIVE, 0, fileservice::ARCHIVE_TXID};
+    const abi_image_payload payload{size};
+    sys_copy_out(0, &header, sizeof(header));
+    sys_copy_out(sizeof(header), &payload, sizeof(payload));
+    sys_copy_out(HANDLE_AT, &vmo, sizeof(vmo));
+    const uint64_t sent = sys_channel_send(mailbox, 0, sizeof(header) + sizeof(payload), HANDLE_AT, 1);
+    if (sys_is_error(sent)) {
+        (void)sys_handle_close(vmo);
+        sys_print("coord: FILE SERVER ENDOWMENT FAILED\n");
+        return false;
+    }
+
+    const uint64_t signals = sys_object_wait(mailbox, ABI_CHANNEL_SIGNAL_READABLE | ABI_CHANNEL_SIGNAL_PEER_CLOSED,
+                                             fileservice::STARTUP_TIMEOUT_NS);
+    if (sys_is_error(signals) || (signals & ABI_CHANNEL_SIGNAL_PEER_CLOSED)) {
+        sys_print("coord: FILE SERVER DID NOT BECOME READY\n");
+        return false;
+    }
+    // Registration on this known child's mailbox is its readiness message.
+    abi_message_header ready{};
+    char name[sizeof(fileservice::NAME) - 1];
+    const uint64_t got = sys_channel_recv(mailbox, MSG_AT, MSG_CAP, 0, 0);
+    if (got == sizeof(ready) + sizeof(name)) {
+        sys_copy_in(&ready, MSG_AT, sizeof(ready));
+        sys_copy_in(name, MSG_AT + sizeof(ready), sizeof(name));
+    }
+    if (ready.opcode != ABI_COORD_OP_REGISTER || ready.status != 0 || ready.txid == 0 ||
+        !name_equal(name, sizeof(name), fileservice::NAME, sizeof(name)) ||
+        !register_service(slot, ready.txid, name, sizeof(name))) {
+        sys_print("coord: FILE SERVER REGISTRATION FAILED\n");
+        return false;
+    }
+    return true;
+}
+
 // The second bootstrap message is exactly one opaque INITRD VMO. Archive parsing stays here,
 // in userspace; the kernel knows only its exact byte extent and read-only content authority.
 bool receive_initrd() {
@@ -375,7 +456,7 @@ bool receive_initrd() {
         (void)sys_handle_close(vmo);
         return false;
     }
-    g_initrd_vmo = vmo;
+    if (!endow_file_server(vmo, payload.size_bytes)) { return false; }
     sys_print("coord: initrd ready\n");
     return true;
 }
@@ -401,33 +482,7 @@ void handle_child_message(size_t slot, uint64_t recv_result) {
     sys_copy_in(name, MSG_AT + sizeof(header), name_len);
 
     if (header.opcode == ABI_COORD_OP_REGISTER) {
-        for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
-            if (g_names[i].used && name_equal(g_names[i].name, g_names[i].name_len, name, name_len)) {
-                log_name("coord: register refused (taken) ", name, name_len);
-                (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-7),
-                                   header.txid, nullptr, 0, nullptr);
-                return;
-            }
-        }
-        size_t entry = MAX_REGISTRATIONS;
-        for (size_t i = 0; i < MAX_REGISTRATIONS; i++) {
-            if (!g_names[i].used) {
-                entry = i;
-                break;
-            }
-        }
-        if (entry == MAX_REGISTRATIONS || name_len == 0) {
-            (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, static_cast<uint32_t>(-10), header.txid,
-                               nullptr, 0, nullptr);
-            return;
-        }
-        g_names[entry].used     = true;
-        g_names[entry].child    = slot;
-        g_names[entry].name_len = name_len;
-        for (size_t i = 0; i < name_len; i++) { g_names[entry].name[i] = name[i]; }
-        (void)send_message(g_children[slot].mailbox, ABI_COORD_OP_REGISTER, 0, header.txid, nullptr, 0, nullptr);
-        log_name("coord: registered ", name, name_len);
-        serve_pending(name, name_len, slot);
+        (void)register_service(slot, header.txid, name, name_len);
         return;
     }
 

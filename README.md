@@ -20,7 +20,7 @@ Teaching happens by attaching kernel-validated [transaction programs](docs/Desig
 ## Where it is now
 Today, the kernel boots on x86_64 and riscv64, schedules kernel threads across SMP cores, and runs userspace ELF programs with task-owned address spaces, capability handles, and syscalls. Boot can launch userspace directly or provide an interactive kernel shell. The kernel loads only a minimal non-ELF init image; a capability-endowed userspace ELF loader constructs subsequent tasks.
 
-User-mode hello world is implemented on both architectures. The [GitHub milestones](https://github.com/corwin-mcknight/Archipelago/milestones) describe the next outcomes, including an interactive userspace shell and file services.
+User-mode hello world is implemented on both architectures. The userspace [file service](docs/Design/File%20Service.md) exposes the read-only initrd at `/boot`. The [GitHub milestones](https://github.com/corwin-mcknight/Archipelago/milestones) describe the next outcomes, including an interactive userspace shell and writable storage.
 
 ## Engineering practice
 The distinguishing feature of this project is not the kernel's size but how it is built.

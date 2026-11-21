@@ -4,13 +4,14 @@
 #include <stdint.h>
 #include <sys.h>
 
+bool file_service_selftest();
+
 // The user-mode self-check payload: exercises the path a real program takes -- ELF load, private
 // address space, privilege transition, syscalls, exit -- so it deliberately touches memory in each
 // kind of segment the loader has to get right, and writes through the IPC buffer the kernel handed
 // it rather than through any pointer of its own. Its exit status is the test conduit: the low byte
-// counts failed sections, and STATUS_ECHO_SKIPPED marks a run with no coordinator to connect
-// through (spawned standalone by a kernel test), so watchers can tell "everything passed without a
-// coordinator" from "everything passed including the echo roundtrip".
+// counts failed sections, and STATUS_ECHO_SKIPPED marks a standalone run with no coordinator.
+// A zero status from coordinated boot includes the echo roundtrip and file service checks.
 
 namespace {
 
@@ -543,6 +544,9 @@ extern "C" int main() {
             }
             ok = ok && !sys_is_error(sys_handle_close(peer));
             report(ok, "selftest: echo roundtrip ok\n", "selftest: ECHO ROUNDTRIP BROKEN\n");
+            if (ok) {
+                report(file_service_selftest(), "selftest: file service ok\n", "selftest: FILE SERVICE BROKEN\n");
+            }
         }
     }
 
