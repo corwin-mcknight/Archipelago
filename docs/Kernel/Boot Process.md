@@ -28,6 +28,7 @@ Each core (BSP first, then APs) runs `core_init`:
 
 ### 3. SMP Bringup
 Application Processors (APs) are started via the Limine MP protocol.
+The kernel uses each CPU's position in Limine's list as its logical index. Both hardware ID lookup and secondary CPU startup panic on a missing list or out-of-range index, including in release builds.
 Each AP runs `core_init` with its core ID and then enters a halt loop.
 The BSP waits for all APs to signal initialization before proceeding.
 

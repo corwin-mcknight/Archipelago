@@ -90,12 +90,14 @@ const boot_info& collect();
 const boot_module* find_module(const char* role);
 
 // Hardware id (x86_64 LAPIC id, riscv64 hartid) of the CPU at dense list
-// position `index` in the protocol's CPU list; requires index < cpu_count.
+// position `index` in the protocol's CPU list. Panics if the list is absent or
+// index >= cpu_count, including in release builds.
 uint64_t cpu_hw_id(size_t index);
 
 // Release the secondary CPU at dense list position `index` into
 // entry(index, hw_id) on its own bootloader-provided stack. All CPUs share one
 // entry function, and entry must not return. Never call this for the boot CPU.
+// Uses the same bounds check as cpu_hw_id.
 void start_cpu(size_t index, void (*entry)(size_t core_index, uint64_t hw_id));
 
 // Publish the direct map from boot_info::physmap_base. Must run before any

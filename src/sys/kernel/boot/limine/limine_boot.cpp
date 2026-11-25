@@ -1,9 +1,14 @@
 #include <kernel/boot.h>
 
 #include "kernel/assert.h"
+#include "kernel/config.h"
 #include "kernel/log.h"
 #include "kernel/platform.h"
 #include "vendor/limine.h"
+
+#if CONFIG_KERNEL_TESTING
+#include "kernel/testing/testing.h"
+#endif
 
 // The Limine boot protocol behind kernel::boot::collect(). Everything that knows
 // a Limine type lives here; the rest of the kernel sees only boot_info and the
@@ -191,6 +196,11 @@ uint64_t boot_hw_id(const struct limine_mp_response* mp) {
 #endif
 }
 
+struct limine_mp_info* cpu_at(const struct limine_mp_response* mp, size_t index) {
+    ensure(mp != nullptr && index < mp->cpu_count, "CPU index outside the boot protocol CPU list");
+    return mp->cpus[index];
+}
+
 // All secondary CPUs share one kernel entry function; stashing it in a global
 // (published before the goto_address release below) keeps limine_mp_info out of
 // the arch-facing signature.
@@ -203,6 +213,20 @@ void mp_trampoline(struct limine_mp_info* info) {
 }
 
 }  // namespace
+
+#if CONFIG_KERNEL_TESTING
+KTEST_MODULE("boot/limine");
+
+KTEST_CASE_CRASH(limine_cpu_index_at_count_is_rejected) {
+    struct limine_mp_info cpu{};
+    // Keep the extra slot readable so a missing guard returns instead of faulting.
+    struct limine_mp_info* cpus[] = {&cpu, &cpu};
+    struct limine_mp_response mp{};
+    mp.cpu_count = 1;
+    mp.cpus      = cpus;
+    (void)cpu_at(&mp, mp.cpu_count);
+}
+#endif
 
 const boot_info& collect() {
     if (g_info_cached) { return g_info; }
@@ -270,17 +294,11 @@ const boot_info& collect() {
     return g_info;
 }
 
-uint64_t cpu_hw_id(size_t index) {
-    assert(mp_request.response != nullptr && index < mp_request.response->cpu_count,
-           "cpu_hw_id: index outside the boot protocol CPU list");
-    return hw_id_of(mp_request.response->cpus[index]);
-}
+uint64_t cpu_hw_id(size_t index) { return hw_id_of(cpu_at(mp_request.response, index)); }
 
 void start_cpu(size_t index, void (*entry)(size_t core_index, uint64_t hw_id)) {
-    assert(mp_request.response != nullptr && index < mp_request.response->cpu_count,
-           "start_cpu: index outside the boot protocol CPU list");
+    auto* cpu           = cpu_at(mp_request.response, index);
     g_secondary_entry   = entry;
-    auto* cpu           = mp_request.response->cpus[index];
     // Publish this CPU's dense index before releasing it; the SEQ_CST store of
     // goto_address is the release that makes it (and g_secondary_entry) visible.
     cpu->extra_argument = index;
