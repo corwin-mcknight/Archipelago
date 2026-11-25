@@ -38,13 +38,12 @@ class ShellOutput {
 
     // Formats one @@HARNESS protocol line and writes it regardless of protocol mode: the prefix
     // is what test tooling scrapes, and interactive test runs still want to see progress.
-    template <typename... Args> void event(const char* fmt, const Args&... args) {
-        ktl::fixed_string<512> buffer;
-        ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
-        auto line = kernel::g_console.lock_line();
-        write("@@HARNESS ");
-        write(buffer.c_str());
-        write("\n");
+    template <typename... Args> void event(const char* fmt, const Args&... args) { emit_event(nullptr, fmt, args...); }
+
+    // The format ends at the opening quote of the final string field. Stream the escaped value
+    // under the same line lock so expansion cannot truncate the field or its closing delimiter.
+    template <typename... Args> void event_with_text(const char* text, const char* fmt, const Args&... args) {
+        emit_event(text, fmt, args...);
     }
 
     void write(const char* s);
@@ -70,6 +69,19 @@ class ShellOutput {
     void reset_style() { sgr("0"); }
 
    private:
+    template <typename... Args> void emit_event(const char* text, const char* fmt, const Args&... args) {
+        ktl::fixed_string<512> buffer;
+        ktl::format::format_to_buffer_raw(buffer.m_buffer, sizeof(buffer.m_buffer), fmt, args...);
+        auto line = kernel::g_console.lock_line();
+        write("@@HARNESS ");
+        write(buffer.c_str());
+        if (text) {
+            write_json_escaped(text);
+            write("\"}");
+        }
+        write("\n");
+    }
+
     void write_json_escaped(const char* s) {
         kernel::write_json_escaped([this](char c) { write_char(c); }, s);
     }
