@@ -1,59 +1,35 @@
 # Syscall Interface
 
-The syscall interface is the boundary between userspace and the kernel.
-The installed ABI lives in `src/sys/kernel/includes/abi/syscall.h`.
+## Current ABI
 
-## Entry Point
-Architecture entry code passes the syscall number and register arguments to one shared dispatcher.
-It pins the current thread once; the thread's parent task supplies the handle table and address space.
-Every handler return crosses a common exit boundary that checks for termination, including unknown syscall numbers.
-References and locks are released before thread exit abandons the syscall stack.
+The syscall interface is the boundary between userspace and the kernel. The installed [ABI header](../../src/sys/kernel/includes/abi/syscall.h) defines syscall numbers, arguments, rights, and results.
 
-## Dispatch
-A single switch routes syscall numbers to ordinary handlers.
-Typed operations call `HandleTable::get<T>()`, checking handle validity, type, and rights in that order.
-Generic object operations use `verify()`; handle mutations validate within the table operation itself.
-Acquired object references remain valid across concurrent handle closes, and operations run after the table lock is released.
+### Entry and dispatch
 
-Uniform server routing and [[Object Transaction Programs]] remain part of the planned [[Object Model#Three-Path Dispatch|three-path dispatch]] design.
+x86_64 enters through [`SYSCALL`](../../src/sys/kernel/x86_64/syscall_entry.s) and returns via `SYSRET`. RISC-V enters through [`ecall`](../../src/sys/kernel/riscv64/trap.cpp) and returns via `sret`. Both enter the shared [dispatcher](../../src/sys/kernel/syscalls/dispatch.cpp) on the calling thread's kernel stack with local interrupts masked. Entry preserves six argument slots. Current operations use at most five.
 
-## Buffered Arguments
-Memory arguments are offsets and lengths into the calling thread's pinned IPC buffer.
-A checked range rejects invalid buffers, out-of-bounds offsets, and overflowing lengths before an operation starts.
-Ranges yield bounded, contiguous page chunks and provide copies across noncontiguous backing frames.
-An empty range at the end of a valid buffer is allowed; no frame is accessed for an empty copy.
-Ranges borrow the buffer and must not outlive or mutate its backing description.
+A single switch invokes operation handlers in the [syscalls directory](../../src/sys/kernel/syscalls). The dispatcher pins the calling thread, whose task supplies the handle table and address space. Typed operations use `HandleTable::get<T>()` to check handle validity, type, and rights in that order. Generic object operations use `verify()`. Handle mutations validate inside the table operation itself. An acquired object reference remains valid after unlocking the table, including across a concurrent handle close.
 
-Socket handlers preserve partial progress: a short transfer or a later error returns the bytes already transferred.
-Channel and socket creation share endpoint installation and rollback; handle IDs are copied out only after both inserts succeed.
+Every handler return reaches the same termination check, including unknown syscall numbers. The dispatcher releases its thread reference before a terminating syscall switches away, because thread exit abandons the syscall stack without unwinding it.
 
-## Non-Handle Syscalls
-A small number of syscalls do not operate on handles:
-- Thread yield, sleep, and exit
-- Object creation
-- Debug output
+### Buffered arguments
 
-These operations do not require a handle lookup.
-Service discovery is deliberately not in this list: reaching a named service is a conversation with the [[Service Coordination|coordinator]] over the bootstrap channel, not a syscall.
+Payload buffers are offsets and lengths into the calling thread's pinned IPC buffer. The [checked range implementation](../../src/sys/kernel/task/ipc_range.cpp) rejects invalid buffers and out-of-bounds or overflowing ranges, then copies across backing frames in bounded page chunks. An empty range at the end of a valid buffer is allowed and touches no frames. A range borrows the backing for the duration of the operation.
 
-Debug output is a kernel debugging convenience, not the system's I/O mechanism, and there is deliberately no console object or console handle behind it. Real input and output are an open design question -- see below -- and nothing about the debug write should be read as answering it.
+Socket handlers return the bytes already transferred when a later chunk fails or transfers only partially. Channel and socket creation share endpoint installation and rollback. Handle IDs are copied out only after both inserts succeed.
 
-## Input and Output
-This system has no files, and stdio is not file-shaped: no descriptor numbers, no paths, no open.
-A program's ordinary input and output are [[IPC Primitives#Sockets|socket]] ends endowed at spawn -- see [[Standard Streams]].
-The capability is inherited, but what it names is not a file; the writer holds an object it can write, wait on, and pass along like any other, and bulk data still moves by handle rather than by copy.
-There are no stdio syscalls: writing to output is the ordinary socket write on an ordinary handle, and the console is a userspace server behind some of those handles, not a kernel object.
+### Scheduling and IPC
 
-## Kernel Non-Blocking Guarantee
-The kernel never blocks on behalf of a caller during IPC.
-If a [[IPC Primitives#Channels|channel]] queue is full, the send fails immediately.
-The calling task decides how to handle backpressure -- wait on the `WRITABLE` signal, retry, or drop.
-See [[IPC Primitives#Signals]].
+Yield, sleep, exit, thread exit, debug write, and creation of channels, sockets, ports, and VMOs do not require a handle lookup. Task construction and worker startup require their respective factory capabilities. Userspace finds named services through the [coordinator](Service%20Coordination.md) over its bootstrap channel.
 
-## Relationship to Other Subsystems
-- [[Object Model#Three-Path Dispatch]] -- planned uniform server routing
-- [[Handle Table]] -- handle resolution is the first step of dispatch
-- [[Object Transaction Programs]] -- the programmable layer between rights check and IPC
-- [[IPC Primitives]] -- channels, sockets, signals, and ports
-- [[Task Model]] -- syscalls are the boundary between task code and kernel code
-- [[Scheduling]] -- syscall entry and exit are context switch points
+Channel sends fail immediately when the peer queue is full, and receives return immediately when it is empty. Socket reads return available bytes, and writes may be short when the peer buffer has limited room. The caller decides whether to retry, drop, or explicitly wait for readiness. Object and port wait are blocking operations that can take a timeout. See [IPC Primitives](IPC%20Primitives.md) for readiness and backpressure.
+
+### Input and Output
+
+Userspace can write debugging output through `SYS_WRITE` and exchange byte streams through socket handles. The debug write emits bytes from the caller's IPC buffer and has no console object or handle behind it. The kernel ABI has no dedicated standard-stream operations. The userspace file service also uses IPC. See [File Service](File%20Service.md).
+
+## Planned extensions
+
+[Standard Streams](Standard%20Streams.md) describes planned spawner-endowed sockets for stdin, stdout, and stderr, with a userspace console server behind some of those handles. The socket and handle-rights primitives are implemented. The stream endowment and console wiring are planned.
+
+Uniform server routing and [Object Transaction Programs](Object%20Transaction%20Programs.md) remain part of the planned [three-path dispatch](Object%20Model.md#three-path-dispatch) design.
