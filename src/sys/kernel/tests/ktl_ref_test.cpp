@@ -85,3 +85,17 @@ KTEST_CASE(ktl_ref_self_assignment_safe) {
     *rp            = r;
     KTEST_EXPECT_ALL(!destroyed, r.ref_count() == 1);
 }
+
+KTEST_CASE(ktl_ref_self_move_assignment) {
+    bool destroyed = false;
+    auto r         = ktl::make_ref<test_target>(&destroyed);
+    KTEST_REQUIRE_TRUE(static_cast<bool>(r));
+    const auto* target = r.get();
+
+    auto* alias        = &r;
+    r                  = ktl::move(*alias);
+
+    KTEST_EXPECT_ALL(!destroyed, r.get() == target, r.ref_count() == 1);
+    r.reset();
+    KTEST_EXPECT_TRUE(destroyed);
+}
