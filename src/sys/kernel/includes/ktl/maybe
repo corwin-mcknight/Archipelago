@@ -1,7 +1,6 @@
 #pragma once
 
 #include <kernel/panic.h>
-#include <ktl/type_traits>
 #include <ktl/utility>
 
 namespace ktl {
@@ -27,7 +26,6 @@ template <typename T> class [[nodiscard]] maybe {
     constexpr maybe(T&& value) : m_has_value(true), m_value(ktl::move(value)) {}
 
     constexpr bool has_value() const { return m_has_value; }
-    constexpr bool has_value() { return m_has_value; }
     constexpr explicit operator bool() const { return m_has_value; }
 
     // Accessing the value of an empty maybe is a kernel bug and panics, mirroring result::unwrap.

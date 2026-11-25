@@ -145,7 +145,7 @@ class Channel : public Object {
     // handles to one endpoint would interleave competing reads and make PEER_CLOSED (which fires
     // on the last handle's close) unreadable as a hangup indicator.
     static ktl::result<void> register_type(TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "channel", DEFAULT_RIGHTS, DEFAULT_RIGHTS);
+        return registry.register_type(TYPE_ID, "channel", DEFAULT_RIGHTS);
     }
 
     // Use create(); public only because make_ref needs it.

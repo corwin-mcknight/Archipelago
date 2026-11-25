@@ -15,8 +15,7 @@ class Event : public Object {
     Event() : Object(TYPE_ID) {}
 
     static ktl::result<void> register_type(TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "event", RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE,
-                                      RIGHT_READ | RIGHT_SIGNAL);
+        return registry.register_type(TYPE_ID, "event", RIGHT_READ | RIGHT_SIGNAL | RIGHT_DUPLICATE);
     }
 };
 

@@ -69,7 +69,7 @@ class Port : public Object {
     size_t binding_count();
 
     static ktl::result<void> register_type(TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "port", DEFAULT_RIGHTS, DEFAULT_RIGHTS);
+        return registry.register_type(TYPE_ID, "port", DEFAULT_RIGHTS);
     }
 
    private:

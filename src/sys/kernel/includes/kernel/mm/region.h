@@ -88,7 +88,7 @@ class Region : public obj::Object {
     region_child* find_binding(uintptr_t vaddr);
 
     static ktl::result<void> register_type(obj::TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "region", obj::RIGHT_READ | obj::RIGHT_WRITE, obj::RIGHT_READ);
+        return registry.register_type(TYPE_ID, "region", obj::RIGHT_READ | obj::RIGHT_WRITE);
     }
 
    private:
