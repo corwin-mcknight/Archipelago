@@ -11,7 +11,7 @@ QEMU_TEST_ARGS = $(if $(QEMU_JOBS),--qemu-jobs $(QEMU_JOBS)) \
 
 KERNEL_SRC_DIR     := $(PROJECT_ROOT)/src/sys/kernel
 KERNEL_INCLUDE_DIR := ${KERNEL_SRC_DIR}/includes
-KERNEL_DOCS_DIR    := ${KERNEL_SRC_DIR}/docs
+KERNEL_DOCS_DIR    := $(PROJECT_ROOT)/docs/Kernel
 ARCHIPELAGO_VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
 DOCS_DOXYFILE      := ${KERNEL_SRC_DIR}/Doxyfile
 DOCS_OUTPUT_DIR    := $(PROJECT_ROOT)/build/docs/kernel
