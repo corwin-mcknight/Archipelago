@@ -184,3 +184,32 @@ KTEST(ktl_result_copy_and_move_construction, "ktl/result") {
     ktl::result<int> err_moved(ktl::move(err_copy));
     KTEST_EXPECT_TRUE(err_moved.is_err());
 }
+
+KTEST(ktl_result_self_move_assignment, "ktl/result") {
+    using Result    = ktl::result<tracking_value, tracking_value>;
+    auto ok         = Result::ok(tracking_value{41});
+    auto err        = Result::err(tracking_value{-4});
+    auto* ok_alias  = &ok;
+    auto* err_alias = &err;
+    ok              = ktl::move(*ok_alias);
+    err             = ktl::move(*err_alias);
+
+    KTEST_REQUIRE_TRUE(ok.is_ok());
+    KTEST_REQUIRE_TRUE(err.is_err());
+    KTEST_EXPECT_EQUAL(ok.unwrap().value, 41);
+    KTEST_EXPECT_EQUAL(err.unwrap_err().value, -4);
+}
+
+KTEST(ktl_result_void_self_move_assignment, "ktl/result") {
+    using Result    = ktl::result<void, tracking_value>;
+    auto ok         = Result::ok();
+    auto err        = Result::err(tracking_value{-4});
+    auto* ok_alias  = &ok;
+    auto* err_alias = &err;
+    ok              = ktl::move(*ok_alias);
+    err             = ktl::move(*err_alias);
+
+    KTEST_EXPECT_TRUE(ok.is_ok());
+    KTEST_REQUIRE_TRUE(err.is_err());
+    KTEST_EXPECT_EQUAL(err.unwrap_err().value, -4);
+}
