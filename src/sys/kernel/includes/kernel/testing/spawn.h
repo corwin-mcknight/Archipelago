@@ -4,6 +4,11 @@
 
 namespace kernel::testing {
 
+#if CONFIG_KERNEL_TESTING
+// Exercise the enqueue unwind without exhausting the scheduler's reserved run queue.
+ktl::result<void> enqueue_thread_with_rejected_push(ktl::ref<sched::Thread> thread);
+#endif
+
 // Spawn a kernel thread running `fn`, a callable held by reference on the caller's frame -- so
 // tests can pass capturing lambdas without a context struct + void* trampoline. The caller's
 // frame must outlive the thread: wait for completion before `fn` goes out of scope.
