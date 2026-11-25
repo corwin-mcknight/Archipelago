@@ -77,6 +77,20 @@ KTEST_CASE(ktl_vector_move_semantics) {
     KTEST_EXPECT_ALL(moved[0].value == 42, moved[0].move_observed);
 }
 
+KTEST_CASE(ktl_vector_self_move_assignment) {
+    ktl::vector<tracking_value> vec;
+    KTEST_REQUIRE_TRUE(vec.push_back(tracking_value{42}));
+    KTEST_REQUIRE_TRUE(vec.push_back(tracking_value{17}));
+    const auto capacity = vec.capacity();
+    const auto* storage = vec.begin();
+
+    auto* alias         = &vec;
+    vec                 = ktl::move(*alias);
+
+    KTEST_REQUIRE_EQUAL(vec.size(), 2u);
+    KTEST_EXPECT_ALL(vec.capacity() == capacity, vec.begin() == storage, vec[0].value == 42, vec[1].value == 17);
+}
+
 KTEST_CASE(ktl_vector_iterators) {
     ktl::vector<int> vec;
     for (int i = 0; i < 8; ++i) { KTEST_REQUIRE_TRUE(vec.push_back(i)); }

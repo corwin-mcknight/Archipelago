@@ -42,7 +42,7 @@ jobs:
       - name: Hosted ASan and UBSan tests
         id: host_tests
         run: make host-test 2>&1 | tee build/ci/host-test.log
-      - name: Test registration and coverage failure regressions
+      - name: Test registration, KTL contracts, and coverage failure regressions
         id: regressions
         run: |
           tools/dev python3 tools/host-portability-check.py 2>&1 | tee build/ci/host-portability.log
