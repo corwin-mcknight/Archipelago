@@ -119,6 +119,8 @@ Events (kernel to host) are emitted as `@@HARNESS {...}` JSON lines:
 | `error` | `message` | Assertion failure or command error |
 | `abort` | `code` | Guest requested QEMU exit |
 
+Both the hosted runner and the kernel shell JSON-escape assertion messages and failure reasons. After decoding, each field contains the original diagnostic text, including any embedded newlines. The shell holds the console line lock through the terminating newline of each event.
+
 ### Harness Behavior
 - Boots QEMU with `-serial stdio`, waits for boot output to settle, then sends `harness enable`.
 - Waits for the `ready` event before sending commands.

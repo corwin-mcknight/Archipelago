@@ -7,6 +7,7 @@
 // a result. This is the host transport for the shared @@HARNESS protocol; the Python aggregator
 // consumes the same events the QEMU tier emits over serial.
 
+#include <kernel/json_escape.h>
 #include <kernel/panic.h>
 #include <kernel/testing/registry.h>
 #include <sys/resource.h>
@@ -46,42 +47,15 @@ void emit_raw(const char* json) {
     fflush(stdout);
 }
 
-// Escape a string for use inside a JSON double-quoted value.
-void json_escape(const char* in, char* out, size_t cap) {
-    size_t o = 0;
-    auto put = [&](char c) {
-        if (o + 1 < cap) { out[o++] = c; }
-    };
-    for (size_t i = 0; in && in[i]; ++i) {
-        unsigned char c = static_cast<unsigned char>(in[i]);
-        switch (c) {
-            case '"':
-            case '\\':
-            case '\n':
-            case '\r':
-            case '\t':
-                put('\\');
-                put(c);
-                break;
-            default:
-                if (c < 0x20) {
-                    char u[8];
-                    snprintf(u, sizeof u, "\\u%04x", c);
-                    for (int k = 0; u[k]; ++k) { put(u[k]); }
-                } else {
-                    put(static_cast<char>(c));
-                }
-        }
-    }
-    out[o < cap ? o : cap - 1] = '\0';
+void write_json_escaped(const char* text) {
+    kernel::write_json_escaped([](char c) { fputc(c, stdout); }, text);
 }
 
 void emit_error(const char* message) {
-    char esc[1024];
-    json_escape(message, esc, sizeof esc);
-    char line[1100];
-    snprintf(line, sizeof line, "{\"event\":\"error\",\"message\":\"%s\"}", esc);
-    emit_raw(line);
+    fputs("@@HARNESS {\"event\":\"error\",\"message\":\"", stdout);
+    write_json_escaped(message);
+    fputs("\"}\n", stdout);
+    fflush(stdout);
 }
 
 void emit_test_start(const char* name) {
@@ -92,18 +66,14 @@ void emit_test_start(const char* name) {
 }
 
 void emit_test_end(const char* name, const char* status, const char* reason, uint64_t duration_ns) {
-    char line[1200];
+    printf("@@HARNESS {\"event\":\"test_end\",\"name\":\"%s\",\"status\":\"%s\"", name, status);
     if (reason) {
-        char esc[1024];
-        json_escape(reason, esc, sizeof esc);
-        snprintf(line, sizeof line,
-                 "{\"event\":\"test_end\",\"name\":\"%s\",\"status\":\"%s\",\"reason\":\"%s\",\"duration_ns\":%llu}",
-                 name, status, esc, static_cast<unsigned long long>(duration_ns));
-    } else {
-        snprintf(line, sizeof line, "{\"event\":\"test_end\",\"name\":\"%s\",\"status\":\"%s\",\"duration_ns\":%llu}",
-                 name, status, static_cast<unsigned long long>(duration_ns));
+        fputs(",\"reason\":\"", stdout);
+        write_json_escaped(reason);
+        fputc('"', stdout);
     }
-    emit_raw(line);
+    printf(",\"duration_ns\":%llu}\n", static_cast<unsigned long long>(duration_ns));
+    fflush(stdout);
 }
 
 void emit_test_meta_rss(const char* name, long peak_rss_kb) {

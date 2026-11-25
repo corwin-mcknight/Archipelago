@@ -47,7 +47,7 @@ void record_failure(const char* message) {
         g_failure_reason[copy_len] = '\0';
         g_failure_reason_recorded  = true;
     }
-    kernel::shell::shell_output().event("{{\"event\":\"error\",\"message\":\"{0}\"}}", message);
+    kernel::shell::shell_output().event_with_text(message, "{{\"event\":\"error\",\"message\":\"");
 }
 
 void send_test_start(kernel::shell::ShellOutput& output, const kernel::testing::ktest& test) {
@@ -59,9 +59,9 @@ void send_test_end(kernel::shell::ShellOutput& output, const kernel::testing::kt
                    const char* reason = nullptr) {
     auto current_time = kernel::time::ns_since_boot();
     if (reason) {
-        output.event(
-            "{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"reason\":\"{2}\",\"timestamp\":{3}}}",
-            test.name, status, reason, current_time);
+        output.event_with_text(
+            reason, "{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"timestamp\":{2},\"reason\":\"",
+            test.name, status, current_time);
     } else {
         output.event("{{\"event\":\"test_end\",\"name\":\"{0}\",\"status\":\"{1}\",\"timestamp\":{2}}}", test.name,
                      status, current_time);
@@ -110,7 +110,9 @@ void test_handler(int argc, const ktl::string_view argv[], kernel::shell::ShellO
         }
         auto test = find_test(argv[2]);
         if (!test) {
-            output.event("{{\"event\":\"error\",\"message\":\"Test not found: {0}\"}}", argv[2]);
+            ktl::fixed_string<512> message;
+            ktl::format::format_to_buffer_raw(message.m_buffer, message.size(), "Test not found: {0}", argv[2]);
+            output.event_with_text(message.c_str(), "{{\"event\":\"error\",\"message\":\"");
             return;
         }
         execute_test(output, *test);
