@@ -116,6 +116,7 @@ extern x86_trap_stack_overflow
 ; isr_common on this same live emergency stack; bounded today only by crash.cpp's
 ; g_in_dump recursion guard, not by hardware stack switching.
 trap_sp_overflow:
+    cld
     lea rsp, [rel emergency_stack_top]
     call x86_trap_stack_overflow
 
