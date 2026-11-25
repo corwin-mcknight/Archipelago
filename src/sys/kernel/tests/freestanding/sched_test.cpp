@@ -267,10 +267,35 @@ KTEST_CASE(sched_accounting_lifecycle_counters) {
     KTEST_EXPECT_TRUE(t->stats().cpu_cycles > 0);  // sub-tick runtime still visible
 }
 
+KTEST_CASE(sched_rejected_enqueue_unwinds_without_spawn_record) {
+    auto task = ktl::make_ref<Task>();
+    KTEST_REQUIRE_TRUE(static_cast<bool>(task));
+    KTEST_UNWRAP(thread, thread_create_in(task, "rejected", [](void*) {}, nullptr));
+    KTEST_EXPECT_EQUAL(task->thread_count(), size_t{1});
+    const uint64_t before = stats_snapshot().spawned;
+    trace_clear();
+
+    auto queued = kernel::testing::enqueue_thread_with_rejected_push(thread);
+    KTEST_REQUIRE_TRUE(queued.is_err());
+    KTEST_EXPECT_TRUE(queued.unwrap_err() == ktl::errc::oom);
+    KTEST_EXPECT_EQUAL(task->thread_count(), size_t{0});
+    KTEST_EXPECT_EQUAL(stats_snapshot().spawned, before);
+
+    static trace_record records[CONFIG_SCHED_TRACE_EVENTS];
+    const size_t count = trace_copy_newest(records, CONFIG_SCHED_TRACE_EVENTS);
+    bool saw_spawn     = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (records[i].kind == trace_kind::SPAWN && records[i].to_id == thread->id()) { saw_spawn = true; }
+    }
+    KTEST_EXPECT_FALSE(saw_spawn);
+}
+
 KTEST_CASE(sched_trace_records_thread_life) {
+    const uint64_t before = stats_snapshot().spawned;
     kernel::sched::trace_clear();
     auto body = [] {};
     KTEST_UNWRAP(t, spawn_fn("traced", body));
+    KTEST_EXPECT_EQUAL(stats_snapshot().spawned, before + 1);
     uint64_t tid = t->id();
     t->wait_signals(Thread::SIGNAL_TERMINATED);
     static kernel::sched::trace_record recs[64];

@@ -32,6 +32,8 @@ The scheduler publishes the incoming kernel stack floor on each switch. Trap ent
 
 The kernel shell exposes per-thread CPU accounting, scheduling counts, migrations, runnable-to-running latency, and a bounded event trace. Trace detail is pulled on demand, and lifecycle logging can be enabled separately.
 
+The scheduler increments the global spawn count and records a spawn event once the run queue accepts the thread, under the same scheduler lock.
+
 ## Future extensions
 
 The current scheduler has no priorities, fairness weights, scheduling classes, or user-configurable policy. Per-core run queues are a possible future optimization if profiling shows contention on the shared queue lock.
