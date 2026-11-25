@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ktl/fmt>
-
 namespace kernel::crash::arch {
 
 // x86 frame record: [rbp+0] = saved rbp, [rbp+8] = return address.

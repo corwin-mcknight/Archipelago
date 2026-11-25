@@ -1,6 +1,5 @@
 // src/sys/kernel/task/spawn.cpp
 #include <kernel/arch.h>
-#include <kernel/assert.h>
 #include <kernel/config.h>
 #include <kernel/log.h>
 #include <kernel/mm/physmap.h>

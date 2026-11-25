@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ktl/fmt>
 #include <ktl/ranges>
 #include <ktl/span>
 

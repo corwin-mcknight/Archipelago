@@ -1,7 +1,6 @@
 #include <kernel/arch.h>
 #include <kernel/boot.h>
 #include <kernel/console.h>
-#include <kernel/obj/handle_table.h>
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
@@ -9,7 +8,6 @@
 #include <kernel/shell/shell.h>
 #include <kernel/time.h>
 
-#include <ktl/maybe>
 #include <ktl/string_view>
 
 #include "kernel/config.h"

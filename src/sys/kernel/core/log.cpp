@@ -1,6 +1,5 @@
 #include "kernel/log.h"
 
-#include "kernel/config.h"
 #include "kernel/console.h"
 #include "kernel/time.h"
 #include "ktl/algorithm"

@@ -10,7 +10,6 @@ struct TypeDescriptor {
     TypeId id;
     ktl::string_view name;
     Rights valid_rights;
-    Rights default_rights;
 };
 
 }  // namespace kernel::obj

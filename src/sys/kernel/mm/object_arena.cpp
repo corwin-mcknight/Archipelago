@@ -3,7 +3,6 @@
 #include <kernel/mm/slab_heap.h>
 #include <kernel/panic.h>
 #include <kernel/sched/thread.h>
-#include <kernel/synchronization/execution_context.h>
 #include <kernel/synchronization/guard.h>
 #include <std/new.h>
 

@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ktl/fmt>
-
 namespace kernel::crash::arch {
 
 // riscv frame record sits below fp: [fp-8] = return address, [fp-16] = caller fp.

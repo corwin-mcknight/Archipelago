@@ -53,7 +53,7 @@ class Socket : public Object {
     ktl::result<size_t> read(void* out, size_t capacity);
 
     static ktl::result<void> register_type(TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "socket", DEFAULT_RIGHTS, DEFAULT_RIGHTS);
+        return registry.register_type(TYPE_ID, "socket", DEFAULT_RIGHTS);
     }
 
     // Use create(); public only because make_ref needs it.

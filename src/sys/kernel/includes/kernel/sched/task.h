@@ -92,8 +92,7 @@ class Task : public kernel::obj::Object {
 
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
-        return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT,
-                                      RIGHT_READ);
+        return registry.register_type(TYPE_ID, "task", RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_WAIT);
     }
 
    private:
