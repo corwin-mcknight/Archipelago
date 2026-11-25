@@ -64,12 +64,12 @@ inline void register_all_test_types() {
     static bool done = false;
     if (done) return;
     using namespace kernel::obj;
-    expect_registered(g_type_registry.register_type(TEST_TYPE_A, "test_obj_a", RIGHTS_ALL, RIGHTS_ALL),
+    expect_registered(g_type_registry.register_type(TEST_TYPE_A, "test_obj_a", RIGHTS_ALL),
                       "test type A registration failed");
-    expect_registered(g_type_registry.register_type(TEST_TYPE_B, "test_obj_b", RIGHTS_ALL, RIGHTS_ALL),
+    expect_registered(g_type_registry.register_type(TEST_TYPE_B, "test_obj_b", RIGHTS_ALL),
                       "test type B registration failed");
     expect_registered(g_type_registry.register_type(TEST_TYPE_RESTRICTED, "test_obj_restricted",
-                                                    TEST_RESTRICTED_VALID_RIGHTS, RIGHT_READ),
+                                                    TEST_RESTRICTED_VALID_RIGHTS),
                       "restricted test type registration failed");
     expect_registered(Event::register_type(g_type_registry), "Event test registration failed");
     done = true;

@@ -19,28 +19,23 @@ Runs on the Bootstrap Processor (BSP) before any other core is started.
    See [[Device Drivers]].
 4. **Core discovery** -- The BSP reads Limine's MP (multiprocessor) response to discover available CPU cores.
 
-### 2. Per-Core Setup (`core_init`)
-Each core (BSP first, then APs) runs `core_init`:
+### 2. Physical Memory
 
-* CPU specific setup for each core is done
-* Interrupts are enabled
-* Some device drivers are initialized.
+The boot processor registers the bootloader memory map with the Physical Memory Manager and initializes the virtual memory manager. Once the kernel page tables and shared zero page are available, the slab heap takes over general allocation from the early heap. See [[Memory Subsystem#Physical Memory Manager]].
 
 ### 3. SMP Bringup
-Application Processors (APs) are started via the Limine MP protocol.
-The kernel uses each CPU's position in Limine's list as its logical index. Both hardware ID lookup and secondary CPU startup panic on a missing list or out-of-range index, including in release builds.
-Each AP runs `core_init` with its core ID and then enters a halt loop.
-The BSP waits for all APs to signal initialization before proceeding.
 
-### 4. Physical Memory
-Memory regions from the bootloader's memory map are registered with the Physical Memory Manager.
-The page allocator is now available.
-The virtual memory manager initializes on top of it -- page descriptors, the kernel's own page tables, and the shared zero page -- and the slab heap then takes over general allocation from the early heap.
-See [[Memory Subsystem#Physical Memory Manager]].
+The boot processor initializes its local interrupt and timer support, starts the secondary cores through the Limine MP protocol, and waits at the core initialization gate. Each secondary sets up its local execution context and interrupt entry before reporting initialization. It then waits for the scheduler to come online.
+
+The kernel uses each CPU's position in Limine's list as its logical index. Both hardware ID lookup and secondary CPU startup panic on a missing list or out-of-range index, including in release builds.
+
+### 4. Scheduler Startup
+
+The boot processor initializes the object system and scheduler. Each core adopts its boot context as its idle thread. The secondary cores start their local timers and begin taking work from the shared run queue. See [Scheduling](../Design/Scheduling.md#multicore-startup-and-idle).
 
 ### 5. Kernel Entry
-The kernel initializes the object system and scheduler, makes the boot context the idle thread, and starts the background page-zeroing thread.
-The boot command line selects whether to start userspace immediately or first enter the kernel shell:
+
+The kernel starts the background page-zeroing thread. The boot command line selects whether to start userspace immediately or first enter the kernel shell:
 
 - With neither shell token, boot launches the userspace coordinator (`init`).
 - `shell` starts the kernel shell as a thread and holds userspace startup until `boot continue`.

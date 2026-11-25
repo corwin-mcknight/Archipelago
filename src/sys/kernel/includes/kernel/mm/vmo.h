@@ -61,7 +61,7 @@ class vmo : public obj::Object {
     size_t mapping_count() const { return m_mappings.size(); }
 
     static ktl::result<void> register_type(obj::TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "vmo", obj::RIGHT_READ | obj::RIGHT_WRITE, obj::RIGHT_READ);
+        return registry.register_type(TYPE_ID, "vmo", obj::RIGHT_READ | obj::RIGHT_WRITE);
     }
 
    private:
