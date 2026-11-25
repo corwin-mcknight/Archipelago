@@ -1,7 +1,5 @@
 #include "kernel/mm/pmm.h"
 
-#include <std/string.h>
-
 #include "kernel/config.h"
 #include "kernel/mm/page.h"
 #include "kernel/mm/page_descriptor.h"

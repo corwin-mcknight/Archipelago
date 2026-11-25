@@ -14,7 +14,6 @@
 #include <kernel/testing/testing.h>
 #include <kernel/testing/user_program.h>
 #include <kernel/time.h>
-#include <std/string.h>
 
 #include <ktl/string_view>
 #include <ktl/vector>

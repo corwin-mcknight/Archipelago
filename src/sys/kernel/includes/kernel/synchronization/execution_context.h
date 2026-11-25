@@ -48,7 +48,6 @@ void fault_exit();
 void syscall_enter();
 void syscall_exit();
 
-void assert_thread_context(const char* operation);
 void assert_blocking_allowed(const char* operation);
 void assert_no_locks_held(const char* operation);
 

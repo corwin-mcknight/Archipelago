@@ -49,8 +49,7 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
 }
 ''')
         objects = []
-        sources = [KERNEL / "tests/std_ctype_test.cpp", KERNEL / "tests/ktl_ref_overflow_test.cpp", fixture,
-                   KERNEL / "core/std/stdlib.cpp"]
+        sources = [KERNEL / "tests/ktl_ref_overflow_test.cpp", fixture, KERNEL / "core/std/stdlib.cpp"]
         for index, source in enumerate(sources):
             obj = directory / f"amplifier-{index}.o"
             subprocess.run([*amplifier, "-c", str(source), "-o", str(obj)], check=True)
@@ -72,8 +71,8 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         assert assertion in errors, errors
         assert "panic: ktl::ref strong count overflow" in errors, errors
         completed = [event for event in events if event["event"] == "test_end"]
-        expected = {"std_ctype_classification", "native_registry_normal", "native_registry_panic",
-                    "native_registry_signal", "native_registry_assertion", "ktl_ref_count_overflow"}
+        expected = {"native_registry_normal", "native_registry_panic", "native_registry_signal",
+                    "native_registry_assertion", "ktl_ref_count_overflow"}
         assert {event["name"] for event in completed} == expected, result.stdout
         assert len(completed) == len(expected), result.stdout
         assert all(event["status"] == "pass" for event in completed), result.stdout

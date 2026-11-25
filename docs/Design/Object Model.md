@@ -43,7 +43,7 @@ An object is anything that can be pointed to by a handle.
 The base representation is deliberately minimal:
 
 - **Type ID** -- a stored integer identifying the object's registered type.
-  The full type descriptor (name, rights, storage model) lives in the type registry and is looked up by ID when needed.
+  The kernel looks up the type's name and valid rights by ID in the type registry.
 - **Signal state** -- waitable signal bits for the [[IPC Primitives|signal/wait and polling]] systems
 - **Object ID** -- a unique kernel-wide identifier assigned at creation from a monotonic counter.
   The object ID is not a handle and not a capability -- it exists for kernel-internal purposes:
@@ -95,9 +95,11 @@ Registration consists of:
 - **Type ID** -- for kernel-defined types, a constexpr value declared in the type's class.
   User-defined types will receive dynamically assigned IDs.
   Used by the [[Handle Table#Type-Safe Access|type-safe access]] mechanism to validate handle types without runtime type introspection.
-- **Default rights** -- rights assigned when a handle is created without an explicit rights argument
 - **Valid rights** -- mask of rights that are meaningful for this type
 - **Storage model** -- how the kernel manages data for objects of this type (see [[#Storage Models]], not yet implemented)
+
+The current kernel registry stores the name, ID, and valid rights mask. Handle creation sites supply
+their requested rights explicitly, and the handle table checks those rights against the registered mask.
 
 [[Object Transaction Programs]] are attached later, after type registration, by authorized handles at runtime.
 They are not part of the initial registration payload.

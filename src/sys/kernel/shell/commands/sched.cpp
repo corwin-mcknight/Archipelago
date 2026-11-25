@@ -12,7 +12,6 @@
 #include <kernel/shell/output.h>
 #include <kernel/shell/render.h>
 
-#include <ktl/fmt>
 #include <ktl/ref>
 #include <ktl/string_view>
 #include <ktl/vector>

@@ -13,7 +13,6 @@
 #include <kernel/sched/task_construction.h>
 #include <kernel/sched/user_task.h>
 #include <std/new.h>
-#include <std/string.h>
 
 namespace kernel::sched {
 

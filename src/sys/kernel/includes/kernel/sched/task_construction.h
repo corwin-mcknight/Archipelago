@@ -18,8 +18,7 @@ class TaskFactory : public obj::Object {
     DECLARE_OBJECT_TYPE(TaskFactory, obj::type_ids::TASK_FACTORY)
     TaskFactory() : Object(TYPE_ID) {}
     static ktl::result<void> register_type(obj::TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "task_factory", obj::RIGHT_WRITE | obj::RIGHT_DUPLICATE,
-                                      obj::RIGHT_WRITE);
+        return registry.register_type(TYPE_ID, "task_factory", obj::RIGHT_WRITE | obj::RIGHT_DUPLICATE);
     }
 };
 
@@ -30,8 +29,7 @@ class ThreadFactory : public obj::Object {
     explicit ThreadFactory(obj::ObjectId owner) : Object(TYPE_ID), m_owner(owner) {}
     bool permits(obj::ObjectId caller) const { return caller == m_owner; }
     static ktl::result<void> register_type(obj::TypeRegistry& registry) {
-        return registry.register_type(TYPE_ID, "thread_factory", obj::RIGHT_WRITE | obj::RIGHT_DUPLICATE,
-                                      obj::RIGHT_WRITE);
+        return registry.register_type(TYPE_ID, "thread_factory", obj::RIGHT_WRITE | obj::RIGHT_DUPLICATE);
     }
 
    private:
