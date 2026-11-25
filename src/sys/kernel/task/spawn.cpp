@@ -9,6 +9,7 @@
 #include <kernel/sched/reaper.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
+#include <kernel/testing/spawn.h>
 
 namespace kernel::sched {
 
@@ -79,15 +80,19 @@ void thread_discard(ktl::ref<Thread> thread) {
     stack_pool_release(thread->kstack_phys());
 }
 
-ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
+namespace {
+
+template <auto PushRunnable> ktl::result<void> enqueue_thread(ktl::ref<Thread> thread) {
     bool ok;
     {
         sched_guard guard(g_sched_lock);
         thread->set_ready_ts(kernel::arch::timestamp());
-        g_stats.spawned += 1;
-        auto& c = cur_cpu();
-        trace_push(trace_kind::SPAWN, switch_reason::NONE, c.current ? c.current->id() : 0, thread->id());
-        ok = push_runnable_locked(thread);
+        ok = PushRunnable(thread);
+        if (ok) {
+            g_stats.spawned += 1;
+            auto& c = cur_cpu();
+            trace_push(trace_kind::SPAWN, switch_reason::NONE, c.current ? c.current->id() : 0, thread->id());
+        }
     }
     if (!ok) {
         thread_discard(thread);
@@ -95,6 +100,12 @@ ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
     }
     if (lifecycle_log_enabled()) { g_log.debug("sched: spawn '{0}' id={1}", thread->name(), thread->id()); }
     return ktl::result<void>::ok();
+}
+
+}  // namespace
+
+ktl::result<void> thread_enqueue(ktl::ref<Thread> thread) {
+    return enqueue_thread<push_runnable_locked>(ktl::move(thread));
 }
 
 ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, void* arg) {
@@ -107,3 +118,13 @@ ktl::result<ktl::ref<Thread>> spawn(const char* name, thread_entry_fn entry, voi
 }
 
 }  // namespace kernel::sched
+
+#if CONFIG_KERNEL_TESTING
+namespace kernel::testing {
+
+ktl::result<void> enqueue_thread_with_rejected_push(ktl::ref<sched::Thread> thread) {
+    return sched::enqueue_thread<[](const ktl::ref<sched::Thread>&) { return false; }>(ktl::move(thread));
+}
+
+}  // namespace kernel::testing
+#endif

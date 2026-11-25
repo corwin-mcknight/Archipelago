@@ -67,6 +67,7 @@ Application processors continue to park; bringing them into scheduling is future
 
 ## Observability
 The scheduler keeps per-thread accounting -- CPU time, scheduling counts, and wait latency -- alongside an always-on bounded event trace and an optional lifecycle log stream.
+It increments the global spawn count and records a spawn event once the run queue accepts the thread, under the same scheduler lock.
 All of it surfaces through the kernel shell.
 Trace detail is pulled on demand rather than streamed continuously, because the serial wire cannot carry per-switch logging at the rate threads actually switch.
 This keeps the scheduler inspectable without adding overhead or bandwidth pressure to the hot path.
