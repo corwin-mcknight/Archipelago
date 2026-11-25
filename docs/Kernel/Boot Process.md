@@ -27,6 +27,8 @@ The boot processor registers the bootloader memory map with the Physical Memory 
 
 The boot processor initializes its local interrupt and timer support, starts the secondary cores through the Limine MP protocol, and waits at the core initialization gate. Each secondary sets up its local execution context and interrupt entry before reporting initialization. It then waits for the scheduler to come online.
 
+The kernel uses each CPU's position in Limine's list as its logical index. Both hardware ID lookup and secondary CPU startup panic on a missing list or out-of-range index, including in release builds.
+
 ### 4. Scheduler Startup
 
 The boot processor initializes the object system and scheduler. Each core adopts its boot context as its idle thread. The secondary cores start their local timers and begin taking work from the shared run queue. See [Scheduling](../Design/Scheduling.md#multicore-startup-and-idle).
