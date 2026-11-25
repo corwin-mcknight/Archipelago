@@ -7,8 +7,7 @@ namespace kernel::obj {
 
 [[clang::no_destroy]] TypeRegistry g_type_registry;
 
-ktl::result<void> TypeRegistry::register_type(TypeId id, ktl::string_view name, Rights valid_rights,
-                                              Rights default_rights) {
+ktl::result<void> TypeRegistry::register_type(TypeId id, ktl::string_view name, Rights valid_rights) {
     kernel::synchronization::lock_guard guard(m_lock);
 
     if (m_count >= MAX_TYPES) { return ktl::err(ktl::errc::registry_full); }
@@ -17,7 +16,7 @@ ktl::result<void> TypeRegistry::register_type(TypeId id, ktl::string_view name, 
         ktl::find_if(m_types, m_types + m_count, [&](const TypeDescriptor& t) { return t.id == id || t.name == name; });
     if (duplicate.has_value()) { return ktl::err(ktl::errc::already_registered); }
 
-    m_types[m_count] = {id, name, valid_rights, default_rights};
+    m_types[m_count] = {id, name, valid_rights};
     m_count++;
 
     return ktl::result<void>::ok();

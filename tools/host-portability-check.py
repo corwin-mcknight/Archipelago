@@ -26,10 +26,13 @@ def main():
                  "-fno-exceptions", "-fno-rtti", "-I", str(KERNEL / "includes/std"), *includes]
     with tempfile.TemporaryDirectory(prefix="archipelago-host-registry-") as tmp:
         directory = Path(tmp)
+        normal_fixture = directory / "registry_normal.cpp"
+        normal_fixture.write_text('''#include <kernel/testing/testing.h>
+KTEST(native_registry_normal, "native") {}
+''')
         fixture = directory / "registry.cpp"
         fixture.write_text(r'''#include <kernel/testing/testing.h>
 #include <kernel/panic.h>
-KTEST(native_registry_normal, "native") {}
 KTEST_WITH_FLAGS(native_registry_panic, "native", kernel::testing::KTEST_FLAG_EXPECTS_CRASH) {
     panic("expected registry check panic");
 }
@@ -45,7 +48,7 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
 }
 ''')
         objects = []
-        sources = [KERNEL / "tests/std_ctype_test.cpp", fixture, KERNEL / "core/std/stdlib.cpp"]
+        sources = [normal_fixture, fixture, KERNEL / "core/std/stdlib.cpp"]
         for index, source in enumerate(sources):
             obj = directory / f"amplifier-{index}.o"
             subprocess.run([*amplifier, "-c", str(source), "-o", str(obj)], check=True)
@@ -66,8 +69,8 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         assertion = '"quoted"\\\n\r\t  (= ' + '\x01' * 200 + ')  at fixture:79'
         assert assertion in errors, errors
         completed = [event for event in events if event["event"] == "test_end"]
-        expected = {"std_ctype_classification", "native_registry_normal", "native_registry_panic",
-                    "native_registry_signal", "native_registry_assertion"}
+        expected = {"native_registry_normal", "native_registry_panic", "native_registry_signal",
+                    "native_registry_assertion"}
         assert {event["name"] for event in completed} == expected, result.stdout
         assert len(completed) == len(expected), result.stdout
         assert all(event["status"] == "pass" for event in completed), result.stdout
@@ -78,7 +81,7 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         rss_events = [event for event in events if event["event"] == "test_meta"]
         assert len(rss_events) == len(expected), result.stdout
         assert all(0 < event["peak_rss_kb"] <= peak_kib for event in rss_events), result.stdout
-        print("host registry: 5/5 passed (multiple translation units, ASan, panic/signal crashes, escaped assertions, KiB RSS)")
+        print("host registry: 4/4 passed (multiple translation units, ASan, panic/signal crashes, escaped assertions, KiB RSS)")
 
 
 if __name__ == "__main__":

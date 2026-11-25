@@ -1,5 +1,4 @@
 #include <kernel/drivers/uart.h>
-#include <kernel/log.h>
 #include <kernel/mm/mmio.h>
 #include <kernel/mm/physmap.h>
 #include <kernel/platform.h>

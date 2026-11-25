@@ -3,7 +3,6 @@
 #if CONFIG_KERNEL_SHELL
 
 #include <kernel/arch.h>
-#include <kernel/boot.h>
 #include <kernel/mm/vm_aspace.h>
 #include <kernel/sched/task.h>
 #include <kernel/sched/user_task.h>

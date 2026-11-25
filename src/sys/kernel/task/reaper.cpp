@@ -1,5 +1,4 @@
 // src/sys/kernel/task/reaper.cpp
-#include <kernel/arch.h>
 #include <kernel/assert.h>
 #include <kernel/log.h>
 #include <kernel/sched/internal.h>

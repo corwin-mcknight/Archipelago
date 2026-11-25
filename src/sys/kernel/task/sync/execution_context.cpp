@@ -108,10 +108,6 @@ void syscall_exit() {
     service_deferred_preemption(context);
 }
 
-void assert_thread_context(const char* operation) {
-    const auto& context = current_execution_context();
-    if (context.interrupt_depth != 0 || context.fault_depth != 0) { panic(operation); }
-}
 void assert_blocking_allowed(const char* operation) {
     if (!blocking_allowed()) { panic(operation); }
 }

@@ -163,8 +163,7 @@ class Thread : public kernel::obj::Object {
 
     static ktl::result<void> register_type(kernel::obj::TypeRegistry& registry) {
         using namespace kernel::obj;
-        return registry.register_type(TYPE_ID, "thread", RIGHT_READ | RIGHT_WAIT | RIGHT_DUPLICATE,
-                                      RIGHT_READ | RIGHT_WAIT);
+        return registry.register_type(TYPE_ID, "thread", RIGHT_READ | RIGHT_WAIT | RIGHT_DUPLICATE);
     }
 
    private:

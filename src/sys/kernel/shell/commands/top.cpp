@@ -8,7 +8,6 @@
 #include <kernel/platform.h>
 #include <kernel/sched/scheduler.h>
 #include <kernel/sched/task.h>
-#include <kernel/sched/trace.h>
 #include <kernel/shell/output.h>
 #include <kernel/shell/render.h>
 
