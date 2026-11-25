@@ -69,7 +69,7 @@ A protocol that needs both moves handles over a channel and bulk bytes over a so
 Sockets carry bytes only and have no handle slots.
 
 Each direction has a bounded byte buffer.
-A write to a full buffer fails immediately, under the same [[Syscall Interface#Kernel Non-Blocking Guarantee|non-blocking contract]] as channels: `WRITABLE` clears when the peer's buffer is full and re-asserts when the reader drains it.
+A write to a full buffer fails immediately, under the same [[Syscall Interface#Scheduling and IPC|non-blocking contract]] as channels: `WRITABLE` clears when the peer's buffer is full and re-asserts when the reader drains it.
 `READABLE`, `WRITABLE`, and `PEER_CLOSED` behave as they do on channel endpoints, so sockets bind to [[#Ports|ports]] and multiplex into server event loops the same way.
 
 Direction is a property of the handle, not the object.

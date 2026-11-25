@@ -1,78 +1,39 @@
 # Scheduling
 
-The kernel owns the scheduler.
-Scheduling policy is not exposed to userspace and is not pluggable.
+## Current behavior
 
-## Current Design
-The scheduler uses round-robin rotation across all runnable threads.
-On each timer tick or voluntary yield, the kernel picks the next runnable thread. A timer-driven switch is deferred while preemption is disabled or a trap context is active.
-There is no priority system, no fairness weights, and no scheduling classes.
+The kernel schedules **threads from both kernel and userspace tasks** on x86_64 and riscv64. Scheduling policy stays in the kernel. One [FIFO run queue](../../src/sys/kernel/task/scheduler.cpp) shared by all scheduling cores gives round-robin rotation among runnable threads. Running threads may resume on a different core after yielding, blocking, or being preempted. If a queued thread is still switching out on its previous core, the queue picker rotates it to the back until that switch finishes.
 
-This is intentionally minimal.
-A more sophisticated scheduler is a future optimization, not a design-time concern.
-Round-robin is sufficient to reach the first userspace milestone and validate the rest of the architecture.
+### Multicore startup and idle
 
-## Thread Control
-Threads interact with the scheduler through their own handles:
-- **Yield** -- voluntarily give up the current timeslice
-- **Block** -- suspend until a condition is met (signal wait, futex, etc.)
+The boot processor initializes the scheduler and creates an idle thread for each participating core. Each core adopts its own boot context as its idle thread, keeping the existing stack. Secondary cores wait for scheduler initialization, join the scheduler, and start their local timers. An idle core checks the shared queue before waiting for an interrupt. Enqueuing work from a busy core can send a reschedule IPI to wake an idle peer. See [Boot Process](../Kernel/Boot%20Process.md#3-smp-bringup).
 
-Today these are direct kernel calls -- there is no userspace yet, so there is no syscall boundary to cross.
-Once userspace exists, these operations will go through the [[Syscall Interface]] like any other kernel interaction.
-A blocked thread is removed from the run queue and re-added when the blocking condition is satisfied.
+### Yield, block, and preempt
 
-## Context Switching
-A voluntary context switch saves and restores only the callee-saved register set of the outgoing and incoming threads.
-A preempted thread's full register state is already preserved in its trap frame, so it resumes by returning out through the interrupt return path rather than through the switch primitive.
-Context switches occur at two points today:
-- **Voluntary** -- yield, block, and exit switch away directly
-- **Preemption** -- when the timer fires and the scheduler selects a different thread
+Kernel threads call the scheduler directly. A userspace thread can yield or sleep through the [syscall interface](Syscall%20Interface.md), or block explicitly on object signals or a port. A yield leaves the current thread running if there is no eligible replacement. A blocked thread becomes runnable when its wait is satisfied or its deadline expires.
 
-A syscall boundary becomes a third context switch point once userspace exists.
-Preemption is tick-driven: each timer interrupt performs wakeups and decrements the running thread's remaining timeslice. Once it reaches zero, the CPU records a pending preemption. Trap exit switches immediately when eligible; a protected critical section delays the switch until its outermost exit without losing tick accounting.
+Every scheduling core has a local tick. The boot core alone advances the shared kernel tick count. Each core's tick checks the shared sleep and timed-wait lists and, when the run queue has work, charges the running thread's timeslice. If the slice expires or idle has work to run, the tick requests preemption. The switch is serviced at an eligible boundary, such as interrupt exit or the outermost preemption-enable, after interrupt and fault nesting and preemption-disable depth have cleared.
 
-## Task Zero
-The kernel itself is [[Task Model#The Kernel as Task Zero|task zero]].
-It owns the kernel's threads and the kernel's handle table, so every thread the kernel spawns for its own purposes -- the idle thread, the reaper, the shell -- lives under task zero rather than a separate global structure.
+The low-level context switch saves and restores the kernel's callee-saved context. An interrupted thread already has a register frame on its kernel stack and eventually resumes through the interrupt return path. A syscall can switch through an explicit yield, wait, or exit, and its exit boundary can service pending preemption. The scheduler also activates the incoming task's address space as needed and saves or restores user FP state when switching out of or into a user thread. See [Tasks](../Kernel/Tasks.md#scheduling-and-address-spaces).
 
-## Idle Thread
-When no threads are runnable, the kernel runs its idle thread.
-The kernel is task zero and must be schedulable for this reason.
-The context executing at boot becomes the boot processor's idle thread directly, with no stack handoff, and falls into the idle loop once the reaper and initial threads are spawned.
+### Wait queues and execution context
 
-## Thread Lifecycle and the Reaper
-An exiting thread marks itself dead, signals its termination, and switches away without freeing its own stack -- a thread cannot safely tear down the stack it is still running on.
-A dedicated reaper thread blocks until a thread has exited, then reclaims the dead thread's object and stack.
-This keeps exit cheap and keeps stack reclamation off the hot path of every thread's own exit.
+Object signal waits, thread joins, and contended kernel mutexes use wait queues. Sleep uses a separate deadline list. The timer also checks deadlines for timed wait-queue entries. A mutex checks its acquisition predicate under the wait-queue lock to close the race between failed acquisition, enqueue, and unlock.
 
-## Wait Queues and Waitable Signals
-Blocking is built on a single primitive: a wait queue that holds threads until woken, either individually or all at once.
-Sleeping for a fixed number of ticks and waiting on an object's signals are both built on top of this primitive.
-Kernel objects expose signals as waitable conditions -- a thread can block until a specific signal becomes set rather than polling.
-Thread join is an instance of this: waiting for a thread's termination signal.
-The same primitive backs kernel mutex contention, with the acquisition predicate evaluated while the queue lock is held to close the failed-acquire/enqueue/unlock race.
+Per-core execution context tracks IRQ, fault, and syscall nesting and distinguishes preemption control from local IRQ masking. Blocking and voluntary scheduling require preemptible thread context with no locks held. Syscall handlers can block in thread context. See [Kernel Locking](../Kernel/Locking.md).
 
-## Execution Context
-Per-CPU execution context distinguishes preemption control from local IRQ masking and tracks interrupt, fault, and syscall nesting. Blocking and voluntary scheduling are valid only in preemptible thread context and while holding no locks. See [[../Kernel/Locking|Kernel Locking]] for guard selection, mutex semantics, and debug lock dependency checking.
+### Thread exit and stack protection
 
-## Stack Overflow Protection
-Each thread runs on a fixed-size kernel stack.
-The scheduler publishes the floor of the incoming thread's stack on every context switch, and trap entry checks the stack pointer against that floor before doing any further work.
-A violation diverts to a dedicated emergency stack and panics through the crash-reporting path rather than corrupting adjacent memory.
-This is a tripwire, not a hardware guard page -- it catches the realistic failure (deep recursion) without requiring guard-paged stack mappings.
+All kernel threads, including per-core idle threads, the reaper, and the kernel shell, belong to [task zero](Task%20Model.md#the-kernel-as-task-zero). An exiting thread marks itself dead, signals termination, and switches away. The reaper waits for the outgoing switch to finish before reclaiming the stack and other thread resources. The last dead thread of a userspace task triggers [task teardown](../Kernel/Tasks.md#teardown).
 
-## Multi-Core Scope
-Scheduler state is shaped per-CPU, but only the boot processor runs a scheduler today.
-Application processors continue to park; bringing them into scheduling is future work that needs a per-CPU timer, per-CPU core-identity pointers, and cross-core wake paths, without reshaping the scheduler's data structures.
+The scheduler publishes the incoming kernel stack floor on each switch. Trap entry can detect a stack pointer below that floor and divert to an emergency stack to report the overflow. This software check is independent of page protection.
 
-## Observability
-The scheduler keeps per-thread accounting -- CPU time, scheduling counts, and wait latency -- alongside an always-on bounded event trace and an optional lifecycle log stream.
-It increments the global spawn count and records a spawn event once the run queue accepts the thread, under the same scheduler lock.
-All of it surfaces through the kernel shell.
-Trace detail is pulled on demand rather than streamed continuously, because the serial wire cannot carry per-switch logging at the rate threads actually switch.
-This keeps the scheduler inspectable without adding overhead or bandwidth pressure to the hot path.
+### Observability
 
-## Relationship to Other Subsystems
-- [[Task Model]] -- threads live inside tasks; the scheduler operates on threads
-- [[Syscall Interface]] -- yield and block become syscalls once userspace exists, adding syscall boundaries as a third context switch point
-- [[Interrupt Model]] -- the timer interrupt drives preemption
+The kernel shell exposes per-thread CPU accounting, scheduling counts, migrations, runnable-to-running latency, and a bounded event trace. Trace detail is pulled on demand, and lifecycle logging can be enabled separately.
+
+The scheduler increments the global spawn count and records a spawn event once the run queue accepts the thread, under the same scheduler lock.
+
+## Future extensions
+
+The current scheduler has no priorities, fairness weights, scheduling classes, or user-configurable policy. Per-core run queues are a possible future optimization if profiling shows contention on the shared queue lock.
