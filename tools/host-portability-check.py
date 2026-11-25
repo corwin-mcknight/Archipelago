@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile and run the real hosted registry with ASan and both crash paths."""
+"""Check the hosted registry's crash paths and compile-time KTL contracts."""
 
 import json
 import os
@@ -24,15 +24,16 @@ def main():
     includes = ["-I", str(KERNEL / "includes")]
     amplifier = [*common, "-ffreestanding", "-nostdinc++", "-fno-builtin",
                  "-fno-exceptions", "-fno-rtti", "-I", str(KERNEL / "includes/std"), *includes]
+    subprocess.run([*amplifier, "-fsyntax-only", "-Xclang", "-verify",
+                    str(KERNEL / "tests/compile_fail/ktl_maybe_ref.cpp")], check=True)
+    print("KTL compile contracts: lvalues accepted, rvalues rejected by deleted constructors", flush=True)
+
     with tempfile.TemporaryDirectory(prefix="archipelago-host-registry-") as tmp:
         directory = Path(tmp)
-        normal_fixture = directory / "registry_normal.cpp"
-        normal_fixture.write_text('''#include <kernel/testing/testing.h>
-KTEST(native_registry_normal, "native") {}
-''')
         fixture = directory / "registry.cpp"
         fixture.write_text(r'''#include <kernel/testing/testing.h>
 #include <kernel/panic.h>
+KTEST(native_registry_normal, "native") {}
 KTEST_WITH_FLAGS(native_registry_panic, "native", kernel::testing::KTEST_FLAG_EXPECTS_CRASH) {
     panic("expected registry check panic");
 }
@@ -48,7 +49,7 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
 }
 ''')
         objects = []
-        sources = [normal_fixture, fixture, KERNEL / "core/std/stdlib.cpp"]
+        sources = [KERNEL / "tests/ktl_ref_overflow_test.cpp", fixture, KERNEL / "core/std/stdlib.cpp"]
         for index, source in enumerate(sources):
             obj = directory / f"amplifier-{index}.o"
             subprocess.run([*amplifier, "-c", str(source), "-o", str(obj)], check=True)
@@ -68,9 +69,10 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         errors = [event["message"] for event in events if event["event"] == "error"]
         assertion = '"quoted"\\\n\r\t  (= ' + '\x01' * 200 + ')  at fixture:79'
         assert assertion in errors, errors
+        assert "panic: ktl::ref strong count overflow" in errors, errors
         completed = [event for event in events if event["event"] == "test_end"]
         expected = {"native_registry_normal", "native_registry_panic", "native_registry_signal",
-                    "native_registry_assertion"}
+                    "native_registry_assertion", "ktl_ref_count_overflow"}
         assert {event["name"] for event in completed} == expected, result.stdout
         assert len(completed) == len(expected), result.stdout
         assert all(event["status"] == "pass" for event in completed), result.stdout
@@ -81,7 +83,8 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         rss_events = [event for event in events if event["event"] == "test_meta"]
         assert len(rss_events) == len(expected), result.stdout
         assert all(0 < event["peak_rss_kb"] <= peak_kib for event in rss_events), result.stdout
-        print("host registry: 4/4 passed (multiple translation units, ASan, panic/signal crashes, escaped assertions, KiB RSS)")
+        print(f"host registry: {len(completed)}/{len(expected)} passed "
+              "(ASan/UBSan, panic/signal crashes, refcount overflow diagnostic, escaped assertions, KiB RSS)")
 
 
 if __name__ == "__main__":

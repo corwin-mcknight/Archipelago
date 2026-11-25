@@ -92,6 +92,13 @@ KTEST(my_feature_test, my_module) {
 The macros place test descriptors in the `.ktests` linker section.
 The shell's `test` command discovers them at boot by walking the section between `__start__ktests` and `__stop__ktests`.
 
+### Hosted KTL contracts
+
+`make host-test` runs the KTL runtime tests, including self-move assignment and the refcount overflow crash case.
+Run `tools/dev python3 tools/host-portability-check.py` to verify the exact overflow panic message and check the
+compile-fail fixture under `src/sys/kernel/tests/compile_fail/`. Clang verifies that lvalue bindings compile and
+that `maybe<T&>` rvalue bindings diagnose the deleted constructor. Both hosted CI platforms run these checks.
+
 ## How It Works
 When `CONFIG_KERNEL_TESTING` is enabled (the default), the [[Shell|kernel shell]] provides the `test` command group.
 The shell boots into interactive mode; the host harness sends `harness enable` to switch to protocol mode, then drives tests programmatically.
