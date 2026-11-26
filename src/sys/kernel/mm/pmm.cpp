@@ -4,6 +4,7 @@
 #include "kernel/mm/page.h"
 #include "kernel/mm/page_descriptor.h"
 #include "kernel/mm/physmap.h"
+#include "kernel/panic.h"
 
 namespace kernel::mm {
 
@@ -48,18 +49,19 @@ ktl::maybe<vm_paddr_t> page_frame_allocator::frame_stack::pop() {
 
 void page_frame_allocator::free(vm_paddr_t addr) {
     kernel::synchronization::critical_irq_lock_guard guard(m_lock);
-    // A frame already back in a pool would be threaded onto the intrusive stack twice, aliasing
-    // two future allocations forever -- with descriptor coverage a double free is detectable, so
-    // detect it. Uncovered frames (pre-VMM boot) stay tolerated, matching set_state's contract.
-    if (const auto* descriptor = g_page_descriptors.lookup(addr)) {
-        if (descriptor->state == page_state::FREE || descriptor->state == page_state::ZEROED) {
-            panic("pmm: double free of a frame");
-        }
+    // push() writes the link into the frame itself, so validate its exact address first.
+    if (addr % PAGE_SIZE != 0) { panic("pmm: unaligned frame address"); }
+    auto* descriptor = g_page_descriptors.lookup(addr);
+    if (descriptor == nullptr) { panic("pmm: frame has no descriptor"); }
+    if (descriptor->state == page_state::FREE || descriptor->state == page_state::ZEROED) {
+        panic("pmm: double free of a frame");
     }
+    if (descriptor->state != page_state::ACTIVE) { panic("pmm: frame is not active"); }
+
     m_dirty.push(addr);
     ++m_free_pages;
     ++m_free_count;
-    g_page_descriptors.set_state(addr, page_state::FREE);
+    descriptor->state = page_state::FREE;
 }
 
 ktl::maybe<vm_paddr_t> page_frame_allocator::alloc_contiguous(size_t count) {

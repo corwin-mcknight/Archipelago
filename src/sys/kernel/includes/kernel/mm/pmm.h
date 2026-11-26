@@ -27,6 +27,7 @@ struct pmm_stats {
 class page_frame_allocator {
    public:
     ktl::maybe<vm_paddr_t> alloc();
+    // Return a page-aligned ACTIVE frame. Every release requires descriptor coverage.
     void free(vm_paddr_t addr);
     // Carve a physically contiguous, zeroed run of pages from an untouched
     // region tail. No free_contiguous: boot-lifetime callers (the page
