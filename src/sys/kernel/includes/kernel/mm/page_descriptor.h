@@ -51,8 +51,7 @@ class page_descriptor_table {
     page_descriptor* lookup(vm_paddr_t paddr);
     const page_descriptor* lookup(vm_paddr_t paddr) const;
 
-    // State transition helper that tolerates uninitialized/uncovered frames --
-    // the PMM calls this on every alloc/free, including before VMM init.
+    // Bootstrap allocation can precede descriptor initialization. Ignore uncovered frames here.
     void set_state(vm_paddr_t paddr, page_state state);
     void mark_range(vm_paddr_t base, size_t pages, page_state state);
 

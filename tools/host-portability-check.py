@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the hosted registry's crash paths and compile-time KTL contracts."""
+"""Check hosted crash diagnostics and compile-time KTL contracts."""
 
 import json
 import os
@@ -49,7 +49,9 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
 }
 ''')
         objects = []
-        sources = [KERNEL / "tests/ktl_ref_overflow_test.cpp", fixture, KERNEL / "core/std/stdlib.cpp"]
+        sources = [KERNEL / "tests/ktl_ref_overflow_test.cpp", fixture, KERNEL / "core/std/stdlib.cpp",
+                   KERNEL / "tests/runner/pmm_free_fixture.cpp", KERNEL / "mm/pmm.cpp", KERNEL / "mm/physmap.cpp",
+                   KERNEL / "task/sync/execution_context.cpp", KERNEL / "task/sync/lockdep.cpp"]
         for index, source in enumerate(sources):
             obj = directory / f"amplifier-{index}.o"
             subprocess.run([*amplifier, "-c", str(source), "-o", str(obj)], check=True)
@@ -66,13 +68,30 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         result = subprocess.run([str(runner)], env=env, capture_output=True, text=True, check=True)
         events = [json.loads(line.removeprefix("@@HARNESS ")) for line in result.stdout.splitlines()
                   if line.startswith("@@HARNESS ")]
-        errors = [event["message"] for event in events if event["event"] == "error"]
+        errors = {}
+        for event in events:
+            if event["event"] == "test_start":
+                current = event["name"]
+                errors[current] = []
+            elif event["event"] == "error":
+                errors[current].append(event["message"])
         assertion = '"quoted"\\\n\r\t  (= ' + '\x01' * 200 + ')  at fixture:79'
-        assert assertion in errors, errors
-        assert "panic: ktl::ref strong count overflow" in errors, errors
+        assert errors["native_registry_assertion"] == [assertion], errors
+        panics = {
+            "ktl_ref_count_overflow": "ktl::ref strong count overflow",
+            "pmm_free_unaligned": "pmm: unaligned frame address",
+            "pmm_free_before_descriptors": "pmm: frame has no descriptor",
+            "pmm_free_outside_coverage": "pmm: frame has no descriptor",
+            "pmm_free_wired": "pmm: frame is not active",
+            "pmm_free_mmio": "pmm: frame is not active",
+            "pmm_free_already_free": "pmm: double free of a frame",
+            "pmm_free_already_zeroed": "pmm: double free of a frame",
+        }
+        for name, reason in panics.items():
+            assert errors.get(name) == [f"panic: {reason}"], (name, errors.get(name))
         completed = [event for event in events if event["event"] == "test_end"]
         expected = {"native_registry_normal", "native_registry_panic", "native_registry_signal",
-                    "native_registry_assertion", "ktl_ref_count_overflow"}
+                    "native_registry_assertion", *panics}
         assert {event["name"] for event in completed} == expected, result.stdout
         assert len(completed) == len(expected), result.stdout
         assert all(event["status"] == "pass" for event in completed), result.stdout
@@ -84,7 +103,7 @@ KTEST_WITH_FLAGS(native_registry_signal, "native", kernel::testing::KTEST_FLAG_E
         assert len(rss_events) == len(expected), result.stdout
         assert all(0 < event["peak_rss_kb"] <= peak_kib for event in rss_events), result.stdout
         print(f"host registry: {len(completed)}/{len(expected)} passed "
-              "(ASan/UBSan, panic/signal crashes, refcount overflow diagnostic, escaped assertions, KiB RSS)")
+              "(ASan/UBSan, panic/signal crashes, refcount and PMM diagnostics, escaped assertions, KiB RSS)")
 
 
 if __name__ == "__main__":

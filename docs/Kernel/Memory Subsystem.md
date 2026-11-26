@@ -25,6 +25,10 @@ Allocation pops from the zeroed pool; if the pool is empty, the PMM zeroes one p
 Free pushes the returned page to the dirty pool without scrubbing it.
 The PMM never hands out a dirty page.
 
+Free requires a **page-aligned physical address with an `ACTIVE` descriptor**. The PMM checks this under its lock before writing the pool link into the frame or updating its counters.
+Returning a `FREE` or `ZEROED` frame triggers a double-free panic. An unaligned address, missing descriptor, or other ineligible state also triggers a panic.
+Releases before descriptor initialization therefore panic. The descriptor array itself is allocated during bootstrap and stays wired for the life of the kernel.
+
 A background zeroing thread, started at [[Boot Process#5. Kernel Entry|kernel entry]], is the steady-state mechanism for moving pages from dirty to zeroed.
 It works in small paced batches so that the initial climb to a zeroed supply trickles out instead of monopolizing the CPU.
 Dirty pages always drain into the zeroed pool first; once none remain, the worker pre-zeroes untouched region tails in place until all free memory is zeroed.
