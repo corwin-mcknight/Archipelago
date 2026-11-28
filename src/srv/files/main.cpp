@@ -3,6 +3,7 @@
 #include <fileservice/protocol.h>
 #include <sys.h>
 
+#include "access.h"
 #include "archive.h"
 
 namespace {
@@ -29,6 +30,7 @@ struct Reply {
 struct Endpoint {
     uint64_t handle;
     NodeId node;  // Zero means unused
+    Access access;
     Reply reply;
 };
 
@@ -60,41 +62,81 @@ void close_endpoint(size_t slot) {
     endpoint.node = 0;
 }
 
-bool attach(uint64_t handle, NodeId node) {
+size_t attach(uint64_t handle, NodeId node, Access access) {
     for (size_t i = 0; i < ENDPOINT_LIMIT; ++i) {
         if (endpoints[i].node != 0) { continue; }
-        if (sys_is_error(sys_port_bind(port, handle, i, READABLE | CLOSED))) { return false; }
+        if (sys_is_error(sys_port_bind(port, handle, i, READABLE | CLOSED))) { break; }
         endpoints[i].handle       = handle;
         endpoints[i].node         = node;
+        endpoints[i].access       = access;
         endpoints[i].reply.size   = 0;
         endpoints[i].reply.handle = NONE;
-        return true;
+        return i;
     }
-    return false;
+    return ENDPOINT_LIMIT;
 }
 
-uint32_t open_node(const Endpoint& endpoint, size_t length, Reply& reply) {
-    const auto flags = get<uint32_t>(0);
-    if (flags & ~WRITE_ACCESS) { return UNSUPPORTED; }
-    NodeId found;
-    const char* path = sys_ipc_base() + RECEIVE_AT + DATA_AT + sizeof(flags);
-    if (const auto status = archive.lookup(endpoint.node, path, length - sizeof(flags), found)) { return status; }
-    if (flags & WRITE_ACCESS) { return READ_ONLY; }
+uint32_t open_node(const Endpoint& endpoint, uint32_t opcode, size_t length, Reply& reply) {
+    const bool create      = opcode == CREATE;
+    const bool legacy      = opcode == OPEN;
+    const size_t prefix    = legacy ? sizeof(uint32_t) : 2 * sizeof(uint32_t);
+    const char* path       = sys_ipc_base() + RECEIVE_AT + DATA_AT + prefix;
+    const size_t path_size = length - prefix;
+    if (create && !archive.writable(endpoint.node)) { return READ_ONLY; }
+    if (!endpoint.access.allows(create ? CREATE_CHILD : LOOKUP)) { return ACCESS_DENIED; }
+
+    constexpr uint32_t browse = READ_BYTES | LIST | LOOKUP;
+    Access child{};
+    const uint32_t first = get<uint32_t>(0);
+    if (legacy) {
+        if (first & ~WRITE_ACCESS) { return UNSUPPORTED; }
+        child.rights = READ_BYTES | (browse & endpoint.access.ceiling);
+        if (first & WRITE_ACCESS) { child.rights |= READ_WRITE; }
+        child.ceiling = child.rights;
+    } else {
+        child = {first, get<uint32_t>(sizeof(uint32_t))};
+    }
+
+    NodeId found = endpoint.node;
+    if (!create) {
+        // Every intermediate component needs lookup authority as well.
+        if (!(endpoint.access.ceiling & LOOKUP)) {
+            for (size_t i = 0; i < path_size; ++i) {
+                if (path[i] == '/') { return ACCESS_DENIED; }
+            }
+        }
+        if (const auto status = archive.lookup(endpoint.node, path, path_size, found)) { return status; }
+        constexpr uint32_t mutation = APPEND_BYTES | OVERWRITE_BYTES | CREATE_CHILD;
+        if (!archive.writable(found) && ((child.rights | child.ceiling) & mutation)) { return READ_ONLY; }
+    }
+    if (const auto status = endpoint.access.grant(child)) { return status; }
 
     if (sys_is_error(sys_channel_create(HANDLES_AT))) { return RESOURCE_EXHAUSTED; }
     uint64_t handles[2];
     sys_copy_in(handles, HANDLES_AT, sizeof(handles));
-    if (!attach(handles[0], found)) {
+    const size_t slot = attach(handles[0], found, child);
+    if (slot == ENDPOINT_LIMIT) {
         (void)sys_handle_close(handles[0]);
         (void)sys_handle_close(handles[1]);
         return RESOURCE_EXHAUSTED;
+    }
+    if (create) {
+        // Reserve the complete reply channel before publishing the new name.
+        if (const auto status = archive.create(endpoint.node, path, path_size, found)) {
+            close_endpoint(slot);
+            (void)sys_handle_close(handles[1]);
+            return status;
+        }
+        endpoints[slot].node = found;
     }
     reply.handle = handles[1];
     return 0;
 }
 
-uint32_t read_file(const Node& node, Reply& reply) {
-    if (node.entry.directory) { return WRONG_KIND; }
+uint32_t read_file(const Endpoint& endpoint, Reply& reply) {
+    if (!endpoint.access.allows(READ_BYTES)) { return ACCESS_DENIED; }
+    const auto& node = archive.node(endpoint.node);
+    if (!archive.writable(endpoint.node) && node.entry.directory) { return WRONG_KIND; }
     const auto offset    = get<uint64_t>(0);
     const auto requested = get<uint32_t>(sizeof(offset));
     if (offset >= node.entry.size) { return 0; }
@@ -106,9 +148,21 @@ uint32_t read_file(const Node& node, Reply& reply) {
     return 0;
 }
 
-uint32_t list_directory(NodeId id, Reply& reply) {
+uint32_t write_node(const Endpoint& endpoint, size_t length) {
+    if (!archive.writable(endpoint.node)) { return READ_ONLY; }
+    uint64_t offset   = get<uint64_t>(0);
+    const bool append = offset == APPEND_OFFSET;
+    if (!endpoint.access.allows(append ? APPEND_BYTES : OVERWRITE_BYTES)) { return ACCESS_DENIED; }
+    if (append) { offset = archive.node(endpoint.node).entry.size; }
+    const char* bytes = sys_ipc_base() + RECEIVE_AT + DATA_AT + sizeof(offset);
+    return archive.write(endpoint.node, offset, bytes, length - sizeof(offset));
+}
+
+uint32_t list_directory(const Endpoint& endpoint, Reply& reply) {
+    if (!endpoint.access.allows(LIST)) { return ACCESS_DENIED; }
+    const NodeId id       = endpoint.node;
     const auto& directory = archive.node(id);
-    if (!directory.entry.directory) { return WRONG_KIND; }
+    if (!archive.writable(id) && !directory.entry.directory) { return WRONG_KIND; }
     const auto cursor = get<uint64_t>(0);
     if (cursor != 0 && (cursor > UINT32_MAX || !archive.contains(static_cast<NodeId>(cursor)) ||
                         archive.node(static_cast<NodeId>(cursor)).parent != id)) {
@@ -148,7 +202,16 @@ bool prepare_reply(Endpoint& endpoint, size_t size) {
     switch (header.opcode) {
         case OPEN:
             if (payload < sizeof(uint32_t)) { return false; }
-            header.status = open_node(endpoint, payload, reply);
+            header.status = open_node(endpoint, OPEN, payload, reply);
+            break;
+        case OPEN_RIGHTS:
+        case CREATE:
+            if (payload < 2 * sizeof(uint32_t)) { return false; }
+            header.status = open_node(endpoint, header.opcode, payload, reply);
+            break;
+        case WRITE:
+            if (payload < sizeof(uint64_t)) { return false; }
+            header.status = write_node(endpoint, payload);
             break;
         case STAT:
             if (payload != 0) { return false; }
@@ -158,11 +221,11 @@ bool prepare_reply(Endpoint& endpoint, size_t size) {
             break;
         case READ:
             if (payload != sizeof(uint64_t) + sizeof(uint32_t)) { return false; }
-            header.status = read_file(node, reply);
+            header.status = read_file(endpoint, reply);
             break;
         case READ_DIR:
             if (payload != sizeof(uint64_t)) { return false; }
-            header.status = list_directory(endpoint.node, reply);
+            header.status = list_directory(endpoint, reply);
             break;
         default: header.status = UNSUPPORTED; break;
     }
@@ -248,7 +311,7 @@ bool serve_parent() {
         }
         uint64_t handle;
         sys_copy_in(&handle, HANDLES_AT, sizeof(handle));
-        if (!attach(handle, ROOT)) { (void)sys_handle_close(handle); }
+        if (attach(handle, ROOT, {ALL_RIGHTS, ALL_RIGHTS}) == ENDPOINT_LIMIT) { (void)sys_handle_close(handle); }
     }
 }
 

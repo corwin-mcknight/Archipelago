@@ -1,8 +1,9 @@
-#include "../../../srv/files/archive.h"
-
 #include <fileservice/protocol.h>
 #include <initrd/initrd.h>
 #include <kernel/testing/testing.h>
+
+#include "../../../srv/files/access.h"
+#include "../../../srv/files/archive.h"
 
 KTEST_MODULE("userspace/initrd");
 
@@ -382,4 +383,99 @@ KTEST_CASE(file_archive_index_requires_directory_parents) {
     KTEST_REQUIRE_TRUE(conflict.valid());
     fileservice::Archive file_parent;
     KTEST_EXPECT_FALSE(file_parent.load(conflict.bytes, conflict.size));
+}
+
+KTEST_CASE(file_nodes_store_bytes_and_nested_children) {
+    using namespace fileservice;
+    ::Archive fixture;
+    fixture.add("readme", "boot");
+    fileservice::Archive index;
+    KTEST_REQUIRE_TRUE(index.load(fixture.bytes, fixture.size));
+    NodeId hello, upper, drafts, today, found;
+    KTEST_REQUIRE_EQUAL(index.create(ROOT, "hello", 5, hello), 0u);
+    KTEST_REQUIRE_EQUAL(index.create(ROOT, "Hello", 5, upper), 0u);
+    KTEST_EXPECT_EQUAL(index.node(ROOT).first_child, upper);
+    KTEST_EXPECT_EQUAL(index.node(upper).next, BOOT);
+    KTEST_EXPECT_EQUAL(index.node(BOOT).next, hello);
+    KTEST_REQUIRE_EQUAL(index.write(hello, 0, "hello", 5), 0u);
+    KTEST_REQUIRE_EQUAL(index.write(hello, 1, "A", 1), 0u);
+    KTEST_REQUIRE_EQUAL(index.write(hello, 5, "!", 1), 0u);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "hello", 5, found), ALREADY_EXISTS);
+    KTEST_REQUIRE_EQUAL(index.create(hello, "drafts", 6, drafts), 0u);
+    KTEST_REQUIRE_EQUAL(index.create(drafts, "today", 5, today), 0u);
+    KTEST_REQUIRE_EQUAL(index.lookup(ROOT, "hello/drafts/today", 18, found), 0u);
+    KTEST_EXPECT_EQUAL(found, today);
+    KTEST_EXPECT_ALL(index.node(hello).entry.directory, !index.node(today).entry.directory);
+    KTEST_EXPECT_EQUAL(index.lookup(today, "none", 4, found), NOT_FOUND);
+    const auto& entry = index.node(hello).entry;
+    KTEST_REQUIRE_EQUAL(entry.size, 6u);
+    KTEST_EXPECT_EQUAL(__builtin_memcmp(entry.data, "hAllo!", 6), 0);
+    KTEST_EXPECT_EQUAL(index.node(upper).entry.size, 0u);
+    KTEST_REQUIRE_EQUAL(index.lookup(BOOT, "readme", 6, found), 0u);
+    KTEST_EXPECT_EQUAL(index.write(found, 0, "x", 1), READ_ONLY);
+    KTEST_EXPECT_EQUAL(index.create(BOOT, "other", 5, found), READ_ONLY);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "boot", 4, found), ALREADY_EXISTS);
+}
+
+KTEST_CASE(file_nodes_reject_invalid_names_depth_and_node_exhaustion) {
+    using namespace fileservice;
+    ::Archive fixture;
+    fileservice::Archive index;
+    KTEST_REQUIRE_TRUE(index.load(fixture.bytes, fixture.size));
+    NodeId created;
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "", 0, created), INVALID_PATH);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "..", 2, created), INVALID_PATH);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "a/b", 3, created), INVALID_PATH);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "nul\0byte", 8, created), INVALID_PATH);
+    char longest[initrd::MAX_PATH_BYTES];
+    for (char& byte : longest) { byte = 'x'; }
+    KTEST_REQUIRE_EQUAL(index.create(ROOT, longest, sizeof(longest), created), 0u);
+    KTEST_EXPECT_EQUAL(index.create(created, "x", 1, created), INVALID_PATH);
+    for (size_t i = 1; i < MAX_CREATED_NODES; ++i) {
+        const char name[] = {static_cast<char>('a' + (i / 26) % 26), static_cast<char>('a' + i % 26)};
+        KTEST_REQUIRE_EQUAL(index.create(ROOT, name, sizeof(name), created), 0u);
+    }
+    KTEST_EXPECT_EQUAL(index.create(ROOT, "extra", 5, created), RESOURCE_EXHAUSTED);
+    KTEST_EXPECT_EQUAL(index.lookup(ROOT, "extra", 5, created), NOT_FOUND);
+    KTEST_EXPECT_EQUAL(index.create(ROOT, longest, sizeof(longest), created), ALREADY_EXISTS);
+}
+
+KTEST_CASE(file_nodes_bound_total_bytes_preserving_prior_contents) {
+    using namespace fileservice;
+    ::Archive fixture;
+    fileservice::Archive index;
+    KTEST_REQUIRE_TRUE(index.load(fixture.bytes, fixture.size));
+    NodeId created;
+    KTEST_REQUIRE_EQUAL(index.create(ROOT, "log", 3, created), 0u);
+    KTEST_EXPECT_EQUAL(index.write(created, UINT64_MAX, "x", 1), INVALID_OFFSET);
+    KTEST_REQUIRE_EQUAL(index.write(created, 0, "abc", 3), 0u);
+    static constexpr char block[1024] = {};
+    size_t remaining                  = MAX_WRITABLE_BYTES - 3;
+    while (remaining > 0) {
+        const size_t chunk = remaining < sizeof(block) ? remaining : sizeof(block);
+        KTEST_REQUIRE_EQUAL(index.write(ROOT, index.node(ROOT).entry.size, block, chunk), 0u);
+        remaining -= chunk;
+    }
+    KTEST_EXPECT_EQUAL(index.write(created, 1, "xyz", 3), RESOURCE_EXHAUSTED);
+    KTEST_EXPECT_EQUAL(index.write(created, 0, "x", SIZE_MAX), RESOURCE_EXHAUSTED);
+    KTEST_EXPECT_EQUAL(index.write(created, 3, "", 0), 0u);
+    KTEST_REQUIRE_EQUAL(index.node(created).entry.size, 3u);
+    KTEST_EXPECT_EQUAL(__builtin_memcmp(index.node(created).entry.data, "abc", 3), 0);
+    KTEST_EXPECT_EQUAL(index.write(created, 2, "X", 1), 0u);
+    KTEST_EXPECT_EQUAL(index.node(created).entry.data[2], static_cast<uint8_t>('X'));
+}
+
+KTEST_CASE(file_handles_limit_operations_and_descendant_grants) {
+    using namespace fileservice;
+    const Access inbox{CREATE_CHILD, APPEND_BYTES};
+    KTEST_EXPECT_TRUE(inbox.allows(CREATE_CHILD));
+    KTEST_EXPECT_FALSE(inbox.allows(LOOKUP));
+    KTEST_EXPECT_FALSE(inbox.allows(APPEND_BYTES));
+    KTEST_EXPECT_EQUAL(inbox.grant({APPEND_BYTES, 0}), 0u);
+    KTEST_EXPECT_EQUAL(inbox.grant({READ_WRITE, 0}), ACCESS_DENIED);
+    KTEST_EXPECT_EQUAL(inbox.grant({APPEND_BYTES, READ_WRITE}), ACCESS_DENIED);
+    const Access root{ALL_RIGHTS, ALL_RIGHTS};
+    KTEST_EXPECT_EQUAL(root.grant({LOOKUP, READ_BYTES}), 0u);
+    KTEST_EXPECT_EQUAL(root.grant({READ_BYTES | APPEND_BYTES, 0}), UNSUPPORTED);
+    KTEST_EXPECT_EQUAL(root.grant({0, ~ALL_RIGHTS}), UNSUPPORTED);
 }
