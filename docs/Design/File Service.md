@@ -1,8 +1,23 @@
 # File Service
 
-The userspace service named `files` exposes a root directory containing `boot`. The `/boot` tree is an immutable view of the initrd. Init moves the original read-only archive VMO to the designated bootstrap child after extracting the executable images. The child maps it read-only and validates and indexes it before registering. Init requires that registration on the child's mailbox, with a bounded wait. Missing or failed registration aborts bootstrap. See [[Initrd]] for the archive profile.
+The userspace service named `files` stores named nodes in memory for the current boot. Each writable node, including the root, can hold both bytes and named children. Closing every handle leaves its name, contents, and children available until the service exits. The `/boot` tree is an immutable view of the initrd. Init moves the original read-only archive VMO to the designated bootstrap child after extracting the executable images. The child maps it read-only and validates and indexes it before registering. Init requires that registration on the child's mailbox, with a bounded wait. Missing or failed registration aborts bootstrap. See [[Initrd]] for the archive profile.
 
-Each brokered connection is a root directory capability. `OPEN` returns a fresh channel for the selected node. An open channel grants authority over that node and, for a directory, lookup below it. Clients with a root capability resolve absolute user-facing paths from root. The service accepts relative paths of 1–255 printable ASCII bytes, with nonempty components and no backslash, `.`, or `..`. Archive entries must have explicit directory parents. The index supports up to 4096 archive entries.
+## Names and authority
+
+A brokered connection grants a full-access root handle under the coordinator’s open discovery policy. Clients resolve user-facing absolute paths relative to this handle. Both lookup paths and the full root-relative path of a created node are limited to 255 bytes. Paths use printable ASCII, with nonempty components and no backslash, `.`, or `..`. Create takes one component. Names are case-sensitive and exclusive within their parent. Creating `hello` twice returns `ALREADY_EXISTS` on the second attempt. Creating `Hello` adds a distinct sibling.
+
+Each handle carries two masks. Its **rights** govern operations on this node. Its **descendant ceiling** limits both masks a caller can request when opening or creating a child. Lookup through several components also requires Lookup in the ceiling for intermediate steps. Two handles to the same node can have different rights.
+
+| Right or mode | Permitted operation |
+| --- | --- |
+| Read-only | Read bytes by offset. |
+| Write-only append | Add bytes at the current end. The server chooses the position when processing each request. |
+| Read-write | Read, overwrite or extend from a specified offset, or append. |
+| List | Page through child names. |
+| Lookup | Open an existing child by name. |
+| Create | Add a new child and receive its first handle with the requested rights and ceiling. |
+
+List, Lookup, and Create are independent. A handle can have any combination of these, including with no byte access. For example, Create alone on a parent with an append-only ceiling lets a client create a child and append through its first handle. A separate reader with Lookup and a read-only ceiling can open that child and read it. Exceeding the ceiling returns `ACCESS_DENIED`. A create denied by the ceiling leaves the requested name available for a retry.
 
 ## Protocol
 
@@ -11,11 +26,18 @@ Messages are at most 2048 bytes including the existing 16-byte `abi_message_head
 | Operation | Request payload | Successful reply payload |
 | --- | --- | --- |
 | `OPEN` | `u32` flags, then relative path bytes | Empty payload, one file or directory channel |
-| `STAT` | Empty | `u64` size (zero for a directory), `u32` kind, `u32` reserved zero |
+| `OPEN_RIGHTS` | `u32` rights, `u32` descendant ceiling, then relative path bytes | Empty payload, one node channel |
+| `CREATE` | Same masks, then one child name | Empty payload, one new node channel |
+| `WRITE` | `u64` offset followed by raw bytes | Empty payload after the entire write succeeds |
+| `STAT` | Empty | `u64` byte size, `u32` kind, `u32` reserved zero |
 | `READ` | `u64` offset, `u32` maximum bytes | Raw bytes, capped by the message budget and remaining file length. At or beyond EOF, or for a zero-length request, the payload is empty |
 | `READ_DIR` | `u64` cursor | `u64` next cursor, `u32` end flag, then complete entries of `u16` name length, `u8` kind, and name bytes |
 
-`OPEN` and `READ_DIR` require a directory. `READ` requires a file. The only defined open flag requests write access and returns `READ_ONLY` for existing nodes. Unknown operations and flags return `UNSUPPORTED`. Cursor zero starts a listing. A reply with end flag one finishes it and carries cursor zero. Other replies carry an opaque continuation for that directory. A cursor that does not identify a child of the relevant directory returns `INVALID_CURSOR`. Entries sort by filename bytes. The immutable index keeps subsequent pages consistent without a mutable listing position.
+The original `OPEN` with zero flags requests read access, plus List and Lookup when the parent ceiling permits them. `WRITE_ACCESS` additionally requests read-write access. The resulting ceiling equals the granted rights. Clients use `OPEN_RIGHTS` to request independent masks. Unsupported byte-mode combinations, unknown rights bits, flags and operations return `UNSUPPORTED`. Every handle supports `STAT`. Writable nodes report the compatibility kind `DIRECTORY` when they have children and `FILE` when empty of children. Both kinds support byte and child operations subject to the handle rights. The initrd subtree retains its archive kinds and read-only behavior, including `WRONG_KIND` for a byte read on an archive directory and `READ_ONLY` for a write or create.
+
+`WRITE` carries up to 2024 bytes. The reserved offset `APPEND_OFFSET` selects append. An append-only handle rejects a positional write. Positional writes preserve bytes outside their range, can extend at EOF, and reject a gap with `INVALID_OFFSET`. An acknowledged write is visible to a subsequent read through another handle. Storage supports 256 created nodes and 1 MiB of writable contents across the tree, in addition to up to 4096 archive entries. Capacity and allocation failures return `RESOURCE_EXHAUSTED` and preserve the earlier contents.
+
+A `READ_DIR` cursor of zero starts a listing. Entries sort by filename bytes. Each nonfinal page returns an opaque cursor identifying the next child. A cursor outside the relevant parent returns `INVALID_CURSOR`. The final page has end flag one and cursor zero. A listing of a mutable node is live across pages. Children inserted before a saved continuation are skipped on resume, and a fresh listing includes them.
 
 ## Ordering and lifetime
 
@@ -23,4 +45,4 @@ Requests and replies are FIFO within each endpoint. Clients may pipeline request
 
 The server caps live endpoints at 64. At capacity, opening a node returns `RESOURCE_EXHAUSTED`, and a newly brokered root connection closes immediately. Closing an endpoint abandons its outstanding requests and pending reply. A previously received child capability remains independent. A client that keeps an endpoint open after a timeout still drains late replies and closes any unused handles. Bad framing or unexpected handles close the affected endpoint. Ordinary operation errors preserve it.
 
-Writable anonymous storage and executable-content snapshots are later increments of [#21](https://github.com/corwin-mcknight/Archipelago/issues/21).
+The two-client demo runs in the guest with `make test-verbose ARCH=x86_64 TEST=coordinator_boot` or `ARCH=riscv64`. The writer checks that `hello` is absent in the fresh service, creates it, appends `Hello, world!\n`, closes its handles, and signals the reader through the coordinator. The reader opens `hello` from its own root and verifies all 14 bytes. Executable-content snapshots remain a later increment of [#21](https://github.com/corwin-mcknight/Archipelago/issues/21).

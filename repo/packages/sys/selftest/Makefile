@@ -15,8 +15,10 @@ pkg_build:
 	@echo "[plume] Building $(CATEGORY)/$(PN)"
 	mkdir -p $(OBJ_DIR)
 	cd $(LIVE_SOURCES) && $(MAKE) -j$(MAKE_JOBS) BUILD_DIR=$(BUILD_DIR) OBJ_DIR=$(OBJ_DIR) SYSROOT=$(SYSROOT)
+	cd $(LIVE_SOURCES) && $(MAKE) -j$(MAKE_JOBS) BUILD_DIR=$(BUILD_DIR) OBJ_DIR=$(OBJ_DIR) SYSROOT=$(SYSROOT) SRC_DIRS=writer TARGET_EXEC=writer.elf
 
 pkg_install:
 	@echo "[plume] Installing $(CATEGORY)/$(PN)"
 	mkdir -p $(D)/usr/share/initrd/bootstrap
 	cp $(OBJ_DIR)/$(PN).elf $(D)/usr/share/initrd/bootstrap/$(PN).elf
+	cp $(OBJ_DIR)/writer.elf $(D)/usr/share/initrd/bootstrap/writer.elf
